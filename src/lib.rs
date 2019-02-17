@@ -227,6 +227,10 @@ impl World {
         }
     }
 
+    pub fn is_alive(&self, entity: &Entity) -> bool {
+        self.allocator.as_ref().unwrap().is_alive(entity)
+    }
+
     pub fn insert_from<S, T>(&mut self, shared: S, components: T) -> &[Entity]
     where S: SharedDataSet,
           T: IntoIterator,
@@ -269,6 +273,70 @@ impl World {
         self.entities = Some(entities);
         self.allocator = Some(allocator);
         self.allocator.as_ref().unwrap().allocation_buffer()
+    }
+
+    pub fn delete(&mut self, entity: Entity) -> bool {
+        let deleted = self.allocator.as_mut().unwrap().delete_entity(entity);
+
+        if deleted {
+            // lookup entity location
+            let ids = self.entities.as_ref().unwrap()
+                .get(&entity)
+                .map(|(archetype_id, chunk_id, component_id)| (*archetype_id, *chunk_id, *component_id));
+            
+            // swap remove with last entity in chunk
+            let swapped = ids.and_then(|(archetype_id, chunk_id, component_id)| {
+                self.archetypes
+                    .get_mut(archetype_id as usize)
+                    .and_then(|archetype| archetype.chunk_mut(chunk_id))
+                    .and_then(|chunk| unsafe { chunk.remove(component_id) })
+            });
+
+            // record swapped entity's new location
+            if let Some(swapped) = swapped {
+                self.entities.as_mut().unwrap()
+                    .insert(swapped, ids.unwrap());
+            }
+        }
+
+        deleted
+    }
+
+    pub fn component<T: Component>(&self, entity: Entity) -> Option<&T> {        
+        self.entities.as_ref()
+            .and_then(|e| e.get(&entity))
+            .and_then(|(archetype_id, chunk_id, component_id)| {
+                self.archetypes
+                    .get(*archetype_id as usize)
+                    .and_then(|archetype| archetype.chunk(*chunk_id))
+                    .and_then(|chunk| unsafe { chunk.components::<T>() })
+                    .and_then(|vec| vec.get(*component_id as usize))
+            })
+    }
+
+    pub fn component_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
+        let entities = &self.entities;
+        let archetypes = &self.archetypes;
+        entities.as_ref()
+            .and_then(|e| e.get(&entity))
+            .and_then(|(archetype_id, chunk_id, component_id)| {
+                archetypes
+                    .get(*archetype_id as usize)
+                    .and_then(|archetype| archetype.chunk(*chunk_id))
+                    .and_then(|chunk| unsafe { chunk.components_mut::<T>() })
+                    .and_then(|vec| vec.get_mut(*component_id as usize))
+            })
+    }
+
+    pub fn shared<T: SharedComponent>(&self, entity: Entity) -> Option<&T> {
+        self.entities.as_ref()
+            .and_then(|e| e.get(&entity))
+            .and_then(|(archetype_id, chunk_id, _)| {
+                self.archetypes
+                    .get(*archetype_id as usize)
+                    .and_then(|archetype| archetype.chunk(*chunk_id))
+                    .and_then(|chunk| unsafe { chunk.shared_component::<T>() })
+            })
     }
 
     fn archetype<S: SharedDataSet, C: ComponentSource>(&mut self, shared: &S, components: &C) -> (ArchetypeID, &mut Archetype) {
@@ -314,43 +382,6 @@ impl World {
                 ((archetype2.chunks.len() - 1) as ChunkID, archetype2.chunks.last_mut().unwrap())
             }
         }
-    }
-
-    pub fn component<T: Component>(&self, entity: Entity) -> Option<&T> {        
-        self.entities.as_ref()
-            .and_then(|e| e.get(&entity))
-            .and_then(|(archetype_id, chunk_id, component_id)| {
-                self.archetypes
-                    .get(*archetype_id as usize)
-                    .and_then(|archetype| archetype.chunk(*chunk_id))
-                    .and_then(|chunk| unsafe { chunk.components::<T>() })
-                    .and_then(|vec| vec.get(*component_id as usize))
-            })
-    }
-
-    pub fn component_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
-        let entities = &self.entities;
-        let archetypes = &self.archetypes;
-        entities.as_ref()
-            .and_then(|e| e.get(&entity))
-            .and_then(|(archetype_id, chunk_id, component_id)| {
-                archetypes
-                    .get(*archetype_id as usize)
-                    .and_then(|archetype| archetype.chunk(*chunk_id))
-                    .and_then(|chunk| unsafe { chunk.components_mut::<T>() })
-                    .and_then(|vec| vec.get_mut(*component_id as usize))
-            })
-    }
-
-    pub fn shared<T: SharedComponent>(&self, entity: Entity) -> Option<&T> {
-        self.entities.as_ref()
-            .and_then(|e| e.get(&entity))
-            .and_then(|(archetype_id, chunk_id, _)| {
-                self.archetypes
-                    .get(*archetype_id as usize)
-                    .and_then(|archetype| archetype.chunk(*chunk_id))
-                    .and_then(|chunk| unsafe { chunk.shared_component::<T>() })
-            })
     }
 }
 
@@ -680,6 +711,10 @@ impl Archetype {
         self.chunks.get(id as usize)
     }
 
+    pub fn chunk_mut(&mut self, id: ChunkID) -> Option<&mut Chunk> {
+        self.chunks.get_mut(id as usize)
+    }
+
     pub fn has_component<T: Component>(&self) -> bool {
         self.components.contains(&TypeId::of::<T>())
     }
@@ -921,5 +956,86 @@ mod tests {
         let entity = *world.insert_from((Static,), vec![(0f64,)]).get(0).unwrap();
 
         assert_eq!(None, world.shared::<Model>(entity));
+    }
+
+    #[test]
+    fn delete() {
+        let universe = Universe::new(None);
+        let mut world = universe.create_world();
+
+        let shared = (Static, Model(5));
+        let components = vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))
+        ];
+
+        let mut entities: Vec<Entity> = Vec::new();
+        for e in world.insert_from(shared, components.clone()) {
+            entities.push(*e);
+        }
+
+        for e in entities.iter() {
+            assert_eq!(true, world.is_alive(e));
+        }
+
+        for e in entities.iter() {
+            world.delete(*e);
+            assert_eq!(false, world.is_alive(e));
+        }
+    }
+
+    #[test]
+    fn delete_last() {
+        let universe = Universe::new(None);
+        let mut world = universe.create_world();
+
+        let shared = (Static, Model(5));
+        let components = vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))
+        ];
+
+        let mut entities: Vec<Entity> = Vec::new();
+        for e in world.insert_from(shared, components.clone()) {
+            entities.push(*e);
+        }
+
+        let last = *entities.last().unwrap();
+        world.delete(last);
+        assert_eq!(false, world.is_alive(&last));
+
+        for (i, e) in entities.iter().take(entities.len() - 1).enumerate() {
+            assert_eq!(true, world.is_alive(e));
+            assert_eq!(components.get(i).map(|(_, x)| x), world.component(*e));
+            assert_eq!(components.get(i).map(|(x, _)| x), world.component(*e));
+        }
+    }
+
+    #[test]
+    fn delete_first() {
+        let universe = Universe::new(None);
+        let mut world = universe.create_world();
+
+        let shared = (Static, Model(5));
+        let components = vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))
+        ];
+
+        let mut entities: Vec<Entity> = Vec::new();
+        for e in world.insert_from(shared, components.clone()) {
+            entities.push(*e);
+        }
+
+        let first = *entities.first().unwrap();
+
+        world.delete(first);
+        assert_eq!(false, world.is_alive(&first));
+
+        for (i, e) in entities.iter().skip(1).enumerate() {
+            assert_eq!(true, world.is_alive(e));
+            assert_eq!(components.get(i + 1).map(|(_, x)| x), world.component(*e));
+            assert_eq!(components.get(i + 1).map(|(x, _)| x), world.component(*e));
+        }
     }
 }
