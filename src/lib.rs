@@ -1,10 +1,15 @@
 #![feature(specialization)]
 #![feature(fnbox)]
+#![feature(iter_unfold)]
 
-use std::boxed::FnBox;
-use std::mem::size_of;
-use downcast_rs::{Downcast, impl_downcast};
-use std::cell::UnsafeCell;
+mod query;
+mod storage;
+
+pub use crate::query::*;
+pub use crate::storage::*;
+
+use std::iter::Peekable;
+use std::fmt::Debug;
 use std::collections::HashMap;
 use std::any::TypeId;
 use std::collections::HashSet;
@@ -41,6 +46,7 @@ impl Display for Entity {
     }
 }
 
+#[derive(Debug)]
 pub struct Universe {
     logger: slog::Logger,
     allocator: Arc<Mutex<BlockAllocator>>
@@ -60,6 +66,7 @@ impl Universe {
     }
 }
 
+#[derive(Debug)]
 struct BlockAllocator {
     allocated: usize,
     free: Vec<EntityBlock>
@@ -90,6 +97,7 @@ impl BlockAllocator {
     }
 }
 
+#[derive(Debug)]
 struct EntityBlock {
     start: EntityIndex,
     len: usize,
@@ -145,6 +153,7 @@ impl EntityBlock {
     }
 }
 
+#[derive(Debug)]
 pub struct EntityAllocator {
     allocator: Arc<Mutex<BlockAllocator>>,
     blocks: Vec<EntityBlock>,
@@ -212,6 +221,7 @@ impl Drop for EntityAllocator {
     }
 }
 
+#[derive(Debug)]
 pub struct World {
     allocator: Option<EntityAllocator>,
     archetypes: Vec<Archetype>,
@@ -234,7 +244,6 @@ impl World {
     pub fn insert_from<S, T>(&mut self, shared: S, components: T) -> &[Entity]
     where S: SharedDataSet,
           T: IntoIterator,
-          T::IntoIter: ExactSizeIterator,
           T::Item: ComponentDataSet,
           IterComponentSource<T::IntoIter, T::Item>: ComponentSource
     {
@@ -394,14 +403,14 @@ pub trait SharedDataSet {
 
 pub trait ComponentDataSet: Sized {
     fn component_source<T>(source: T) -> IterComponentSource<T, Self>
-        where T: ExactSizeIterator + Iterator<Item=Self>;
+        where T: Iterator<Item=Self>;
 }
 
 pub trait ComponentSource {
     fn is_archetype_match(&self, archetype: &Archetype) -> bool;
     fn configure_chunk(&self, chunk: &mut ChunkBuilder);
     fn types(&self) -> HashSet<TypeId>;
-    fn is_empty(&self) -> bool;
+    fn is_empty(&mut self) -> bool;
     fn write<'a>(&mut self, chunk: &'a mut Chunk, allocator: &mut EntityAllocator) -> usize;
 }
 
@@ -460,8 +469,8 @@ impl_shared_data_set!(3; A, B, C);
 impl_shared_data_set!(4; A, B, C, D);
 impl_shared_data_set!(5; A, B, C, D, E);
 
-pub struct IterComponentSource<T: ExactSizeIterator + Iterator<Item=K>, K> {
-    source: T
+pub struct IterComponentSource<T: Iterator<Item=K>, K> {
+    source: Peekable<T>
 }
 
 macro_rules! impl_component_source {
@@ -470,14 +479,14 @@ macro_rules! impl_component_source {
         where $( $ty: Component ),*
         {
             fn component_source<T>(source: T) -> IterComponentSource<T, Self>
-                where T: ExactSizeIterator + Iterator<Item=Self>
+                where T: Iterator<Item=Self>
             {
-                IterComponentSource::<T, Self> { source }
+                IterComponentSource::<T, Self> { source: source.peekable() }
             }
         }
 
         impl<I, $( $ty ),*> ComponentSource for IterComponentSource<I, ($( $ty, )*)> 
-        where I: Iterator<Item=($( $ty, )*)> + ExactSizeIterator,
+        where I: Iterator<Item=($( $ty, )*)>,
               $( $ty: Component ),*
         {
             fn types(&self) -> HashSet<TypeId> {
@@ -497,8 +506,8 @@ macro_rules! impl_component_source {
                 )*
             }
 
-            fn is_empty(&self) -> bool {
-                self.source.len() == 0
+            fn is_empty(&mut self) -> bool {
+                self.source.peek().is_none()
             }
             
             fn write<'a>(&mut self, chunk: &'a mut Chunk, allocator: &mut EntityAllocator) -> usize {
@@ -534,209 +543,28 @@ impl_component_source!(3; A => a, B => b, C => c);
 impl_component_source!(4; A => a, B => b, C => c, D => d);
 impl_component_source!(5; A => a, B => b, C => c, D => d, E => e);
 
-pub trait Component: Send + Sized + 'static { }
-pub trait SharedComponent: Send + Sized + PartialEq + Clone + Sync + 'static { }
+pub trait Component: Send + Sync + Sized + Debug + 'static { }
+pub trait SharedComponent: Send + Sync + Sized + PartialEq + Clone + Debug + 'static { }
 
-impl<T: Send + Sized + 'static> Component for T {}
-impl<T: Send + Sized + PartialEq + Clone + Sync + 'static> SharedComponent for T {}
+impl<T: Send + Sync + Sized + Debug + 'static> Component for T {}
+impl<T: Send + Sized + PartialEq + Clone + Sync + Debug + 'static> SharedComponent for T {}
 
-impl_downcast!(ComponentStorage);
-pub trait ComponentStorage: Downcast {
-    fn remove(&mut self, id: ComponentID);
-    fn len(&self) -> usize;
-}
-
-pub struct UnsafeVec<T>(UnsafeCell<Vec<T>>);
-
-impl<T> UnsafeVec<T> {
-    fn with_capacity(capacity: usize) -> Self {
-        UnsafeVec(UnsafeCell::new(Vec::<T>::with_capacity(capacity)))
-    }
-
-    unsafe fn inner(&self) -> &Vec<T> {
-        &(*self.0.get())
-    }
-
-    unsafe fn inner_mut(&self) -> &mut Vec<T> {
-        &mut (*self.0.get())
-    }
-}
-
-impl<T: 'static> ComponentStorage for UnsafeVec<T> {
-    fn remove(&mut self, id: ComponentID) {
-        unsafe {
-            self.inner_mut().swap_remove(id as usize);
-        }
-    }
-
-    fn len(&self) -> usize {
-        unsafe {
-            self.inner_mut().len()
-        }
-    }
-}
-
-impl_downcast!(SharedComponentStorage);
-trait SharedComponentStorage: Downcast { }
-
-struct SharedComponentStore<T>(UnsafeCell<T>);
-
-impl<T: SharedComponent> SharedComponentStorage for SharedComponentStore<T> {
-
-}
-
-pub struct Chunk {
-    len: usize,
-    capacity: usize,
-    entities: UnsafeVec<Entity>,
-    components: HashMap<TypeId, Box<dyn ComponentStorage>>,
-    shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>
-}
-
-impl Chunk {
-    pub fn is_full(&self) -> bool {
-        self.len == self.capacity
-    }
-
-    pub unsafe fn entities(&self) -> &Vec<Entity> {
-        self.entities.inner()
-    }
-
-    pub unsafe fn entities_mut(&self) -> &mut Vec<Entity> {
-        self.entities.inner_mut()
-    }
-
-    pub unsafe fn component_ids<'a>(&'a self) -> impl Iterator<Item=(Entity, ComponentID)> + ExactSizeIterator + 'a {
-        self.entities.inner().iter().enumerate().map(|(i, e)| (*e, i as ComponentID))
-    }
-
-    pub unsafe fn components<T: Component>(&self) -> Option<&Vec<T>> {
-        self.components
-            .get(&TypeId::of::<T>())
-            .and_then(|c| c.downcast_ref::<UnsafeVec<T>>())
-            .map(|c| c.inner())
-    }
-
-    pub unsafe fn components_mut<T: Component>(&self) -> Option<&mut Vec<T>> {
-        self.components
-            .get(&TypeId::of::<T>())
-            .and_then(|c| c.downcast_ref::<UnsafeVec<T>>())
-            .map(|c| c.inner_mut())
-    }
-
-    pub unsafe fn shared_component<T: SharedComponent>(&self) -> Option<&T> {
-        self.shared
-            .get(&TypeId::of::<T>())
-            .and_then(|s| s.downcast_ref::<SharedComponentStore<T>>())
-            .map(|s| &*s.0.get())
-    }
-
-    pub unsafe fn remove(&mut self, id: ComponentID) -> Option<Entity> {
-        let index = id as usize;
-        self.entities.inner_mut().swap_remove(index);
-        for storage in self.components.values_mut() {
-            storage.remove(id);
-        }
-
-        if self.entities.len() > index {
-            Some(*self.entities.inner().get(index).unwrap())
-        } else {
-            None
-        }            
-    }
-
-    pub fn validate(&self) {
-        let valid = self.components
-            .values()
-            .fold(true, |total, s| total && s.len() == self.entities.len());
-        if !valid {
-            panic!("imbalanced chunk components");
-        }
-    }
-}
-
-pub struct ChunkBuilder {
-    components: Vec<(TypeId, usize, Box<dyn FnBox(usize) -> Box<dyn ComponentStorage>>)>,
-    shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>
-}
-
-impl ChunkBuilder {
-    const MAX_SIZE: usize = 16 * 1024;
-
-    pub fn new() -> ChunkBuilder {
-        ChunkBuilder {
-            components: Vec::new(),
-            shared: HashMap::new()
-        }
-    }
-
-    pub fn register_component<T: Component>(&mut self) {
-        let constructor = |capacity| Box::new(UnsafeVec::<T>::with_capacity(capacity)) as Box<dyn ComponentStorage>;
-        self.components.push((TypeId::of::<T>(), size_of::<T>(), Box::new(constructor)));
-    }
-
-    pub fn register_shared<T: SharedComponent>(&mut self, data: T) {
-        self.shared.insert(TypeId::of::<T>(), Arc::new(SharedComponentStore(UnsafeCell::new(data))) as Arc<dyn SharedComponentStorage>);
-    }
-
-    pub fn build(self) -> Chunk {
-        let size_bytes = *self.components.iter().map(|(_, size, _)| size).max().unwrap_or(&ChunkBuilder::MAX_SIZE);
-        let capacity = std::cmp::max(1, ChunkBuilder::MAX_SIZE / size_bytes);        
-        Chunk {
-            len: 0,
-            capacity: capacity,
-            entities: UnsafeVec::with_capacity(capacity),
-            components: self.components.into_iter().map(|(id, _, con)| (id, con(capacity))).collect(),
-            shared: self.shared
-        }
-    }
-}
-
-pub struct Archetype {
-    components: HashSet<TypeId>,
-    shared: HashSet<TypeId>,
-    chunks: Vec<Chunk>
-}
-
-impl Archetype {
-    pub fn new(components: HashSet<TypeId>, shared: HashSet<TypeId>) -> Archetype {
-        Archetype {
-            components: components,
-            shared: shared,
-            chunks: Vec::new()
-        }
-    }
-
-    pub fn chunk(&self, id: ChunkID) -> Option<&Chunk> {
-        self.chunks.get(id as usize)
-    }
-
-    pub fn chunk_mut(&mut self, id: ChunkID) -> Option<&mut Chunk> {
-        self.chunks.get_mut(id as usize)
-    }
-
-    pub fn has_component<T: Component>(&self) -> bool {
-        self.components.contains(&TypeId::of::<T>())
-    }
-
-    pub fn has_shared<T: SharedComponent>(&self) -> bool {
-        self.shared.contains(&TypeId::of::<T>())
-    }
-
-    fn chunks_with_space_mut(&mut self) -> impl Iterator<Item=&mut Chunk> {
-        self.chunks.iter_mut().filter(|c| !c.is_full())
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use crate::*;
     use std::collections::HashSet;
 
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Copy, Debug, PartialEq)]
     struct Rot(f32, f32, f32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Scale(f32, f32, f32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Vel(f32, f32, f32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Accel(f32, f32, f32);
     #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
     struct Model(u32);
     #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -1038,4 +866,6 @@ mod tests {
             assert_eq!(components.get(i + 1).map(|(x, _)| x), world.component(*e));
         }
     }
+
+    
 }
