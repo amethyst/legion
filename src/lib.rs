@@ -1,5 +1,3 @@
-#![feature(fnbox)]
-
 mod query;
 mod storage;
 

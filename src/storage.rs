@@ -1,7 +1,6 @@
 use crate::*;
 use downcast_rs::{impl_downcast, Downcast};
 use std::any::TypeId;
-use std::boxed::FnBox;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -137,7 +136,7 @@ pub struct ChunkBuilder {
     components: Vec<(
         TypeId,
         usize,
-        Box<dyn FnBox(usize) -> Box<dyn ComponentStorage>>,
+        Box<dyn FnMut(usize) -> Box<dyn ComponentStorage>>,
     )>,
     shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>,
 }
@@ -182,7 +181,7 @@ impl ChunkBuilder {
             components: self
                 .components
                 .into_iter()
-                .map(|(id, _, con)| (id, con(capacity)))
+                .map(|(id, _, mut con)| (id, con(capacity)))
                 .collect(),
             shared: self.shared,
         }
