@@ -1,13 +1,13 @@
-use std::fmt::Debug;
+use crate::*;
+use downcast_rs::{impl_downcast, Downcast};
+use std::any::TypeId;
 use std::boxed::FnBox;
-use std::mem::size_of;
-use downcast_rs::{Downcast, impl_downcast};
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
-use std::any::TypeId;
 use std::collections::HashSet;
+use std::fmt::Debug;
+use std::mem::size_of;
 use std::sync::Arc;
-use crate::*;
 
 impl_downcast!(ComponentStorage);
 trait ComponentStorage: Downcast + Debug {
@@ -40,28 +40,24 @@ impl<T: Debug + 'static> ComponentStorage for UnsafeVec<T> {
     }
 
     fn len(&self) -> usize {
-        unsafe {
-            self.inner_mut().len()
-        }
+        unsafe { self.inner_mut().len() }
     }
 }
 
 impl_downcast!(SharedComponentStorage);
-trait SharedComponentStorage: Downcast + Debug { }
+trait SharedComponentStorage: Downcast + Debug {}
 
 #[derive(Debug)]
 struct SharedComponentStore<T>(UnsafeCell<T>);
 
-impl<T: SharedComponent> SharedComponentStorage for SharedComponentStore<T> {
-
-}
+impl<T: SharedComponent> SharedComponentStorage for SharedComponentStore<T> {}
 
 #[derive(Debug)]
 pub struct Chunk {
     capacity: usize,
     entities: UnsafeVec<Entity>,
     components: HashMap<TypeId, Box<dyn ComponentStorage>>,
-    shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>
+    shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>,
 }
 
 impl Chunk {
@@ -81,8 +77,14 @@ impl Chunk {
         self.entities.inner_mut()
     }
 
-    pub unsafe fn component_ids<'a>(&'a self) -> impl Iterator<Item=(Entity, ComponentID)> + ExactSizeIterator + 'a {
-        self.entities.inner().iter().enumerate().map(|(i, e)| (*e, i as ComponentID))
+    pub unsafe fn component_ids<'a>(
+        &'a self,
+    ) -> impl Iterator<Item = (Entity, ComponentID)> + ExactSizeIterator + 'a {
+        self.entities
+            .inner()
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (*e, i as ComponentID))
     }
 
     pub unsafe fn components<T: Component>(&self) -> Option<&Vec<T>> {
@@ -117,11 +119,12 @@ impl Chunk {
             Some(*self.entities.inner().get(index).unwrap())
         } else {
             None
-        }            
+        }
     }
 
     pub fn validate(&self) {
-        let valid = self.components
+        let valid = self
+            .components
             .values()
             .fold(true, |total, s| total && s.len() == self.entities.len());
         if !valid {
@@ -131,8 +134,12 @@ impl Chunk {
 }
 
 pub struct ChunkBuilder {
-    components: Vec<(TypeId, usize, Box<dyn FnBox(usize) -> Box<dyn ComponentStorage>>)>,
-    shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>
+    components: Vec<(
+        TypeId,
+        usize,
+        Box<dyn FnBox(usize) -> Box<dyn ComponentStorage>>,
+    )>,
+    shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>,
 }
 
 impl ChunkBuilder {
@@ -141,27 +148,43 @@ impl ChunkBuilder {
     pub fn new() -> ChunkBuilder {
         ChunkBuilder {
             components: Vec::new(),
-            shared: HashMap::new()
+            shared: HashMap::new(),
         }
     }
 
     pub fn register_component<T: Component>(&mut self) {
-        let constructor = |capacity| Box::new(UnsafeVec::<T>::with_capacity(capacity)) as Box<dyn ComponentStorage>;
-        self.components.push((TypeId::of::<T>(), size_of::<T>(), Box::new(constructor)));
+        let constructor = |capacity| {
+            Box::new(UnsafeVec::<T>::with_capacity(capacity)) as Box<dyn ComponentStorage>
+        };
+        self.components
+            .push((TypeId::of::<T>(), size_of::<T>(), Box::new(constructor)));
     }
 
     pub fn register_shared<T: SharedComponent>(&mut self, data: T) {
-        self.shared.insert(TypeId::of::<T>(), Arc::new(SharedComponentStore(UnsafeCell::new(data))) as Arc<dyn SharedComponentStorage>);
+        self.shared.insert(
+            TypeId::of::<T>(),
+            Arc::new(SharedComponentStore(UnsafeCell::new(data)))
+                as Arc<dyn SharedComponentStorage>,
+        );
     }
 
     pub fn build(self) -> Chunk {
-        let size_bytes = *self.components.iter().map(|(_, size, _)| size).max().unwrap_or(&ChunkBuilder::MAX_SIZE);
-        let capacity = std::cmp::max(1, ChunkBuilder::MAX_SIZE / size_bytes);        
+        let size_bytes = *self
+            .components
+            .iter()
+            .map(|(_, size, _)| size)
+            .max()
+            .unwrap_or(&ChunkBuilder::MAX_SIZE);
+        let capacity = std::cmp::max(1, ChunkBuilder::MAX_SIZE / size_bytes);
         Chunk {
             capacity: capacity,
             entities: UnsafeVec::with_capacity(capacity),
-            components: self.components.into_iter().map(|(id, _, con)| (id, con(capacity))).collect(),
-            shared: self.shared
+            components: self
+                .components
+                .into_iter()
+                .map(|(id, _, con)| (id, con(capacity)))
+                .collect(),
+            shared: self.shared,
         }
     }
 }
@@ -170,7 +193,7 @@ impl ChunkBuilder {
 pub struct Archetype {
     pub components: HashSet<TypeId>,
     pub shared: HashSet<TypeId>,
-    pub chunks: Vec<Chunk>
+    pub chunks: Vec<Chunk>,
 }
 
 impl Archetype {
@@ -178,7 +201,7 @@ impl Archetype {
         Archetype {
             components: components,
             shared: shared,
-            chunks: Vec::new()
+            chunks: Vec::new(),
         }
     }
 
@@ -202,7 +225,7 @@ impl Archetype {
         self.chunks.iter()
     }
 
-    pub fn chunks_with_space_mut(&mut self) -> impl Iterator<Item=&mut Chunk> {
+    pub fn chunks_with_space_mut(&mut self) -> impl Iterator<Item = &mut Chunk> {
         self.chunks.iter_mut().filter(|c| !c.is_full())
     }
 }
