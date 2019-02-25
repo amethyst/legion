@@ -1,6 +1,6 @@
+use itertools::multizip;
 use std::iter::Repeat;
 use std::iter::Take;
-use std::iter::Zip;
 use std::marker::PhantomData;
 use std::slice::Iter;
 use std::slice::IterMut;
@@ -13,6 +13,11 @@ pub trait View<'a>: Sized + 'static {
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter;
     fn filter() -> Self::Filter;
+    fn validate() -> bool;
+}
+
+pub trait ViewElement {
+    type Component;
 }
 
 pub trait Queryable<'a, World>: View<'a> {
@@ -21,6 +26,10 @@ pub trait Queryable<'a, World>: View<'a> {
 
 impl<'a, T: View<'a>> Queryable<'a, &'a mut World> for T {
     fn query(world: &'a mut World) -> Query<'a, Self, Self::Filter, Passthrough> {
+        if !Self::validate() {
+            panic!("invalid view, please ensure the view contains no duplicate component types");
+        }
+
         Query {
             world: world,
             view: PhantomData,
@@ -34,6 +43,10 @@ pub trait ReadOnly {}
 
 impl<'a, T: View<'a> + ReadOnly> Queryable<'a, &'a World> for T {
     fn query(world: &'a World) -> Query<'a, Self, Self::Filter, Passthrough> {
+        if !Self::validate() {
+            panic!("invalid view, please ensure the view contains no duplicate component types");
+        }
+
         Query {
             world,
             view: PhantomData,
@@ -59,6 +72,14 @@ impl<'a, T: Component> View<'a> for Read<T> {
     fn filter() -> Self::Filter {
         EntityDataFilter::new()
     }
+
+    fn validate() -> bool {
+        true
+    }
+}
+
+impl<T: Component> ViewElement for Read<T> {
+    type Component = T;
 }
 
 #[derive(Debug)]
@@ -75,6 +96,14 @@ impl<'a, T: Component> View<'a> for Write<T> {
     fn filter() -> Self::Filter {
         EntityDataFilter::new()
     }
+
+    fn validate() -> bool {
+        true
+    }
+}
+
+impl<T: Component> ViewElement for Write<T> {
+    type Component = T;
 }
 
 #[derive(Debug)]
@@ -96,25 +125,55 @@ impl<'a, T: SharedComponent> View<'a> for Shared<T> {
     fn filter() -> Self::Filter {
         SharedDataFilter::new()
     }
+
+    fn validate() -> bool {
+        true
+    }
 }
 
-impl<'a, T1: View<'a>, T2: View<'a>> View<'a> for (T1, T2) {
-    type Iter = Zip<T1::Iter, T2::Iter>;
-    type Filter = And<T1::Filter, T2::Filter>;
+impl<T: SharedComponent> ViewElement for Shared<T> {
+    type Component = Shared<T>;
+}
 
-    fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        T1::fetch(chunk).zip(T2::fetch(chunk))
-    }
+macro_rules! impl_view_tuple {
+    ( $( $ty: ident ),* ) => {
+        impl<'a, $( $ty: ViewElement + View<'a> ),* > View<'a> for ($( $ty, )*) {
+            type Iter = itertools::Zip<($( $ty::Iter, )*)>;
+            type Filter = And<($( $ty::Filter, )*)>;
 
-    fn filter() -> Self::Filter {
-        And {
-            a: T1::filter(),
-            b: T2::filter(),
+            fn fetch(chunk: &'a Chunk) -> Self::Iter {
+                multizip(($( $ty::fetch(chunk), )*))
+            }
+
+            fn filter() -> Self::Filter {
+                And {
+                    filters: ($( $ty::filter(), )*)
+                }
+            }
+
+            fn validate() -> bool {
+                let types = &[$( TypeId::of::<$ty::Component>() ),*];
+                for i in 0..types.len() {
+                    for j in (i + 1)..types.len() {
+                        if unsafe { types.get_unchecked(i) == types.get_unchecked(j) } {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            }
         }
-    }
+
+        impl<$( $ty: ReadOnly ),*> ReadOnly for ($( $ty, )*) {}
+    };
 }
 
-impl<T1: ReadOnly, T2: ReadOnly> ReadOnly for (T1, T2) {}
+impl_view_tuple!(A);
+impl_view_tuple!(A, B);
+impl_view_tuple!(A, B, C);
+impl_view_tuple!(A, B, C, D);
+impl_view_tuple!(A, B, C, D, E);
 
 pub trait ArchetypeFilter {
     fn filter(&self, archetype: &Archetype) -> bool;
@@ -161,24 +220,38 @@ impl<F: ChunkFilter> ChunkFilter for Not<F> {
 }
 
 #[derive(Debug)]
-pub struct And<A, B> {
-    a: A,
-    b: B,
+pub struct And<T> {
+    filters: T,
 }
 
-impl<A: ArchetypeFilter, B: ArchetypeFilter> ArchetypeFilter for And<A, B> {
-    #[inline]
-    fn filter(&self, archetype: &Archetype) -> bool {
-        self.a.filter(archetype) && self.b.filter(archetype)
-    }
+macro_rules! impl_and_filter {
+    ( $( $ty: ident ),* ) => {
+        impl<$( $ty: ArchetypeFilter ),*> ArchetypeFilter for And<($( $ty, )*)> {
+            #[inline]
+            fn filter(&self, archetype: &Archetype) -> bool {
+                #![allow(non_snake_case)]
+                let ($( $ty, )*) = &self.filters;
+                $( $ty.filter(archetype) )&&*
+            }
+        }
+
+        impl<$( $ty: ChunkFilter ),*> ChunkFilter for And<($( $ty, )*)> {
+            #[inline]
+            fn filter(&self, chunk: &Chunk) -> bool {
+                #![allow(non_snake_case)]
+                let ($( $ty, )*) = &self.filters;
+                $( $ty.filter(chunk) )&&*
+            }
+        }
+    };
 }
 
-impl<A: ChunkFilter, B: ChunkFilter> ChunkFilter for And<A, B> {
-    #[inline]
-    fn filter(&self, chunk: &Chunk) -> bool {
-        self.a.filter(chunk) && self.b.filter(chunk)
-    }
-}
+impl_and_filter!(A);
+impl_and_filter!(A, B);
+impl_and_filter!(A, B, C);
+impl_and_filter!(A, B, C, D);
+impl_and_filter!(A, B, C, D, E);
+impl_and_filter!(A, B, C, D, E, F);
 
 #[derive(Debug)]
 pub struct EntityDataFilter<T>(PhantomData<T>);
@@ -243,13 +316,12 @@ where
     A: 'a,
     C: 'a,
 {
-    pub fn with_entity_data<T: Component>(self) -> Query<'a, V, And<A, EntityDataFilter<T>>, C> {
+    pub fn with_entity_data<T: Component>(self) -> Query<'a, V, And<(A, EntityDataFilter<T>)>, C> {
         Query {
             world: self.world,
             view: self.view,
             arch_filter: And {
-                a: self.arch_filter,
-                b: EntityDataFilter::new(),
+                filters: (self.arch_filter, EntityDataFilter::new()),
             },
             chunk_filter: self.chunk_filter,
         }
@@ -257,15 +329,17 @@ where
 
     pub fn without_entity_data<T: Component>(
         self,
-    ) -> Query<'a, V, And<A, Not<EntityDataFilter<T>>>, C> {
+    ) -> Query<'a, V, And<(A, Not<EntityDataFilter<T>>)>, C> {
         Query {
             world: self.world,
             view: self.view,
             arch_filter: And {
-                a: self.arch_filter,
-                b: Not {
-                    filter: EntityDataFilter::new(),
-                },
+                filters: (
+                    self.arch_filter,
+                    Not {
+                        filter: EntityDataFilter::new(),
+                    },
+                ),
             },
             chunk_filter: self.chunk_filter,
         }
@@ -273,13 +347,12 @@ where
 
     pub fn with_shared_data<T: SharedComponent>(
         self,
-    ) -> Query<'a, V, And<A, SharedDataFilter<T>>, C> {
+    ) -> Query<'a, V, And<(A, SharedDataFilter<T>)>, C> {
         Query {
             world: self.world,
             view: self.view,
             arch_filter: And {
-                a: self.arch_filter,
-                b: SharedDataFilter::new(),
+                filters: (self.arch_filter, SharedDataFilter::new()),
             },
             chunk_filter: self.chunk_filter,
         }
@@ -287,15 +360,17 @@ where
 
     pub fn without_shared_data<T: SharedComponent>(
         self,
-    ) -> Query<'a, V, And<A, Not<SharedDataFilter<T>>>, C> {
+    ) -> Query<'a, V, And<(A, Not<SharedDataFilter<T>>)>, C> {
         Query {
             world: self.world,
             view: self.view,
             arch_filter: And {
-                a: self.arch_filter,
-                b: Not {
-                    filter: SharedDataFilter::new(),
-                },
+                filters: (
+                    self.arch_filter,
+                    Not {
+                        filter: SharedDataFilter::new(),
+                    },
+                ),
             },
             chunk_filter: self.chunk_filter,
         }
@@ -304,14 +379,13 @@ where
     pub fn with_shared_data_value<'b, T: SharedComponent>(
         self,
         value: &'b T,
-    ) -> Query<'a, V, A, And<C, SharedDataValueFilter<'b, T>>> {
+    ) -> Query<'a, V, A, And<(C, SharedDataValueFilter<'b, T>)>> {
         Query {
             world: self.world,
             view: self.view,
             arch_filter: self.arch_filter,
             chunk_filter: And {
-                a: self.chunk_filter,
-                b: SharedDataValueFilter::new(value),
+                filters: (self.chunk_filter, SharedDataValueFilter::new(value)),
             },
         }
     }
@@ -319,16 +393,18 @@ where
     pub fn without_shared_data_value<'b, T: SharedComponent>(
         self,
         value: &'b T,
-    ) -> Query<'a, V, A, And<C, Not<SharedDataValueFilter<'b, T>>>> {
+    ) -> Query<'a, V, A, And<(C, Not<SharedDataValueFilter<'b, T>>)>> {
         Query {
             world: self.world,
             view: self.view,
             arch_filter: self.arch_filter,
             chunk_filter: And {
-                a: self.chunk_filter,
-                b: Not {
-                    filter: SharedDataValueFilter::new(value),
-                },
+                filters: (
+                    self.chunk_filter,
+                    Not {
+                        filter: SharedDataValueFilter::new(value),
+                    },
+                ),
             },
         }
     }
