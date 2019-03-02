@@ -57,16 +57,16 @@ impl<'a, T: View<'a> + ReadOnly> Queryable<'a, &'a World> for T {
 }
 
 #[derive(Debug)]
-pub struct Read<T: Component>(PhantomData<T>);
+pub struct Read<T: EntityData>(PhantomData<T>);
 
-impl<T: Component> ReadOnly for Read<T> {}
+impl<T: EntityData> ReadOnly for Read<T> {}
 
-impl<'a, T: Component> View<'a> for Read<T> {
-    type Iter = Iter<'a, T>;
+impl<'a, T: EntityData> View<'a> for Read<T> {
+    type Iter = BorrowedIter<'a, Iter<'a, T>>;
     type Filter = EntityDataFilter<T>;
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        unsafe { chunk.components().unwrap().iter() }
+        chunk.entity_data().unwrap().into_iter()
     }
 
     fn filter() -> Self::Filter {
@@ -78,19 +78,19 @@ impl<'a, T: Component> View<'a> for Read<T> {
     }
 }
 
-impl<T: Component> ViewElement for Read<T> {
+impl<T: EntityData> ViewElement for Read<T> {
     type Component = T;
 }
 
 #[derive(Debug)]
-pub struct Write<T: Component>(PhantomData<T>);
+pub struct Write<T: EntityData>(PhantomData<T>);
 
-impl<'a, T: Component> View<'a> for Write<T> {
-    type Iter = IterMut<'a, T>;
+impl<'a, T: EntityData> View<'a> for Write<T> {
+    type Iter = BorrowedIter<'a, IterMut<'a, T>>;
     type Filter = EntityDataFilter<T>;
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        unsafe { chunk.components_mut().unwrap().iter_mut() }
+        chunk.entity_data_mut().unwrap().into_iter()
     }
 
     fn filter() -> Self::Filter {
@@ -102,16 +102,16 @@ impl<'a, T: Component> View<'a> for Write<T> {
     }
 }
 
-impl<T: Component> ViewElement for Write<T> {
+impl<T: EntityData> ViewElement for Write<T> {
     type Component = T;
 }
 
 #[derive(Debug)]
-pub struct Shared<T: SharedComponent>(PhantomData<T>);
+pub struct Shared<T: SharedData>(PhantomData<T>);
 
-impl<T: SharedComponent> ReadOnly for Shared<T> {}
+impl<T: SharedData> ReadOnly for Shared<T> {}
 
-impl<'a, T: SharedComponent> View<'a> for Shared<T> {
+impl<'a, T: SharedData> View<'a> for Shared<T> {
     type Iter = Take<Repeat<&'a T>>;
     type Filter = SharedDataFilter<T>;
 
@@ -131,7 +131,7 @@ impl<'a, T: SharedComponent> View<'a> for Shared<T> {
     }
 }
 
-impl<T: SharedComponent> ViewElement for Shared<T> {
+impl<T: SharedData> ViewElement for Shared<T> {
     type Component = Shared<T>;
 }
 
@@ -256,13 +256,13 @@ impl_and_filter!(A, B, C, D, E, F);
 #[derive(Debug)]
 pub struct EntityDataFilter<T>(PhantomData<T>);
 
-impl<T: Component> EntityDataFilter<T> {
+impl<T: EntityData> EntityDataFilter<T> {
     fn new() -> Self {
         EntityDataFilter(PhantomData)
     }
 }
 
-impl<T: Component> ArchetypeFilter for EntityDataFilter<T> {
+impl<T: EntityData> ArchetypeFilter for EntityDataFilter<T> {
     #[inline]
     fn filter(&self, archetype: &Archetype) -> bool {
         archetype.has_component::<T>()
@@ -272,13 +272,13 @@ impl<T: Component> ArchetypeFilter for EntityDataFilter<T> {
 #[derive(Debug)]
 pub struct SharedDataFilter<T>(PhantomData<T>);
 
-impl<T: SharedComponent> SharedDataFilter<T> {
+impl<T: SharedData> SharedDataFilter<T> {
     fn new() -> Self {
         SharedDataFilter(PhantomData)
     }
 }
 
-impl<T: SharedComponent> ArchetypeFilter for SharedDataFilter<T> {
+impl<T: SharedData> ArchetypeFilter for SharedDataFilter<T> {
     #[inline]
     fn filter(&self, archetype: &Archetype) -> bool {
         archetype.has_shared::<T>()
@@ -290,13 +290,13 @@ pub struct SharedDataValueFilter<'a, T> {
     value: &'a T,
 }
 
-impl<'a, T: SharedComponent> SharedDataValueFilter<'a, T> {
+impl<'a, T: SharedData> SharedDataValueFilter<'a, T> {
     fn new(value: &'a T) -> Self {
         SharedDataValueFilter { value }
     }
 }
 
-impl<'a, T: SharedComponent> ChunkFilter for SharedDataValueFilter<'a, T> {
+impl<'a, T: SharedData> ChunkFilter for SharedDataValueFilter<'a, T> {
     #[inline]
     fn filter(&self, chunk: &Chunk) -> bool {
         unsafe { chunk.shared_component::<T>() }.map_or(false, |s| s == self.value)
@@ -316,7 +316,7 @@ where
     A: 'a,
     C: 'a,
 {
-    pub fn with_entity_data<T: Component>(self) -> Query<'a, V, And<(A, EntityDataFilter<T>)>, C> {
+    pub fn with_entity_data<T: EntityData>(self) -> Query<'a, V, And<(A, EntityDataFilter<T>)>, C> {
         Query {
             world: self.world,
             view: self.view,
@@ -327,7 +327,7 @@ where
         }
     }
 
-    pub fn without_entity_data<T: Component>(
+    pub fn without_entity_data<T: EntityData>(
         self,
     ) -> Query<'a, V, And<(A, Not<EntityDataFilter<T>>)>, C> {
         Query {
@@ -345,9 +345,7 @@ where
         }
     }
 
-    pub fn with_shared_data<T: SharedComponent>(
-        self,
-    ) -> Query<'a, V, And<(A, SharedDataFilter<T>)>, C> {
+    pub fn with_shared_data<T: SharedData>(self) -> Query<'a, V, And<(A, SharedDataFilter<T>)>, C> {
         Query {
             world: self.world,
             view: self.view,
@@ -358,7 +356,7 @@ where
         }
     }
 
-    pub fn without_shared_data<T: SharedComponent>(
+    pub fn without_shared_data<T: SharedData>(
         self,
     ) -> Query<'a, V, And<(A, Not<SharedDataFilter<T>>)>, C> {
         Query {
@@ -376,7 +374,7 @@ where
         }
     }
 
-    pub fn with_shared_data_value<'b, T: SharedComponent>(
+    pub fn with_shared_data_value<'b, T: SharedData>(
         self,
         value: &'b T,
     ) -> Query<'a, V, A, And<(C, SharedDataValueFilter<'b, T>)>> {
@@ -390,7 +388,7 @@ where
         }
     }
 
-    pub fn without_shared_data_value<'b, T: SharedComponent>(
+    pub fn without_shared_data_value<'b, T: SharedData>(
         self,
         value: &'b T,
     ) -> Query<'a, V, A, And<(C, Not<SharedDataValueFilter<'b, T>>)>> {
@@ -426,13 +424,13 @@ where
     }
 
     pub fn into_data(self) -> impl Iterator<Item = <<V as View<'a>>::Iter as Iterator>::Item> {
-        self.into_chunks().flat_map(|mut c| c.data())
+        self.into_chunks().flat_map(|mut c| c.iter())
     }
 
     pub fn into_data_with_entities(
         self,
     ) -> impl Iterator<Item = (Entity, <<V as View<'a>>::Iter as Iterator>::Item)> {
-        self.into_chunks().flat_map(|mut c| c.data_with_entities())
+        self.into_chunks().flat_map(|mut c| c.iter_with_entities())
     }
 }
 
@@ -443,15 +441,15 @@ pub struct ChunkView<'a, V: View<'a>> {
 }
 
 impl<'a, V: View<'a>> ChunkView<'a, V> {
-    pub fn entities(&self) -> impl Iterator<Item = &Entity> {
-        unsafe { self.chunk.entities().iter() }
+    pub fn entities(&self) -> &[Entity] {
+        unsafe { self.chunk.entities() }
     }
 
-    pub fn data(&mut self) -> V::Iter {
+    pub fn iter(&mut self) -> V::Iter {
         V::fetch(self.chunk)
     }
 
-    pub fn data_with_entities(
+    pub fn iter_with_entities(
         &mut self,
     ) -> impl Iterator<Item = (Entity, <<V as View<'a>>::Iter as Iterator>::Item)> + 'a {
         unsafe {
@@ -461,5 +459,17 @@ impl<'a, V: View<'a>> ChunkView<'a, V> {
                 .map(|e| *e)
                 .zip(V::fetch(self.chunk))
         }
+    }
+
+    pub fn shared_data<T: SharedData>(&self) -> Option<&T> {
+        unsafe { self.chunk.shared_component() }
+    }
+
+    pub fn data<T: EntityData>(&self) -> Option<BorrowedSlice<'a, T>> {
+        self.chunk.entity_data()
+    }
+
+    pub fn data_mut<T: EntityData>(&self) -> Option<BorrowedMutSlice<'a, T>> {
+        self.chunk.entity_data_mut()
     }
 }

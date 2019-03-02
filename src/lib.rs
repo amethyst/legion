@@ -1,11 +1,13 @@
+mod borrows;
 mod query;
 mod storage;
 
+pub use crate::borrows::*;
 pub use crate::query::*;
 pub use crate::storage::*;
 
 use parking_lot::Mutex;
-use slog::{debug, o, Drain};
+use slog::{debug, info, o, trace, Drain};
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -44,23 +46,32 @@ impl Display for Entity {
 
 #[derive(Debug)]
 pub struct Universe {
+    name: String,
     logger: slog::Logger,
     allocator: Arc<Mutex<BlockAllocator>>,
 }
 
 impl Universe {
     pub fn new<L: Into<Option<slog::Logger>>>(logger: L) -> Self {
+        let name = names::Generator::default().next().unwrap();
+        let logger = logger
+            .into()
+            .unwrap_or(slog::Logger::root(slog_stdlog::StdLog.fuse(), o!()))
+            .new(o!("universe" => name.clone()));
+
+        info!(logger, "starting universe");
         Universe {
-            logger: logger
-                .into()
-                .unwrap_or(slog::Logger::root(slog_stdlog::StdLog.fuse(), o!())),
+            name,
+            logger,
             allocator: Arc::from(Mutex::new(BlockAllocator::new())),
         }
     }
 
     pub fn create_world(&self) -> World {
-        debug!(self.logger, "Creating world");
-        World::new(EntityAllocator::new(self.allocator.clone()))
+        World::new(
+            self.logger.clone(),
+            EntityAllocator::new(self.allocator.clone()),
+        )
     }
 }
 
@@ -222,22 +233,30 @@ impl Drop for EntityAllocator {
 
 #[derive(Debug)]
 pub struct World {
-    allocator: Option<EntityAllocator>,
+    name: String,
+    logger: slog::Logger,
+    allocator: EntityAllocator,
     archetypes: Vec<Archetype>,
-    entities: Option<HashMap<Entity, (ArchetypeID, ChunkID, ComponentID)>>,
+    entities: HashMap<Entity, (ArchetypeID, ChunkID, ComponentID)>,
 }
 
 impl World {
-    fn new(allocator: EntityAllocator) -> Self {
+    fn new(logger: slog::Logger, allocator: EntityAllocator) -> Self {
+        let name = names::Generator::default().next().unwrap();
+        let logger = logger.new(o!("world" => name.clone()));
+
+        info!(logger, "starting world");
         World {
-            allocator: Some(allocator),
+            name,
+            logger,
+            allocator: allocator,
             archetypes: Vec::new(),
-            entities: Some(HashMap::new()),
+            entities: HashMap::new(),
         }
     }
 
     pub fn is_alive(&self, entity: &Entity) -> bool {
-        self.allocator.as_ref().unwrap().is_alive(entity)
+        self.allocator.is_alive(entity)
     }
 
     pub fn insert_from<S, T>(&mut self, shared: S, components: T) -> &[Entity]
@@ -256,43 +275,61 @@ impl World {
         S: SharedDataSet,
         T: ComponentSource,
     {
-        let mut allocator = self.allocator.take().unwrap();
-        let mut entities = self.entities.take().unwrap();
+        let allocator = &mut self.allocator;
+        let entities = &mut self.entities;
 
         allocator.clear_allocation_buffer();
 
         // find or create archetype
-        let (arch_id, archetype) = self.archetype(&shared, &components);
+        let (arch_id, archetype) =
+            World::archetype(&self.logger, &mut self.archetypes, &shared, &components);
 
         // insert components into chunks
         while !components.is_empty() {
             // find or create chunk
-            let (chunk_id, chunk) = World::free_chunk(archetype, &shared, &components);
+            let (chunk_id, chunk) = archetype.get_or_create_chunk(&shared, &components);
 
             // insert as many components as we can into the chunk
-            let allocated = components.write(chunk, &mut allocator);
+            let allocated = components.write(chunk, allocator);
 
             // record new entity locations
             let start = unsafe { chunk.entities().len() - allocated };
-            let added = unsafe { chunk.component_ids().skip(start) };
-            for (e, comp_id) in added {
-                entities.insert(e, (arch_id, chunk_id, comp_id));
+            let added = unsafe { chunk.entities().iter().enumerate().skip(start) };
+            for (i, e) in added {
+                let comp_id = i as ComponentID;
+                entities.insert(*e, (arch_id, chunk_id, comp_id));
             }
+
+            trace!(
+                self.logger,
+                "appended {entity_count} entities into chunk",
+                entity_count = allocated;
+                "archetype_id" => arch_id,
+                "chunk_id" => chunk_id
+            );
         }
 
-        self.entities = Some(entities);
-        self.allocator = Some(allocator);
-        self.allocator.as_ref().unwrap().allocation_buffer()
+        trace!(
+            self.logger,
+            "inserted {entity_count_added} entities",
+            entity_count_added = self.allocator.allocation_buffer().len();
+            "archetype_id" => arch_id
+        );
+
+        self.allocator.allocation_buffer()
     }
 
     pub fn delete(&mut self, entity: Entity) -> bool {
-        let deleted = self.allocator.as_mut().unwrap().delete_entity(entity);
+        let deleted = self.allocator.delete_entity(entity);
 
         if deleted {
             // lookup entity location
-            let ids = self.entities.as_ref().unwrap().get(&entity).map(
-                |(archetype_id, chunk_id, component_id)| (*archetype_id, *chunk_id, *component_id),
-            );
+            let ids = self
+                .entities
+                .get(&entity)
+                .map(|(archetype_id, chunk_id, component_id)| {
+                    (*archetype_id, *chunk_id, *component_id)
+                });
 
             // swap remove with last entity in chunk
             let swapped = ids.and_then(|(archetype_id, chunk_id, component_id)| {
@@ -304,47 +341,42 @@ impl World {
 
             // record swapped entity's new location
             if let Some(swapped) = swapped {
-                self.entities
-                    .as_mut()
-                    .unwrap()
-                    .insert(swapped, ids.unwrap());
+                self.entities.insert(swapped, ids.unwrap());
             }
         }
 
         deleted
     }
 
-    pub fn component<T: Component>(&self, entity: Entity) -> Option<&T> {
+    pub fn component<'a, T: EntityData>(&'a self, entity: Entity) -> Option<Borrowed<'a, T>> {
         self.entities
-            .as_ref()
-            .and_then(|e| e.get(&entity))
+            .get(&entity)
             .and_then(|(archetype_id, chunk_id, component_id)| {
                 self.archetypes
                     .get(*archetype_id as usize)
                     .and_then(|archetype| archetype.chunk(*chunk_id))
-                    .and_then(|chunk| unsafe { chunk.components::<T>() })
-                    .and_then(|vec| vec.get(*component_id as usize))
+                    .and_then(|chunk| chunk.entity_data::<T>())
+                    .and_then(|vec| vec.single(*component_id as usize))
             })
     }
 
-    pub fn component_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
+    pub fn component_mut<T: EntityData>(&mut self, entity: Entity) -> Option<&mut T> {
         let entities = &self.entities;
         let archetypes = &self.archetypes;
-        entities.as_ref().and_then(|e| e.get(&entity)).and_then(
-            |(archetype_id, chunk_id, component_id)| {
+        entities
+            .get(&entity)
+            .and_then(|(archetype_id, chunk_id, component_id)| {
                 archetypes
                     .get(*archetype_id as usize)
                     .and_then(|archetype| archetype.chunk(*chunk_id))
-                    .and_then(|chunk| unsafe { chunk.components_mut::<T>() })
+                    .and_then(|chunk| unsafe { chunk.entity_data_unchecked::<T>() })
                     .and_then(|vec| vec.get_mut(*component_id as usize))
-            },
-        )
+            })
     }
 
-    pub fn shared<T: SharedComponent>(&self, entity: Entity) -> Option<&T> {
+    pub fn shared<T: SharedData>(&self, entity: Entity) -> Option<&T> {
         self.entities
-            .as_ref()
-            .and_then(|e| e.get(&entity))
+            .get(&entity)
             .and_then(|(archetype_id, chunk_id, _)| {
                 self.archetypes
                     .get(*archetype_id as usize)
@@ -353,62 +385,29 @@ impl World {
             })
     }
 
-    fn archetype<S: SharedDataSet, C: ComponentSource>(
-        &mut self,
+    fn archetype<'a, S: SharedDataSet, C: ComponentSource>(
+        logger: &slog::Logger,
+        archetypes: &'a mut Vec<Archetype>,
         shared: &S,
         components: &C,
-    ) -> (ArchetypeID, &mut Archetype) {
-        // copy of self to bypass NLL2018 failure
-        let self2 = unsafe { &mut *(self as *const _ as *mut Self) };
-
-        if let Some((id, archetype)) = self
-            .archetypes
-            .iter_mut()
+    ) -> (ArchetypeID, &'a mut Archetype) {
+        match archetypes
+            .iter()
             .enumerate()
             .filter(|(_, a)| components.is_archetype_match(a) && shared.is_archetype_match(a))
-            .nth(0)
+            .map(|(i, _)| i)
+            .next()
         {
-            // original borrow of self ends here
-            return (id as ArchetypeID, archetype);
-        }
-
-        // now safe to access self again
-        let archetype = Archetype::new(components.types(), shared.types());
-        self2.archetypes.push(archetype);
-        (
-            (self2.archetypes.len() - 1) as ArchetypeID,
-            self2.archetypes.last_mut().unwrap(),
-        )
-    }
-
-    fn free_chunk<'a, S: SharedDataSet, C: ComponentSource>(
-        archetype: &'a mut Archetype,
-        shared: &S,
-        components: &C,
-    ) -> (ChunkID, &'a mut Chunk) {
-        // copy of archetype reference to bypass NLL2018 failure
-        let archetype2 = unsafe { &mut *(archetype as *const _ as *mut Archetype) };
-
-        let free = archetype
-            .chunks_with_space_mut()
-            .enumerate()
-            .filter(|(_, c)| shared.is_chunk_match(c))
-            .nth(0);
-
-        match free {
-            Some((id, chunk)) => (id as ChunkID, chunk), // original borrow ends here
+            Some(i) => (i as ArchetypeID, unsafe { archetypes.get_unchecked_mut(i) }),
             None => {
-                // now safe to access archetype again
-                let mut builder = ChunkBuilder::new();
-                shared.configure_chunk(&mut builder);
-                components.configure_chunk(&mut builder);
+                let archetype_id = archetypes.len() as ArchetypeID;
+                let logger = logger.new(o!("archetype_id" => archetype_id));
+                let archetype = Archetype::new(logger.clone(), components.types(), shared.types());
+                archetypes.push(archetype);
 
-                let chunk = builder.build();
-                archetype2.chunks.push(chunk);
-                (
-                    (archetype2.chunks.len() - 1) as ChunkID,
-                    archetype2.chunks.last_mut().unwrap(),
-                )
+                debug!(logger, "allocated archetype");
+
+                (archetype_id, archetypes.last_mut().unwrap())
             }
         }
     }
@@ -454,7 +453,7 @@ impl SharedDataSet for () {
 macro_rules! impl_shared_data_set {
     ( $arity: expr; $( $ty: ident ),* ) => {
         impl<$( $ty ),*> SharedDataSet for ($( $ty, )*)
-        where $( $ty: SharedComponent ),*
+        where $( $ty: SharedData ),*
         {
             fn is_archetype_match(&self, archetype: &Archetype) -> bool {
                 archetype.shared.len() == $arity &&
@@ -497,7 +496,7 @@ pub struct IterComponentSource<T: Iterator<Item = K>, K> {
 macro_rules! impl_component_source {
     ( $arity: expr; $( $ty: ident => $id: ident ),* ) => {
         impl<$( $ty ),*> ComponentDataSet for ($( $ty, )*)
-        where $( $ty: Component ),*
+        where $( $ty: EntityData ),*
         {
             fn component_source<T>(source: T) -> IterComponentSource<T, Self>
                 where T: Iterator<Item=Self>
@@ -508,7 +507,7 @@ macro_rules! impl_component_source {
 
         impl<I, $( $ty ),*> ComponentSource for IterComponentSource<I, ($( $ty, )*)>
         where I: Iterator<Item=($( $ty, )*)>,
-              $( $ty: Component ),*
+              $( $ty: EntityData ),*
         {
             fn types(&self) -> HashSet<TypeId> {
                 [$( TypeId::of::<$ty>() ),*].iter().cloned().collect()
@@ -536,9 +535,9 @@ macro_rules! impl_component_source {
                 let mut count = 0;
 
                 unsafe {
-                    let entities = chunk.entities_mut();
+                    let entities = chunk.entities_unchecked();
                     $(
-                        let $ty = chunk.components_mut::<$ty>().unwrap();
+                        let $ty = chunk.entity_data_unchecked::<$ty>().unwrap();
                     )*
 
                     while let Some(($( $id, )*)) = { if chunk.is_full() { None } else { self.source.next() } } {
@@ -564,11 +563,11 @@ impl_component_source!(3; A => a, B => b, C => c);
 impl_component_source!(4; A => a, B => b, C => c, D => d);
 impl_component_source!(5; A => a, B => b, C => c, D => d, E => e);
 
-pub trait Component: Send + Sync + Sized + Debug + 'static {}
-pub trait SharedComponent: Send + Sync + Sized + PartialEq + Clone + Debug + 'static {}
+pub trait EntityData: Send + Sync + Sized + Debug + 'static {}
+pub trait SharedData: Send + Sync + Sized + PartialEq + Clone + Debug + 'static {}
 
-impl<T: Send + Sync + Sized + Debug + 'static> Component for T {}
-impl<T: Send + Sized + PartialEq + Clone + Sync + Debug + 'static> SharedComponent for T {}
+impl<T: Send + Sync + Sized + Debug + 'static> EntityData for T {}
+impl<T: Send + Sized + PartialEq + Clone + Sync + Debug + 'static> SharedData for T {}
 
 #[cfg(test)]
 mod tests {

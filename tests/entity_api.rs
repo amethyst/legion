@@ -45,8 +45,14 @@ fn get_component() {
     }
 
     for (i, e) in entities.iter().enumerate() {
-        assert_eq!(components.get(i).map(|(x, _)| x), world.component(*e));
-        assert_eq!(components.get(i).map(|(_, x)| x), world.component(*e));
+        match world.component(*e) {
+            Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
+            None => assert_eq!(components.get(i).map(|(x, _)| x), None),
+        }
+        match world.component(*e) {
+            Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
+            None => assert_eq!(components.get(i).map(|(_, x)| x), None),
+        }
     }
 }
 
@@ -156,8 +162,14 @@ fn delete_last() {
 
     for (i, e) in entities.iter().take(entities.len() - 1).enumerate() {
         assert_eq!(true, world.is_alive(e));
-        assert_eq!(components.get(i).map(|(_, x)| x), world.component(*e));
-        assert_eq!(components.get(i).map(|(x, _)| x), world.component(*e));
+        match world.component(*e) {
+            Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
+            None => assert_eq!(components.get(i).map(|(x, _)| x), None),
+        }
+        match world.component(*e) {
+            Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
+            None => assert_eq!(components.get(i).map(|(_, x)| x), None),
+        }
     }
 }
 
@@ -184,7 +196,13 @@ fn delete_first() {
 
     for (i, e) in entities.iter().skip(1).enumerate() {
         assert_eq!(true, world.is_alive(e));
-        assert_eq!(components.get(i + 1).map(|(_, x)| x), world.component(*e));
-        assert_eq!(components.get(i + 1).map(|(x, _)| x), world.component(*e));
+        match world.component(*e) {
+            Some(x) => assert_eq!(components.get(i + 1).map(|(x, _)| x), Some(&x as &Pos)),
+            None => assert_eq!(components.get(i + 1).map(|(x, _)| x), None),
+        }
+        match world.component(*e) {
+            Some(x) => assert_eq!(components.get(i + 1).map(|(_, x)| x), Some(&x as &Rot)),
+            None => assert_eq!(components.get(i + 1).map(|(_, x)| x), None),
+        }
     }
 }
