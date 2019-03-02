@@ -14,6 +14,8 @@ pub trait View<'a>: Sized + 'static {
     fn fetch(chunk: &'a Chunk) -> Self::Iter;
     fn filter() -> Self::Filter;
     fn validate() -> bool;
+    fn reads<T: EntityData>() -> bool;
+    fn writes<T: EntityData>() -> bool;
 }
 
 pub trait ViewElement {
@@ -76,6 +78,14 @@ impl<'a, T: EntityData> View<'a> for Read<T> {
     fn validate() -> bool {
         true
     }
+
+    fn reads<D: EntityData>() -> bool {
+        TypeId::of::<T>() == TypeId::of::<D>()
+    }
+
+    fn writes<D: EntityData>() -> bool {
+        false
+    }
 }
 
 impl<T: EntityData> ViewElement for Read<T> {
@@ -99,6 +109,14 @@ impl<'a, T: EntityData> View<'a> for Write<T> {
 
     fn validate() -> bool {
         true
+    }
+
+    fn reads<D: EntityData>() -> bool {
+        TypeId::of::<T>() == TypeId::of::<D>()
+    }
+
+    fn writes<D: EntityData>() -> bool {
+        TypeId::of::<T>() == TypeId::of::<D>()
     }
 }
 
@@ -128,6 +146,14 @@ impl<'a, T: SharedData> View<'a> for Shared<T> {
 
     fn validate() -> bool {
         true
+    }
+
+    fn reads<D: EntityData>() -> bool {
+        false
+    }
+
+    fn writes<D: EntityData>() -> bool {
+        false
     }
 }
 
@@ -162,6 +188,14 @@ macro_rules! impl_view_tuple {
                 }
 
                 true
+            }
+
+            fn reads<Data: EntityData>() -> bool {
+                $( $ty::reads::<Data>() )||*
+            }
+
+            fn writes<Data: EntityData>() -> bool {
+                $( $ty::reads::<Data>() )||*
             }
         }
 
@@ -466,10 +500,16 @@ impl<'a, V: View<'a>> ChunkView<'a, V> {
     }
 
     pub fn data<T: EntityData>(&self) -> Option<BorrowedSlice<'a, T>> {
+        if !V::reads::<T>() {
+            panic!("data type not readable via this query");
+        }
         self.chunk.entity_data()
     }
 
     pub fn data_mut<T: EntityData>(&self) -> Option<BorrowedMutSlice<'a, T>> {
+        if !V::writes::<T>() {
+            panic!("data type not readable via this query");
+        }
         self.chunk.entity_data_mut()
     }
 }
