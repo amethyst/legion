@@ -61,6 +61,8 @@ pub struct Chunk {
     borrows: HashMap<TypeId, AtomicIsize>,
 }
 
+unsafe impl Sync for Chunk {}
+
 impl Chunk {
     pub fn len(&self) -> usize {
         unsafe { self.entities.inner().len() }
@@ -254,8 +256,8 @@ impl Archetype {
         self.shared.contains(&TypeId::of::<T>())
     }
 
-    pub fn chunks(&self) -> impl Iterator<Item = &Chunk> {
-        self.chunks.iter()
+    pub fn chunks(&self) -> &[Chunk] {
+        &self.chunks
     }
 
     pub fn get_or_create_chunk<'a, 'b, 'c, S: SharedDataSet, C: ComponentSource>(

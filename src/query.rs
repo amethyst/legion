@@ -5,9 +5,12 @@ use std::marker::PhantomData;
 use std::slice::Iter;
 use std::slice::IterMut;
 
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
+
 use crate::*;
 
-pub trait View<'a>: Sized + 'static {
+pub trait View<'a>: Sized + Send + Sync + 'static {
     type Iter: Iterator + 'a;
     type Filter: ArchetypeFilter;
 
@@ -22,18 +25,17 @@ pub trait ViewElement {
     type Component;
 }
 
-pub trait Queryable<'a, World>: View<'a> {
-    fn query(world: World) -> Query<'a, Self, <Self as View<'a>>::Filter, Passthrough>;
+pub trait Queryable<'a>: View<'a> {
+    fn query() -> Query<'a, Self, <Self as View<'a>>::Filter, Passthrough>;
 }
 
-impl<'a, T: View<'a>> Queryable<'a, &'a mut World> for T {
-    fn query(world: &'a mut World) -> Query<'a, Self, Self::Filter, Passthrough> {
+impl<'a, T: View<'a>> Queryable<'a> for T {
+    fn query() -> Query<'a, Self, Self::Filter, Passthrough> {
         if !Self::validate() {
             panic!("invalid view, please ensure the view contains no duplicate component types");
         }
 
         Query {
-            world: world,
             view: PhantomData,
             arch_filter: Self::filter(),
             chunk_filter: Passthrough,
@@ -41,27 +43,26 @@ impl<'a, T: View<'a>> Queryable<'a, &'a mut World> for T {
     }
 }
 
-pub trait ReadOnly {}
+// pub trait ReadOnly {}
 
-impl<'a, T: View<'a> + ReadOnly> Queryable<'a, &'a World> for T {
-    fn query(world: &'a World) -> Query<'a, Self, Self::Filter, Passthrough> {
-        if !Self::validate() {
-            panic!("invalid view, please ensure the view contains no duplicate component types");
-        }
+// impl<'a, T: View<'a> + ReadOnly> Queryable<'a, &'a World> for T {
+//     fn query(world: &'a World) -> Query<'a, Self, Self::Filter, Passthrough> {
+//         if !Self::validate() {
+//             panic!("invalid view, please ensure the view contains no duplicate component types");
+//         }
 
-        Query {
-            world,
-            view: PhantomData,
-            arch_filter: Self::filter(),
-            chunk_filter: Passthrough,
-        }
-    }
-}
+//         Query {
+//             view: PhantomData,
+//             arch_filter: Self::filter(),
+//             chunk_filter: Passthrough,
+//         }
+//     }
+// }
 
 #[derive(Debug)]
 pub struct Read<T: EntityData>(PhantomData<T>);
 
-impl<T: EntityData> ReadOnly for Read<T> {}
+// impl<T: EntityData> ReadOnly for Read<T> {}
 
 impl<'a, T: EntityData> View<'a> for Read<T> {
     type Iter = BorrowedIter<'a, Iter<'a, T>>;
@@ -127,7 +128,7 @@ impl<T: EntityData> ViewElement for Write<T> {
 #[derive(Debug)]
 pub struct Shared<T: SharedData>(PhantomData<T>);
 
-impl<T: SharedData> ReadOnly for Shared<T> {}
+// impl<T: SharedData> ReadOnly for Shared<T> {}
 
 impl<'a, T: SharedData> View<'a> for Shared<T> {
     type Iter = Take<Repeat<&'a T>>;
@@ -199,7 +200,7 @@ macro_rules! impl_view_tuple {
             }
         }
 
-        impl<$( $ty: ReadOnly ),*> ReadOnly for ($( $ty, )*) {}
+        // impl<$( $ty: ReadOnly ),*> ReadOnly for ($( $ty, )*) {}
     };
 }
 
@@ -209,11 +210,11 @@ impl_view_tuple!(A, B, C);
 impl_view_tuple!(A, B, C, D);
 impl_view_tuple!(A, B, C, D, E);
 
-pub trait ArchetypeFilter {
+pub trait ArchetypeFilter: Sync {
     fn filter(&self, archetype: &Archetype) -> bool;
 }
 
-pub trait ChunkFilter {
+pub trait ChunkFilter: Sync {
     fn filter(&self, chunk: &Chunk) -> bool;
 }
 
@@ -339,8 +340,7 @@ impl<'a, T: SharedData> ChunkFilter for SharedDataValueFilter<'a, T> {
 
 #[derive(Debug)]
 pub struct Query<'a, V: View<'a>, A: ArchetypeFilter, C: ChunkFilter> {
-    world: &'a World,
-    view: PhantomData<V>,
+    view: PhantomData<&'a V>,
     arch_filter: A,
     chunk_filter: C,
 }
@@ -352,7 +352,6 @@ where
 {
     pub fn with_entity_data<T: EntityData>(self) -> Query<'a, V, And<(A, EntityDataFilter<T>)>, C> {
         Query {
-            world: self.world,
             view: self.view,
             arch_filter: And {
                 filters: (self.arch_filter, EntityDataFilter::new()),
@@ -365,7 +364,6 @@ where
         self,
     ) -> Query<'a, V, And<(A, Not<EntityDataFilter<T>>)>, C> {
         Query {
-            world: self.world,
             view: self.view,
             arch_filter: And {
                 filters: (
@@ -381,7 +379,6 @@ where
 
     pub fn with_shared_data<T: SharedData>(self) -> Query<'a, V, And<(A, SharedDataFilter<T>)>, C> {
         Query {
-            world: self.world,
             view: self.view,
             arch_filter: And {
                 filters: (self.arch_filter, SharedDataFilter::new()),
@@ -394,7 +391,6 @@ where
         self,
     ) -> Query<'a, V, And<(A, Not<SharedDataFilter<T>>)>, C> {
         Query {
-            world: self.world,
             view: self.view,
             arch_filter: And {
                 filters: (
@@ -413,7 +409,6 @@ where
         value: &'b T,
     ) -> Query<'a, V, A, And<(C, SharedDataValueFilter<'b, T>)>> {
         Query {
-            world: self.world,
             view: self.view,
             arch_filter: self.arch_filter,
             chunk_filter: And {
@@ -427,7 +422,6 @@ where
         value: &'b T,
     ) -> Query<'a, V, A, And<(C, Not<SharedDataValueFilter<'b, T>>)>> {
         Query {
-            world: self.world,
             view: self.view,
             arch_filter: self.arch_filter,
             chunk_filter: And {
@@ -441,10 +435,12 @@ where
         }
     }
 
-    pub fn into_chunks(self) -> impl Iterator<Item = ChunkView<'a, V>> {
-        let world = self.world;
-        let arch = self.arch_filter;
-        let chunk = self.chunk_filter;
+    pub fn iter_chunks<'b>(
+        &'b self,
+        world: &'a World,
+    ) -> impl Iterator<Item = ChunkView<'a, V>> + 'b {
+        let arch = &self.arch_filter;
+        let chunk = &self.chunk_filter;
         world
             .archetypes
             .iter()
@@ -457,14 +453,56 @@ where
             })
     }
 
-    pub fn into_data(self) -> impl Iterator<Item = <<V as View<'a>>::Iter as Iterator>::Item> {
-        self.into_chunks().flat_map(|mut c| c.iter())
+    pub fn iter<'b>(
+        &'b self,
+        world: &'a World,
+    ) -> impl Iterator<Item = <<V as View<'a>>::Iter as Iterator>::Item> + 'b {
+        self.iter_chunks(world).flat_map(|mut c| c.iter())
     }
 
-    pub fn into_data_with_entities(
-        self,
-    ) -> impl Iterator<Item = (Entity, <<V as View<'a>>::Iter as Iterator>::Item)> {
-        self.into_chunks().flat_map(|mut c| c.iter_with_entities())
+    pub fn iter_entities<'b>(
+        &'b self,
+        world: &'a World,
+    ) -> impl Iterator<Item = (Entity, <<V as View<'a>>::Iter as Iterator>::Item)> + 'b {
+        self.iter_chunks(world).flat_map(|mut c| c.iter_entities())
+    }
+
+    pub fn for_each<'b, F>(&'b self, world: &'a World, mut f: F)
+    where
+        F: Fn(<<V as View<'a>>::Iter as Iterator>::Item),
+    {
+        self.iter(world).for_each(&mut f);
+    }
+
+    #[cfg(feature = "par-iter")]
+    pub fn par_iter_chunks<'b>(
+        &'b self,
+        world: &'a World,
+    ) -> impl ParallelIterator<Item = ChunkView<'a, V>> + 'b {
+        let arch = &self.arch_filter;
+        let chunk = &self.chunk_filter;
+        let archetypes = &world.archetypes;
+        archetypes
+            .par_iter()
+            .filter(move |a| arch.filter(a))
+            .flat_map(|a| a.chunks())
+            .filter(move |c| chunk.filter(c))
+            .map(|c| ChunkView {
+                chunk: c,
+                view: PhantomData,
+            })
+    }
+
+    #[cfg(feature = "par-iter")]
+    pub fn par_for_each<'b, F>(&'b self, world: &'a World, f: F)
+    where
+        F: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
+    {
+        self.par_iter_chunks(world).for_each(|mut chunk| {
+            for data in chunk.iter() {
+                f(data);
+            }
+        });
     }
 }
 
@@ -483,7 +521,7 @@ impl<'a, V: View<'a>> ChunkView<'a, V> {
         V::fetch(self.chunk)
     }
 
-    pub fn iter_with_entities(
+    pub fn iter_entities(
         &mut self,
     ) -> impl Iterator<Item = (Entity, <<V as View<'a>>::Iter as Iterator>::Item)> + 'a {
         unsafe {
@@ -508,7 +546,7 @@ impl<'a, V: View<'a>> ChunkView<'a, V> {
 
     pub fn data_mut<T: EntityData>(&self) -> Option<BorrowedMutSlice<'a, T>> {
         if !V::writes::<T>() {
-            panic!("data type not readable via this query");
+            panic!("data type not writable via this query");
         }
         self.chunk.entity_data_mut()
     }

@@ -1,5 +1,7 @@
 use hydro::*;
+use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 // use std::iter::FromIterator;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,15 +116,50 @@ fn query_read_entity_data() {
         }
     }
 
-    let query = Read::<Pos>::query(&world);
+    let query = Read::<Pos>::query();
 
     let mut count = 0;
-    for (entity, pos) in query.into_data_with_entities() {
+    for (entity, pos) in query.iter_entities(&world) {
         assert_eq!(&expected.get(&entity).unwrap().0, pos);
         count += 1;
     }
 
     assert_eq!(components.len(), count);
+}
+
+#[test]
+fn query_read_entity_data_par() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5));
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
+
+    for (i, e) in world
+        .insert_from(shared, components.clone())
+        .iter()
+        .enumerate()
+    {
+        if let Some((pos, rot)) = components.get(i) {
+            expected.insert(*e, (*pos, *rot));
+        }
+    }
+
+    let count = AtomicUsize::new(0);
+    let query = Read::<Pos>::query();
+    query.par_iter_chunks(&world).for_each(|mut chunk| {
+        for (entity, pos) in chunk.iter_entities() {
+            assert_eq!(&expected.get(&entity).unwrap().0, pos);
+            count.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+
+    assert_eq!(components.len(), count.load(Ordering::SeqCst));
 }
 
 #[test]
@@ -148,10 +185,10 @@ fn query_read_entity_data_tuple() {
         }
     }
 
-    let query = <(Read<Pos>, Read<Rot>)>::query(&world);
+    let query = <(Read<Pos>, Read<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, rot)) in query.into_data_with_entities() {
+    for (entity, (pos, rot)) in query.iter_entities(&world) {
         assert_eq!(&expected.get(&entity).unwrap().0, pos);
         assert_eq!(&expected.get(&entity).unwrap().1, rot);
         count += 1;
@@ -183,10 +220,10 @@ fn query_write_entity_data() {
         }
     }
 
-    let query = Write::<Pos>::query(&mut world);
+    let query = Write::<Pos>::query();
 
     let mut count = 0;
-    for (entity, pos) in query.into_data_with_entities() {
+    for (entity, pos) in query.iter_entities(&world) {
         assert_eq!(&expected.get(&entity).unwrap().0, pos);
         count += 1;
 
@@ -219,10 +256,10 @@ fn query_write_entity_data_tuple() {
         }
     }
 
-    let query = <(Write<Pos>, Write<Rot>)>::query(&mut world);
+    let query = <(Write<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, rot)) in query.into_data_with_entities() {
+    for (entity, (pos, rot)) in query.iter_entities(&world) {
         assert_eq!(&expected.get(&entity).unwrap().0, pos);
         assert_eq!(&expected.get(&entity).unwrap().1, rot);
         count += 1;
@@ -257,10 +294,10 @@ fn query_mixed_entity_data_tuple() {
         }
     }
 
-    let query = <(Read<Pos>, Write<Rot>)>::query(&mut world);
+    let query = <(Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, rot)) in query.into_data_with_entities() {
+    for (entity, (pos, rot)) in query.iter_entities(&world) {
         assert_eq!(&expected.get(&entity).unwrap().0, pos);
         assert_eq!(&expected.get(&entity).unwrap().1, rot);
         count += 1;
@@ -294,10 +331,10 @@ fn query_partial_match() {
         }
     }
 
-    let query = <(Read<Pos>, Write<Rot>)>::query(&mut world);
+    let query = <(Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, rot)) in query.into_data_with_entities() {
+    for (entity, (pos, rot)) in query.iter_entities(&world) {
         assert_eq!(&expected.get(&entity).unwrap().0, pos);
         assert_eq!(&expected.get(&entity).unwrap().1, rot);
         count += 1;
@@ -321,10 +358,10 @@ fn query_read_shared_data() {
 
     world.insert_from(shared, components.clone());
 
-    let query = Shared::<Static>::query(&world);
+    let query = Shared::<Static>::query();
 
     let mut count = 0;
-    for marker in query.into_data() {
+    for marker in query.iter(&world) {
         assert_eq!(&Static, marker);
         count += 1;
     }
