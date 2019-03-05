@@ -19,9 +19,10 @@ use std::sync::Arc;
 
 pub type EntityIndex = u16;
 pub type EntityVersion = Wrapping<u16>;
-pub type ComponentID = u16;
-pub type ChunkID = u16;
-pub type ArchetypeID = u16;
+pub type ComponentIndex = u16;
+pub type ChunkIndex = u16;
+pub type ArchetypeIndex = u16;
+pub type ChunkID = (ArchetypeIndex, ChunkIndex);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Entity {
@@ -237,7 +238,7 @@ pub struct World {
     logger: slog::Logger,
     allocator: EntityAllocator,
     archetypes: Vec<Archetype>,
-    entities: HashMap<Entity, (ArchetypeID, ChunkID, ComponentID)>,
+    entities: HashMap<Entity, (ArchetypeIndex, ChunkIndex, ComponentIndex)>,
 }
 
 impl World {
@@ -296,7 +297,7 @@ impl World {
             let start = unsafe { chunk.entities().len() - allocated };
             let added = unsafe { chunk.entities().iter().enumerate().skip(start) };
             for (i, e) in added {
-                let comp_id = i as ComponentID;
+                let comp_id = i as ComponentIndex;
                 entities.insert(*e, (arch_id, chunk_id, comp_id));
             }
 
@@ -369,7 +370,7 @@ impl World {
                 archetypes
                     .get(*archetype_id as usize)
                     .and_then(|archetype| archetype.chunk(*chunk_id))
-                    .and_then(|chunk| unsafe { chunk.entity_data_unchecked::<T>() })
+                    .and_then(|chunk| unsafe { chunk.entity_data_mut_unchecked::<T>() })
                     .and_then(|vec| vec.get_mut(*component_id as usize))
             })
     }
@@ -390,7 +391,7 @@ impl World {
         archetypes: &'a mut Vec<Archetype>,
         shared: &S,
         components: &C,
-    ) -> (ArchetypeID, &'a mut Archetype) {
+    ) -> (ArchetypeIndex, &'a mut Archetype) {
         match archetypes
             .iter()
             .enumerate()
@@ -398,11 +399,18 @@ impl World {
             .map(|(i, _)| i)
             .next()
         {
-            Some(i) => (i as ArchetypeID, unsafe { archetypes.get_unchecked_mut(i) }),
+            Some(i) => (i as ArchetypeIndex, unsafe {
+                archetypes.get_unchecked_mut(i)
+            }),
             None => {
-                let archetype_id = archetypes.len() as ArchetypeID;
+                let archetype_id = archetypes.len() as ArchetypeIndex;
                 let logger = logger.new(o!("archetype_id" => archetype_id));
-                let archetype = Archetype::new(logger.clone(), components.types(), shared.types());
+                let archetype = Archetype::new(
+                    archetype_id,
+                    logger.clone(),
+                    components.types(),
+                    shared.types(),
+                );
                 archetypes.push(archetype);
 
                 debug!(logger, "allocated archetype");
@@ -537,7 +545,7 @@ macro_rules! impl_component_source {
                 unsafe {
                     let entities = chunk.entities_unchecked();
                     $(
-                        let $ty = chunk.entity_data_unchecked::<$ty>().unwrap();
+                        let $ty = chunk.entity_data_mut_unchecked::<$ty>().unwrap();
                     )*
 
                     while let Some(($( $id, )*)) = { if chunk.is_full() { None } else { self.source.next() } } {

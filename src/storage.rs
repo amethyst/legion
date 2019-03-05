@@ -11,36 +11,47 @@ use std::sync::Arc;
 
 impl_downcast!(ComponentStorage);
 trait ComponentStorage: Downcast + Debug {
-    fn remove(&mut self, id: ComponentID);
+    fn remove(&mut self, id: ComponentIndex);
     fn len(&self) -> usize;
 }
 
 #[derive(Debug)]
-struct UnsafeVec<T>(UnsafeCell<Vec<T>>);
+struct StorageVec<T> {
+    version: UnsafeCell<Wrapping<usize>>,
+    data: UnsafeCell<Vec<T>>,
+}
 
-impl<T: Debug> UnsafeVec<T> {
+impl<T: Debug> StorageVec<T> {
     fn with_capacity(capacity: usize) -> Self {
-        UnsafeVec(UnsafeCell::new(Vec::<T>::with_capacity(capacity)))
+        StorageVec {
+            version: UnsafeCell::new(Wrapping(0)),
+            data: UnsafeCell::new(Vec::<T>::with_capacity(capacity)),
+        }
     }
 
-    unsafe fn inner(&self) -> &Vec<T> {
-        &(*self.0.get())
+    fn version(&self) -> usize {
+        unsafe { (*self.version.get()).0 }
     }
 
-    unsafe fn inner_mut(&self) -> &mut Vec<T> {
-        &mut (*self.0.get())
+    unsafe fn data(&self) -> &Vec<T> {
+        &(*self.data.get())
+    }
+
+    unsafe fn data_mut(&self) -> &mut Vec<T> {
+        *self.version.get() += Wrapping(1);
+        &mut (*self.data.get())
     }
 }
 
-impl<T: Debug + 'static> ComponentStorage for UnsafeVec<T> {
-    fn remove(&mut self, id: ComponentID) {
+impl<T: Debug + 'static> ComponentStorage for StorageVec<T> {
+    fn remove(&mut self, id: ComponentIndex) {
         unsafe {
-            self.inner_mut().swap_remove(id as usize);
+            self.data_mut().swap_remove(id as usize);
         }
     }
 
     fn len(&self) -> usize {
-        unsafe { self.inner_mut().len() }
+        unsafe { self.data().len() }
     }
 }
 
@@ -54,8 +65,9 @@ impl<T: SharedData> SharedComponentStorage for SharedComponentStore<T> {}
 
 #[derive(Debug)]
 pub struct Chunk {
+    id: ChunkID,
     capacity: usize,
-    entities: UnsafeVec<Entity>,
+    entities: StorageVec<Entity>,
     components: HashMap<TypeId, Box<dyn ComponentStorage>>,
     shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>,
     borrows: HashMap<TypeId, AtomicIsize>,
@@ -64,8 +76,12 @@ pub struct Chunk {
 unsafe impl Sync for Chunk {}
 
 impl Chunk {
+    pub fn id(&self) -> ChunkID {
+        self.id
+    }
+
     pub fn len(&self) -> usize {
-        unsafe { self.entities.inner().len() }
+        self.entities.len()
     }
 
     pub fn is_full(&self) -> bool {
@@ -73,18 +89,25 @@ impl Chunk {
     }
 
     pub unsafe fn entities(&self) -> &[Entity] {
-        self.entities.inner()
+        self.entities.data()
     }
 
     pub unsafe fn entities_unchecked(&self) -> &mut Vec<Entity> {
-        self.entities.inner_mut()
+        self.entities.data_mut()
     }
 
-    pub unsafe fn entity_data_unchecked<T: EntityData>(&self) -> Option<&mut Vec<T>> {
+    pub unsafe fn entity_data_unchecked<T: EntityData>(&self) -> Option<&Vec<T>> {
         self.components
             .get(&TypeId::of::<T>())
-            .and_then(|c| c.downcast_ref::<UnsafeVec<T>>())
-            .map(|c| c.inner_mut())
+            .and_then(|c| c.downcast_ref::<StorageVec<T>>())
+            .map(|c| c.data())
+    }
+
+    pub unsafe fn entity_data_mut_unchecked<T: EntityData>(&self) -> Option<&mut Vec<T>> {
+        self.components
+            .get(&TypeId::of::<T>())
+            .and_then(|c| c.downcast_ref::<StorageVec<T>>())
+            .map(|c| c.data_mut())
     }
 
     pub fn entity_data<'a, T: EntityData>(&'a self) -> Option<BorrowedSlice<'a, T>> {
@@ -98,13 +121,20 @@ impl Chunk {
     }
 
     pub fn entity_data_mut<'a, T: EntityData>(&'a self) -> Option<BorrowedMutSlice<'a, T>> {
-        match unsafe { self.entity_data_unchecked() } {
+        match unsafe { self.entity_data_mut_unchecked() } {
             Some(data) => {
                 let borrow = self.borrow_mut::<T>();
                 Some(BorrowedMutSlice::new(data, borrow))
             }
             None => None,
         }
+    }
+
+    pub fn entity_data_version<T: EntityData>(&self) -> Option<usize> {
+        self.components
+            .get(&TypeId::of::<T>())
+            .and_then(|c| c.downcast_ref::<StorageVec<T>>())
+            .map(|c| c.version())
     }
 
     pub unsafe fn shared_component<T: SharedData>(&self) -> Option<&T> {
@@ -114,15 +144,15 @@ impl Chunk {
             .map(|s| &*s.0.get())
     }
 
-    pub unsafe fn remove(&mut self, id: ComponentID) -> Option<Entity> {
+    pub unsafe fn remove(&mut self, id: ComponentIndex) -> Option<Entity> {
         let index = id as usize;
-        self.entities.inner_mut().swap_remove(index);
+        self.entities.data_mut().swap_remove(index);
         for storage in self.components.values_mut() {
             storage.remove(id);
         }
 
         if self.entities.len() > index {
-            Some(*self.entities.inner().get(index).unwrap())
+            Some(*self.entities.data().get(index).unwrap())
         } else {
             None
         }
@@ -178,7 +208,7 @@ impl ChunkBuilder {
 
     pub fn register_component<T: EntityData>(&mut self) {
         let constructor = |capacity| {
-            Box::new(UnsafeVec::<T>::with_capacity(capacity)) as Box<dyn ComponentStorage>
+            Box::new(StorageVec::<T>::with_capacity(capacity)) as Box<dyn ComponentStorage>
         };
         self.components
             .push((TypeId::of::<T>(), size_of::<T>(), Box::new(constructor)));
@@ -192,7 +222,7 @@ impl ChunkBuilder {
         );
     }
 
-    pub fn build(self) -> Chunk {
+    pub fn build(self, id: ChunkID) -> Chunk {
         let size_bytes = *self
             .components
             .iter()
@@ -201,13 +231,14 @@ impl ChunkBuilder {
             .unwrap_or(&ChunkBuilder::MAX_SIZE);
         let capacity = std::cmp::max(1, ChunkBuilder::MAX_SIZE / size_bytes);
         Chunk {
+            id,
             capacity: capacity,
             borrows: self
                 .components
                 .iter()
                 .map(|(id, _, _)| (*id, AtomicIsize::new(0)))
                 .collect(),
-            entities: UnsafeVec::with_capacity(capacity),
+            entities: StorageVec::with_capacity(capacity),
             components: self
                 .components
                 .into_iter()
@@ -220,6 +251,7 @@ impl ChunkBuilder {
 
 #[derive(Debug)]
 pub struct Archetype {
+    index: ArchetypeIndex,
     logger: slog::Logger,
     pub components: HashSet<TypeId>,
     pub shared: HashSet<TypeId>,
@@ -228,11 +260,13 @@ pub struct Archetype {
 
 impl Archetype {
     pub fn new(
+        index: ArchetypeIndex,
         logger: slog::Logger,
         components: HashSet<TypeId>,
         shared: HashSet<TypeId>,
     ) -> Archetype {
         Archetype {
+            index,
             logger,
             components,
             shared,
@@ -240,11 +274,11 @@ impl Archetype {
         }
     }
 
-    pub fn chunk(&self, id: ChunkID) -> Option<&Chunk> {
+    pub fn chunk(&self, id: ChunkIndex) -> Option<&Chunk> {
         self.chunks.get(id as usize)
     }
 
-    pub fn chunk_mut(&mut self, id: ChunkID) -> Option<&mut Chunk> {
+    pub fn chunk_mut(&mut self, id: ChunkIndex) -> Option<&mut Chunk> {
         self.chunks.get_mut(id as usize)
     }
 
@@ -264,7 +298,7 @@ impl Archetype {
         &'a mut self,
         shared: &'b S,
         components: &'c C,
-    ) -> (ChunkID, &'a mut Chunk) {
+    ) -> (ChunkIndex, &'a mut Chunk) {
         match self
             .chunks
             .iter()
@@ -273,14 +307,15 @@ impl Archetype {
             .map(|(i, _)| i)
             .next()
         {
-            Some(i) => (i as ChunkID, unsafe { self.chunks.get_unchecked_mut(i) }),
+            Some(i) => (i as ChunkIndex, unsafe { self.chunks.get_unchecked_mut(i) }),
             None => {
                 let mut builder = ChunkBuilder::new();
                 shared.configure_chunk(&mut builder);
                 components.configure_chunk(&mut builder);
-                self.chunks.push(builder.build());
 
-                let chunk_id = (self.chunks.len() - 1) as ChunkID;
+                let chunk_id = self.chunks.len() as ChunkIndex;
+                self.chunks.push(builder.build((self.index, chunk_id)));
+
                 let chunk = self.chunks.last_mut().unwrap();
 
                 debug!(self.logger, "allocated chunk"; "chunk_id" => chunk_id);

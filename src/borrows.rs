@@ -283,7 +283,7 @@ mod tests {
         let state = AtomicIsize::new(0);
         let x = 5u8;
 
-        let borrow = Borrowed::new(&x, Borrow::aquire_read(&state).unwrap());
+        let _borrow = Borrowed::new(&x, Borrow::aquire_read(&state).unwrap());
         assert_eq!(1, state.load(Ordering::SeqCst));
     }
 
@@ -293,7 +293,7 @@ mod tests {
         let x = 5u8;
 
         {
-            let borrow = Borrowed::new(&x, Borrow::aquire_read(&state).unwrap());
+            let _borrow = Borrowed::new(&x, Borrow::aquire_read(&state).unwrap());
             assert_eq!(1, state.load(Ordering::SeqCst));
         }
 
@@ -305,7 +305,7 @@ mod tests {
         let state = AtomicIsize::new(0);
         let x = 5u8;
 
-        let borrow = Borrowed::new(&x, Borrow::aquire_write(&state).unwrap());
+        let _borrow = Borrowed::new(&x, Borrow::aquire_write(&state).unwrap());
         assert_eq!(-1, state.load(Ordering::SeqCst));
     }
 
@@ -315,7 +315,7 @@ mod tests {
         let x = 5u8;
 
         {
-            let borrow = Borrowed::new(&x, Borrow::aquire_write(&state).unwrap());
+            let _borrow = Borrowed::new(&x, Borrow::aquire_write(&state).unwrap());
             assert_eq!(-1, state.load(Ordering::SeqCst));
         }
 
@@ -326,8 +326,8 @@ mod tests {
     fn read_while_reading() {
         let state = AtomicIsize::new(0);
 
-        let read = Borrow::aquire_read(&state).unwrap();
-        let read2 = Borrow::aquire_read(&state).unwrap();
+        let _read = Borrow::aquire_read(&state).unwrap();
+        let _read2 = Borrow::aquire_read(&state).unwrap();
     }
 
     #[test]
@@ -335,8 +335,8 @@ mod tests {
     fn write_while_reading() {
         let state = AtomicIsize::new(0);
 
-        let read = Borrow::aquire_read(&state).unwrap();
-        let write = Borrow::aquire_write(&state).unwrap();
+        let _read = Borrow::aquire_read(&state).unwrap();
+        let _write = Borrow::aquire_write(&state).unwrap();
     }
 
     #[test]
@@ -344,8 +344,8 @@ mod tests {
     fn read_while_writing() {
         let state = AtomicIsize::new(0);
 
-        let write = Borrow::aquire_write(&state).unwrap();
-        let read = Borrow::aquire_read(&state).unwrap();
+        let _write = Borrow::aquire_write(&state).unwrap();
+        let _read = Borrow::aquire_read(&state).unwrap();
     }
 
     #[test]
@@ -353,7 +353,7 @@ mod tests {
     fn write_while_writing() {
         let state = AtomicIsize::new(0);
 
-        let write = Borrow::aquire_write(&state).unwrap();
-        let write2 = Borrow::aquire_write(&state).unwrap();
+        let _write = Borrow::aquire_write(&state).unwrap();
+        let _write2 = Borrow::aquire_write(&state).unwrap();
     }
 }

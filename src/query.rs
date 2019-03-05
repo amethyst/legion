@@ -12,7 +12,7 @@ use crate::*;
 
 pub trait View<'a>: Sized + Send + Sync + 'static {
     type Iter: Iterator + 'a;
-    type Filter: ArchetypeFilter;
+    type Filter: Filter;
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter;
     fn filter() -> Self::Filter;
@@ -26,43 +26,24 @@ pub trait ViewElement {
 }
 
 pub trait Queryable<'a>: View<'a> {
-    fn query() -> Query<'a, Self, <Self as View<'a>>::Filter, Passthrough>;
+    fn query() -> Query<'a, Self, <Self as View<'a>>::Filter>;
 }
 
 impl<'a, T: View<'a>> Queryable<'a> for T {
-    fn query() -> Query<'a, Self, Self::Filter, Passthrough> {
+    fn query() -> Query<'a, Self, Self::Filter> {
         if !Self::validate() {
             panic!("invalid view, please ensure the view contains no duplicate component types");
         }
 
         Query {
             view: PhantomData,
-            arch_filter: Self::filter(),
-            chunk_filter: Passthrough,
+            filter: Self::filter(),
         }
     }
 }
 
-// pub trait ReadOnly {}
-
-// impl<'a, T: View<'a> + ReadOnly> Queryable<'a, &'a World> for T {
-//     fn query(world: &'a World) -> Query<'a, Self, Self::Filter, Passthrough> {
-//         if !Self::validate() {
-//             panic!("invalid view, please ensure the view contains no duplicate component types");
-//         }
-
-//         Query {
-//             view: PhantomData,
-//             arch_filter: Self::filter(),
-//             chunk_filter: Passthrough,
-//         }
-//     }
-// }
-
 #[derive(Debug)]
 pub struct Read<T: EntityData>(PhantomData<T>);
-
-// impl<T: EntityData> ReadOnly for Read<T> {}
 
 impl<'a, T: EntityData> View<'a> for Read<T> {
     type Iter = BorrowedIter<'a, Iter<'a, T>>;
@@ -127,8 +108,6 @@ impl<T: EntityData> ViewElement for Write<T> {
 
 #[derive(Debug)]
 pub struct Shared<T: SharedData>(PhantomData<T>);
-
-// impl<T: SharedData> ReadOnly for Shared<T> {}
 
 impl<'a, T: SharedData> View<'a> for Shared<T> {
     type Iter = Take<Repeat<&'a T>>;
@@ -199,8 +178,6 @@ macro_rules! impl_view_tuple {
                 $( $ty::reads::<Data>() )||*
             }
         }
-
-        // impl<$( $ty: ReadOnly ),*> ReadOnly for ($( $ty, )*) {}
     };
 }
 
@@ -210,27 +187,54 @@ impl_view_tuple!(A, B, C);
 impl_view_tuple!(A, B, C, D);
 impl_view_tuple!(A, B, C, D, E);
 
-pub trait ArchetypeFilter: Sync {
-    fn filter(&self, archetype: &Archetype) -> bool;
+pub trait Filter: Sync + Sized {
+    fn filter_archetype(&self, archetype: &Archetype) -> bool;
+    fn filter_chunk(&self, chunk: &Chunk) -> bool;
+
+    fn or<T: Filter>(self, filter: T) -> Or<(Self, T)> {
+        Or {
+            filters: (self, filter),
+        }
+    }
+
+    fn and<T: Filter>(self, filter: T) -> And<(Self, T)> {
+        And {
+            filters: (self, filter),
+        }
+    }
 }
 
-pub trait ChunkFilter: Sync {
-    fn filter(&self, chunk: &Chunk) -> bool;
+pub mod filter {
+    use super::*;
+
+    pub fn entity_data<T: EntityData>() -> EntityDataFilter<T> {
+        EntityDataFilter::new()
+    }
+
+    pub fn shared_data<T: SharedData>() -> SharedDataFilter<T> {
+        SharedDataFilter::new()
+    }
+
+    pub fn shared_data_filter<'a, T: SharedData>(data: &'a T) -> SharedDataValueFilter<'a, T> {
+        SharedDataValueFilter::new(data)
+    }
+
+    pub fn changed<T: EntityData>() -> EntityDataChangedFilter<T> {
+        EntityDataChangedFilter::new()
+    }
 }
 
 #[derive(Debug)]
 pub struct Passthrough;
 
-impl ArchetypeFilter for Passthrough {
+impl Filter for Passthrough {
     #[inline]
-    fn filter(&self, _: &Archetype) -> bool {
+    fn filter_archetype(&self, _: &Archetype) -> bool {
         true
     }
-}
 
-impl ChunkFilter for Passthrough {
     #[inline]
-    fn filter(&self, _: &Chunk) -> bool {
+    fn filter_chunk(&self, _: &Chunk) -> bool {
         true
     }
 }
@@ -240,17 +244,15 @@ pub struct Not<F> {
     filter: F,
 }
 
-impl<F: ArchetypeFilter> ArchetypeFilter for Not<F> {
+impl<F: Filter> Filter for Not<F> {
     #[inline]
-    fn filter(&self, archetype: &Archetype) -> bool {
-        !self.filter.filter(archetype)
+    fn filter_archetype(&self, archetype: &Archetype) -> bool {
+        !self.filter.filter_archetype(archetype)
     }
-}
 
-impl<F: ChunkFilter> ChunkFilter for Not<F> {
     #[inline]
-    fn filter(&self, chunk: &Chunk) -> bool {
-        !self.filter.filter(chunk)
+    fn filter_chunk(&self, chunk: &Chunk) -> bool {
+        !self.filter.filter_chunk(chunk)
     }
 }
 
@@ -261,21 +263,19 @@ pub struct And<T> {
 
 macro_rules! impl_and_filter {
     ( $( $ty: ident ),* ) => {
-        impl<$( $ty: ArchetypeFilter ),*> ArchetypeFilter for And<($( $ty, )*)> {
+        impl<$( $ty: Filter ),*> Filter for And<($( $ty, )*)> {
             #[inline]
-            fn filter(&self, archetype: &Archetype) -> bool {
+            fn filter_archetype(&self, archetype: &Archetype) -> bool {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                $( $ty.filter(archetype) )&&*
+                $( $ty.filter_archetype(archetype) )&&*
             }
-        }
 
-        impl<$( $ty: ChunkFilter ),*> ChunkFilter for And<($( $ty, )*)> {
             #[inline]
-            fn filter(&self, chunk: &Chunk) -> bool {
+            fn filter_chunk(&self, chunk: &Chunk) -> bool {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                $( $ty.filter(chunk) )&&*
+                $( $ty.filter_chunk(chunk) )&&*
             }
         }
     };
@@ -289,6 +289,38 @@ impl_and_filter!(A, B, C, D, E);
 impl_and_filter!(A, B, C, D, E, F);
 
 #[derive(Debug)]
+pub struct Or<T> {
+    filters: T,
+}
+
+macro_rules! impl_or_filter {
+    ( $( $ty: ident ),* ) => {
+        impl<$( $ty: Filter ),*> Filter for Or<($( $ty, )*)> {
+            #[inline]
+            fn filter_archetype(&self, archetype: &Archetype) -> bool {
+                #![allow(non_snake_case)]
+                let ($( $ty, )*) = &self.filters;
+                $( $ty.filter_archetype(archetype) )||*
+            }
+
+            #[inline]
+            fn filter_chunk(&self, chunk: &Chunk) -> bool {
+                #![allow(non_snake_case)]
+                let ($( $ty, )*) = &self.filters;
+                $( $ty.filter_chunk(chunk) )||*
+            }
+        }
+    };
+}
+
+impl_or_filter!(A);
+impl_or_filter!(A, B);
+impl_or_filter!(A, B, C);
+impl_or_filter!(A, B, C, D);
+impl_or_filter!(A, B, C, D, E);
+impl_or_filter!(A, B, C, D, E, F);
+
+#[derive(Debug)]
 pub struct EntityDataFilter<T>(PhantomData<T>);
 
 impl<T: EntityData> EntityDataFilter<T> {
@@ -297,10 +329,15 @@ impl<T: EntityData> EntityDataFilter<T> {
     }
 }
 
-impl<T: EntityData> ArchetypeFilter for EntityDataFilter<T> {
+impl<T: EntityData> Filter for EntityDataFilter<T> {
     #[inline]
-    fn filter(&self, archetype: &Archetype) -> bool {
+    fn filter_archetype(&self, archetype: &Archetype) -> bool {
         archetype.has_component::<T>()
+    }
+
+    #[inline]
+    fn filter_chunk(&self, _: &Chunk) -> bool {
+        true
     }
 }
 
@@ -313,10 +350,15 @@ impl<T: SharedData> SharedDataFilter<T> {
     }
 }
 
-impl<T: SharedData> ArchetypeFilter for SharedDataFilter<T> {
+impl<T: SharedData> Filter for SharedDataFilter<T> {
     #[inline]
-    fn filter(&self, archetype: &Archetype) -> bool {
+    fn filter_archetype(&self, archetype: &Archetype) -> bool {
         archetype.has_shared::<T>()
+    }
+
+    #[inline]
+    fn filter_chunk(&self, _: &Chunk) -> bool {
+        true
     }
 }
 
@@ -331,107 +373,74 @@ impl<'a, T: SharedData> SharedDataValueFilter<'a, T> {
     }
 }
 
-impl<'a, T: SharedData> ChunkFilter for SharedDataValueFilter<'a, T> {
+impl<'a, T: SharedData> Filter for SharedDataValueFilter<'a, T> {
     #[inline]
-    fn filter(&self, chunk: &Chunk) -> bool {
+    fn filter_archetype(&self, _: &Archetype) -> bool {
+        true
+    }
+
+    #[inline]
+    fn filter_chunk(&self, chunk: &Chunk) -> bool {
         unsafe { chunk.shared_component::<T>() }.map_or(false, |s| s == self.value)
     }
 }
 
-#[derive(Debug)]
-pub struct Query<'a, V: View<'a>, A: ArchetypeFilter, C: ChunkFilter> {
-    view: PhantomData<&'a V>,
-    arch_filter: A,
-    chunk_filter: C,
+pub struct EntityDataChangedFilter<T: EntityData> {
+    versions: Mutex<HashMap<(ArchetypeIndex, ChunkIndex), usize>>,
+    phantom: PhantomData<T>,
 }
 
-impl<'a, V: View<'a>, A: ArchetypeFilter, C: ChunkFilter> Query<'a, V, A, C>
+impl<T: EntityData> EntityDataChangedFilter<T> {
+    fn new() -> EntityDataChangedFilter<T> {
+        EntityDataChangedFilter {
+            versions: Mutex::new(HashMap::new()),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<T: EntityData> Filter for EntityDataChangedFilter<T> {
+    #[inline]
+    fn filter_archetype(&self, _: &Archetype) -> bool {
+        true
+    }
+
+    fn filter_chunk(&self, chunk: &Chunk) -> bool {
+        use std::collections::hash_map::Entry;
+        if let Some(version) = chunk.entity_data_version::<T>() {
+            let mut versions = self.versions.lock();
+            match versions.entry(chunk.id()) {
+                Entry::Occupied(mut entry) => {
+                    let existing = entry.get_mut();
+                    let changed = *existing != version;
+                    *existing = version;
+                    changed
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(version);
+                    true
+                }
+            }
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Query<'a, V: View<'a>, F: Filter> {
+    view: PhantomData<&'a V>,
+    filter: F,
+}
+
+impl<'a, V: View<'a>, F: Filter> Query<'a, V, F>
 where
-    A: 'a,
-    C: 'a,
+    F: 'a,
 {
-    pub fn with_entity_data<T: EntityData>(self) -> Query<'a, V, And<(A, EntityDataFilter<T>)>, C> {
+    pub fn filter<T: Filter>(self, filter: T) -> Query<'a, V, And<(F, T)>> {
         Query {
             view: self.view,
-            arch_filter: And {
-                filters: (self.arch_filter, EntityDataFilter::new()),
-            },
-            chunk_filter: self.chunk_filter,
-        }
-    }
-
-    pub fn without_entity_data<T: EntityData>(
-        self,
-    ) -> Query<'a, V, And<(A, Not<EntityDataFilter<T>>)>, C> {
-        Query {
-            view: self.view,
-            arch_filter: And {
-                filters: (
-                    self.arch_filter,
-                    Not {
-                        filter: EntityDataFilter::new(),
-                    },
-                ),
-            },
-            chunk_filter: self.chunk_filter,
-        }
-    }
-
-    pub fn with_shared_data<T: SharedData>(self) -> Query<'a, V, And<(A, SharedDataFilter<T>)>, C> {
-        Query {
-            view: self.view,
-            arch_filter: And {
-                filters: (self.arch_filter, SharedDataFilter::new()),
-            },
-            chunk_filter: self.chunk_filter,
-        }
-    }
-
-    pub fn without_shared_data<T: SharedData>(
-        self,
-    ) -> Query<'a, V, And<(A, Not<SharedDataFilter<T>>)>, C> {
-        Query {
-            view: self.view,
-            arch_filter: And {
-                filters: (
-                    self.arch_filter,
-                    Not {
-                        filter: SharedDataFilter::new(),
-                    },
-                ),
-            },
-            chunk_filter: self.chunk_filter,
-        }
-    }
-
-    pub fn with_shared_data_value<'b, T: SharedData>(
-        self,
-        value: &'b T,
-    ) -> Query<'a, V, A, And<(C, SharedDataValueFilter<'b, T>)>> {
-        Query {
-            view: self.view,
-            arch_filter: self.arch_filter,
-            chunk_filter: And {
-                filters: (self.chunk_filter, SharedDataValueFilter::new(value)),
-            },
-        }
-    }
-
-    pub fn without_shared_data_value<'b, T: SharedData>(
-        self,
-        value: &'b T,
-    ) -> Query<'a, V, A, And<(C, Not<SharedDataValueFilter<'b, T>>)>> {
-        Query {
-            view: self.view,
-            arch_filter: self.arch_filter,
-            chunk_filter: And {
-                filters: (
-                    self.chunk_filter,
-                    Not {
-                        filter: SharedDataValueFilter::new(value),
-                    },
-                ),
-            },
+            filter: self.filter.and(filter),
         }
     }
 
@@ -439,14 +448,13 @@ where
         &'b self,
         world: &'a World,
     ) -> impl Iterator<Item = ChunkView<'a, V>> + 'b {
-        let arch = &self.arch_filter;
-        let chunk = &self.chunk_filter;
+        let filter = &self.filter;
         world
             .archetypes
             .iter()
-            .filter(move |a| arch.filter(a))
+            .filter(move |a| filter.filter_archetype(a))
             .flat_map(|a| a.chunks())
-            .filter(move |c| chunk.filter(c))
+            .filter(move |c| filter.filter_chunk(c))
             .map(|c| ChunkView {
                 chunk: c,
                 view: PhantomData,
@@ -467,9 +475,9 @@ where
         self.iter_chunks(world).flat_map(|mut c| c.iter_entities())
     }
 
-    pub fn for_each<'b, F>(&'b self, world: &'a World, mut f: F)
+    pub fn for_each<'b, T>(&'b self, world: &'a World, mut f: T)
     where
-        F: Fn(<<V as View<'a>>::Iter as Iterator>::Item),
+        T: Fn(<<V as View<'a>>::Iter as Iterator>::Item),
     {
         self.iter(world).for_each(&mut f);
     }
@@ -479,14 +487,13 @@ where
         &'b self,
         world: &'a World,
     ) -> impl ParallelIterator<Item = ChunkView<'a, V>> + 'b {
-        let arch = &self.arch_filter;
-        let chunk = &self.chunk_filter;
+        let filter = &self.filter;
         let archetypes = &world.archetypes;
         archetypes
             .par_iter()
-            .filter(move |a| arch.filter(a))
+            .filter(move |a| filter.filter_archetype(a))
             .flat_map(|a| a.chunks())
-            .filter(move |c| chunk.filter(c))
+            .filter(move |c| filter.filter_chunk(c))
             .map(|c| ChunkView {
                 chunk: c,
                 view: PhantomData,
@@ -494,9 +501,9 @@ where
     }
 
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each<'b, F>(&'b self, world: &'a World, f: F)
+    pub fn par_for_each<'b, T>(&'b self, world: &'a World, f: T)
     where
-        F: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
+        T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
     {
         self.par_iter_chunks(world).for_each(|mut chunk| {
             for data in chunk.iter() {

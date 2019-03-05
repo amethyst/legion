@@ -1,3 +1,4 @@
+use hydro::filter::*;
 use hydro::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -363,6 +364,126 @@ fn query_read_shared_data() {
     let mut count = 0;
     for marker in query.iter(&world) {
         assert_eq!(&Static, marker);
+        count += 1;
+    }
+
+    assert_eq!(components.len(), count);
+}
+
+#[test]
+fn query_on_changed_first() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5));
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
+
+    for (i, e) in world
+        .insert_from(shared, components.clone())
+        .iter()
+        .enumerate()
+    {
+        if let Some((pos, rot)) = components.get(i) {
+            expected.insert(*e, (*pos, *rot));
+        }
+    }
+
+    use filter::*;
+    let query = Read::<Pos>::query().filter(changed::<Pos>().or(changed::<Rot>()));
+
+    let mut count = 0;
+    for (entity, pos) in query.iter_entities(&world) {
+        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        count += 1;
+    }
+
+    assert_eq!(components.len(), count);
+}
+
+#[test]
+fn query_on_changed_no_changes() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5));
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
+
+    for (i, e) in world
+        .insert_from(shared, components.clone())
+        .iter()
+        .enumerate()
+    {
+        if let Some((pos, rot)) = components.get(i) {
+            expected.insert(*e, (*pos, *rot));
+        }
+    }
+
+    let query = Read::<Pos>::query().filter(changed::<Pos>());
+
+    let mut count = 0;
+    for (entity, pos) in query.iter_entities(&world) {
+        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        count += 1;
+    }
+
+    assert_eq!(components.len(), count);
+
+    count = 0;
+    for (entity, pos) in query.iter_entities(&world) {
+        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        count += 1;
+    }
+
+    assert_eq!(0, count);
+}
+
+#[test]
+fn query_on_changed_self_changes() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5));
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
+
+    for (i, e) in world
+        .insert_from(shared, components.clone())
+        .iter()
+        .enumerate()
+    {
+        if let Some((pos, rot)) = components.get(i) {
+            expected.insert(*e, (*pos, *rot));
+        }
+    }
+
+    let query = Write::<Pos>::query().filter(changed::<Pos>());
+
+    let mut count = 0;
+    for (entity, pos) in query.iter_entities(&world) {
+        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        *pos = Pos(1., 1., 1.);
+        count += 1;
+    }
+
+    assert_eq!(components.len(), count);
+
+    count = 0;
+    for pos in query.iter(&world) {
+        assert_eq!(&Pos(1., 1., 1.), pos);
         count += 1;
     }
 
