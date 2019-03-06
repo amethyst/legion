@@ -25,17 +25,17 @@ pub trait ViewElement {
     type Component;
 }
 
-pub trait Queryable<'a>: View<'a> {
-    fn query() -> Query<'a, Self, <Self as View<'a>>::Filter>;
+pub trait IntoQuery<'a>: View<'a> {
+    fn query() -> QueryDef<'a, Self, <Self as View<'a>>::Filter>;
 }
 
-impl<'a, T: View<'a>> Queryable<'a> for T {
-    fn query() -> Query<'a, Self, Self::Filter> {
+impl<'a, T: View<'a>> IntoQuery<'a> for T {
+    fn query() -> QueryDef<'a, Self, Self::Filter> {
         if !Self::validate() {
             panic!("invalid view, please ensure the view contains no duplicate component types");
         }
 
-        Query {
+        QueryDef {
             view: PhantomData,
             filter: Self::filter(),
         }
@@ -427,61 +427,197 @@ impl<T: EntityData> Filter for EntityDataChangedFilter<T> {
     }
 }
 
+pub struct ChunkViewIter<'data, 'filter, V: View<'data>, F: Filter> {
+    archetypes: Iter<'data, Archetype>,
+    filter: &'filter F,
+    frontier: Option<Iter<'data, Chunk>>,
+    view: PhantomData<V>,
+}
+
+impl<'filter, 'data, F, V> Iterator for ChunkViewIter<'data, 'filter, V, F>
+where
+    F: Filter,
+    V: View<'data>,
+{
+    type Item = ChunkView<'data, V>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(ref mut inner) = self.frontier {
+                for x in &mut inner.next() {
+                    if self.filter.filter_chunk(x) {
+                        return Some(ChunkView {
+                            chunk: x,
+                            view: PhantomData,
+                        });
+                    }
+                }
+            }
+            loop {
+                match self.archetypes.next() {
+                    Some(archetype) => {
+                        if self.filter.filter_archetype(archetype) {
+                            self.frontier = Some(archetype.chunks().iter());
+                            break;
+                        }
+                    }
+                    None => return None,
+                }
+            }
+        }
+    }
+}
+
+pub struct ChunkDataIter<'data, 'query, V: View<'data>, F: Filter> {
+    iter: ChunkViewIter<'data, 'query, V, F>,
+    frontier: Option<V::Iter>,
+    view: PhantomData<V>,
+}
+
+impl<'data, 'query, F: Filter, V: View<'data>> Iterator for ChunkDataIter<'data, 'query, V, F> {
+    type Item = <V::Iter as Iterator>::Item;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(ref mut inner) = self.frontier {
+                if let elt @ Some(_) = inner.next() {
+                    return elt;
+                }
+            }
+            match self.iter.next() {
+                Some(mut inner) => self.frontier = Some(inner.iter()),
+                None => return None,
+            }
+        }
+    }
+}
+
+pub struct ChunkEntityIter<'data, 'query, V: View<'data>, F: Filter> {
+    iter: ChunkViewIter<'data, 'query, V, F>,
+    frontier: Option<ZipEntities<'data, V>>,
+    view: PhantomData<V>,
+}
+
+impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'data, 'query, V, F> {
+    type Item = (Entity, <V::Iter as Iterator>::Item);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(ref mut inner) = self.frontier {
+                if let elt @ Some(_) = inner.next() {
+                    return elt;
+                }
+            }
+            match self.iter.next() {
+                Some(mut inner) => self.frontier = Some(inner.iter_entities()),
+                None => return None,
+            }
+        }
+    }
+}
+
+pub trait Query<'data> {
+    type Filter: Filter;
+    type View: View<'data>;
+
+    fn filter<T: Filter>(self, filter: T) -> QueryDef<'data, Self::View, And<(Self::Filter, T)>>;
+
+    fn iter_chunks<'a>(
+        &'a self,
+        world: &'data World,
+    ) -> ChunkViewIter<'data, 'a, Self::View, Self::Filter>;
+
+    fn iter<'a>(
+        &'a self,
+        world: &'data World,
+    ) -> ChunkDataIter<'data, 'a, Self::View, Self::Filter>;
+
+    fn iter_entities<'a>(
+        &'a self,
+        world: &'data World,
+    ) -> ChunkEntityIter<'data, 'a, Self::View, Self::Filter>;
+
+    fn for_each<'a, T>(&'a self, world: &'data World, mut f: T)
+    where
+        T: Fn(<<Self::View as View<'data>>::Iter as Iterator>::Item),
+    {
+        self.iter(world).for_each(&mut f);
+    }
+
+    #[cfg(feature = "par-iter")]
+    fn par_for_each<'a, T>(&'a self, world: &'data World, f: T)
+    where
+        T: Fn(<<Self::View as View<'data>>::Iter as Iterator>::Item) + Send + Sync;
+}
+
 #[derive(Debug)]
-pub struct Query<'a, V: View<'a>, F: Filter> {
+pub struct QueryDef<'a, V: View<'a>, F: Filter> {
     view: PhantomData<&'a V>,
     filter: F,
 }
 
-impl<'a, V: View<'a>, F: Filter> Query<'a, V, F>
-where
-    F: 'a,
-{
-    pub fn filter<T: Filter>(self, filter: T) -> Query<'a, V, And<(F, T)>> {
-        Query {
+impl<'data, V: View<'data>, F: Filter> Query<'data> for QueryDef<'data, V, F> {
+    type View = V;
+    type Filter = F;
+
+    fn filter<T: Filter>(self, filter: T) -> QueryDef<'data, Self::View, And<(Self::Filter, T)>> {
+        QueryDef {
             view: self.view,
             filter: self.filter.and(filter),
         }
     }
 
-    pub fn iter_chunks<'b>(
-        &'b self,
-        world: &'a World,
-    ) -> impl Iterator<Item = ChunkView<'a, V>> + 'b {
-        let filter = &self.filter;
-        world
-            .archetypes
-            .iter()
-            .filter(move |a| filter.filter_archetype(a))
-            .flat_map(|a| a.chunks())
-            .filter(move |c| filter.filter_chunk(c))
-            .map(|c| ChunkView {
-                chunk: c,
-                view: PhantomData,
-            })
+    fn iter_chunks<'a>(
+        &'a self,
+        world: &'data World,
+    ) -> ChunkViewIter<'data, 'a, Self::View, Self::Filter> {
+        ChunkViewIter {
+            archetypes: world.archetypes.iter(),
+            filter: &self.filter,
+            frontier: None,
+            view: PhantomData,
+        }
     }
 
-    pub fn iter<'b>(
-        &'b self,
-        world: &'a World,
-    ) -> impl Iterator<Item = <<V as View<'a>>::Iter as Iterator>::Item> + 'b {
-        self.iter_chunks(world).flat_map(|mut c| c.iter())
+    fn iter<'a>(
+        &'a self,
+        world: &'data World,
+    ) -> ChunkDataIter<'data, 'a, Self::View, Self::Filter> {
+        ChunkDataIter {
+            iter: self.iter_chunks(world),
+            frontier: None,
+            view: PhantomData,
+        }
     }
 
-    pub fn iter_entities<'b>(
-        &'b self,
-        world: &'a World,
-    ) -> impl Iterator<Item = (Entity, <<V as View<'a>>::Iter as Iterator>::Item)> + 'b {
-        self.iter_chunks(world).flat_map(|mut c| c.iter_entities())
+    fn iter_entities<'a>(
+        &'a self,
+        world: &'data World,
+    ) -> ChunkEntityIter<'data, 'a, Self::View, Self::Filter> {
+        ChunkEntityIter {
+            iter: self.iter_chunks(world),
+            frontier: None,
+            view: PhantomData,
+        }
     }
 
-    pub fn for_each<'b, T>(&'b self, world: &'a World, mut f: T)
+    #[cfg(feature = "par-iter")]
+    fn par_for_each<'a, T>(&'a self, world: &'data World, f: T)
     where
-        T: Fn(<<V as View<'a>>::Iter as Iterator>::Item),
+        T: Fn(<<V as View<'data>>::Iter as Iterator>::Item) + Send + Sync,
     {
-        self.iter(world).for_each(&mut f);
+        self.par_iter_chunks(world).for_each(|mut chunk| {
+            for data in chunk.iter() {
+                f(data);
+            }
+        });
     }
+}
 
+impl<'a, V: View<'a>, F: Filter> QueryDef<'a, V, F> {
     #[cfg(feature = "par-iter")]
     pub fn par_iter_chunks<'b>(
         &'b self,
@@ -499,17 +635,33 @@ where
                 view: PhantomData,
             })
     }
+}
 
-    #[cfg(feature = "par-iter")]
-    pub fn par_for_each<'b, T>(&'b self, world: &'a World, f: T)
-    where
-        T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
-    {
-        self.par_iter_chunks(world).for_each(|mut chunk| {
-            for data in chunk.iter() {
-                f(data);
-            }
-        });
+pub struct ZipEntities<'data, V: View<'data>> {
+    entities: &'data [Entity],
+    data: <V as View<'data>>::Iter,
+    index: usize,
+    view: PhantomData<V>,
+}
+
+impl<'data, V: View<'data>> Iterator for ZipEntities<'data, V> {
+    type Item = (Entity, <V::Iter as Iterator>::Item);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(data) = self.data.next() {
+            let i = self.index;
+            self.index += 1;
+            unsafe { Some((*self.entities.get_unchecked(i), data)) }
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.entities.len() - self.index;
+        (len, Some(len))
     }
 }
 
@@ -520,7 +672,7 @@ pub struct ChunkView<'a, V: View<'a>> {
 }
 
 impl<'a, V: View<'a>> ChunkView<'a, V> {
-    pub fn entities(&self) -> &[Entity] {
+    pub fn entities(&self) -> &'a [Entity] {
         unsafe { self.chunk.entities() }
     }
 
@@ -528,15 +680,12 @@ impl<'a, V: View<'a>> ChunkView<'a, V> {
         V::fetch(self.chunk)
     }
 
-    pub fn iter_entities(
-        &mut self,
-    ) -> impl Iterator<Item = (Entity, <<V as View<'a>>::Iter as Iterator>::Item)> + 'a {
-        unsafe {
-            self.chunk
-                .entities()
-                .iter()
-                .map(|e| *e)
-                .zip(V::fetch(self.chunk))
+    pub fn iter_entities(&mut self) -> ZipEntities<'a, V> {
+        ZipEntities {
+            entities: self.entities(),
+            data: V::fetch(self.chunk),
+            index: 0,
+            view: PhantomData,
         }
     }
 
