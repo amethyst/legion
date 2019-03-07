@@ -15,6 +15,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::Peekable;
 use std::num::Wrapping;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 
 pub type EntityIndex = u16;
@@ -22,7 +23,27 @@ pub type EntityVersion = Wrapping<u16>;
 pub type ComponentIndex = u16;
 pub type ChunkIndex = u16;
 pub type ArchetypeIndex = u16;
-pub type ChunkID = (ArchetypeIndex, ChunkIndex);
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct WorldId(u16);
+
+impl WorldId {
+    fn archetype(&self, id: u16) -> ArchetypeId {
+        ArchetypeId(self.0, id)
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ArchetypeId(u16, u16);
+
+impl ArchetypeId {
+    fn chunk(&self, id: u16) -> ChunkId {
+        ChunkId(self.0, self.1, id)
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct ChunkId(u16, u16, u16);
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Entity {
@@ -50,6 +71,7 @@ pub struct Universe {
     name: String,
     logger: slog::Logger,
     allocator: Arc<Mutex<BlockAllocator>>,
+    next_id: AtomicU16,
 }
 
 impl Universe {
@@ -65,11 +87,13 @@ impl Universe {
             name,
             logger,
             allocator: Arc::from(Mutex::new(BlockAllocator::new())),
+            next_id: AtomicU16::new(0),
         }
     }
 
     pub fn create_world(&self) -> World {
         World::new(
+            WorldId(self.next_id.fetch_add(1, Ordering::SeqCst)),
             self.logger.clone(),
             EntityAllocator::new(self.allocator.clone()),
         )
@@ -222,6 +246,11 @@ impl EntityAllocator {
     pub fn clear_allocation_buffer(&mut self) {
         self.entity_buffer.clear();
     }
+
+    pub fn merge(&mut self, mut other: EntityAllocator) {
+        assert!(Arc::ptr_eq(&self.allocator, &other.allocator));
+        self.blocks.append(&mut other.blocks);
+    }
 }
 
 impl Drop for EntityAllocator {
@@ -234,25 +263,49 @@ impl Drop for EntityAllocator {
 
 #[derive(Debug)]
 pub struct World {
-    name: String,
+    id: WorldId,
     logger: slog::Logger,
     allocator: EntityAllocator,
     archetypes: Vec<Archetype>,
     entities: HashMap<Entity, (ArchetypeIndex, ChunkIndex, ComponentIndex)>,
+    next_arch_id: u16,
 }
 
 impl World {
-    fn new(logger: slog::Logger, allocator: EntityAllocator) -> Self {
-        let name = names::Generator::default().next().unwrap();
-        let logger = logger.new(o!("world" => name.clone()));
+    fn new(id: WorldId, logger: slog::Logger, allocator: EntityAllocator) -> Self {
+        let logger = logger.new(o!("world_id" => id.0));
 
         info!(logger, "starting world");
         World {
-            name,
+            id,
             logger,
             allocator: allocator,
             archetypes: Vec::new(),
             entities: HashMap::new(),
+            next_arch_id: 0,
+        }
+    }
+
+    pub fn merge(&mut self, mut other: World) {
+        self.allocator.merge(other.allocator);
+
+        let first_new_index = self.archetypes.len();
+        self.archetypes.append(&mut other.archetypes);
+
+        for archetype_index in first_new_index..self.archetypes.len() {
+            let archetype = self.archetypes.get(archetype_index).unwrap();
+            for (chunk_index, chunk) in archetype.chunks().iter().enumerate() {
+                for (entity_index, entity) in unsafe { chunk.entities().iter().enumerate() } {
+                    self.entities.insert(
+                        *entity,
+                        (
+                            archetype_index as ArchetypeIndex,
+                            chunk_index as ChunkIndex,
+                            entity_index as ComponentIndex,
+                        ),
+                    );
+                }
+            }
         }
     }
 
@@ -276,37 +329,40 @@ impl World {
         S: SharedDataSet,
         T: ComponentSource,
     {
-        let allocator = &mut self.allocator;
-        let entities = &mut self.entities;
-
-        allocator.clear_allocation_buffer();
-
         // find or create archetype
-        let (arch_id, archetype) =
-            World::archetype(&self.logger, &mut self.archetypes, &shared, &components);
+        let (arch_index, archetype) = World::prep_archetype(
+            &self.id,
+            &mut self.archetypes,
+            &mut self.next_arch_id,
+            &mut self.logger,
+            &shared,
+            &components,
+        );
+
+        self.allocator.clear_allocation_buffer();
 
         // insert components into chunks
         while !components.is_empty() {
             // find or create chunk
-            let (chunk_id, chunk) = archetype.get_or_create_chunk(&shared, &components);
+            let (chunk_index, chunk) = archetype.get_or_create_chunk(&shared, &components);
 
             // insert as many components as we can into the chunk
-            let allocated = components.write(chunk, allocator);
+            let allocated = components.write(chunk, &mut self.allocator);
 
             // record new entity locations
             let start = unsafe { chunk.entities().len() - allocated };
             let added = unsafe { chunk.entities().iter().enumerate().skip(start) };
             for (i, e) in added {
                 let comp_id = i as ComponentIndex;
-                entities.insert(*e, (arch_id, chunk_id, comp_id));
+                self.entities.insert(*e, (arch_index, chunk_index, comp_id));
             }
 
             trace!(
                 self.logger,
                 "appended {entity_count} entities into chunk",
                 entity_count = allocated;
-                "archetype_id" => arch_id,
-                "chunk_id" => chunk_id
+                "archetype_id" => arch_index,
+                "chunk_id" => chunk_index
             );
         }
 
@@ -314,7 +370,7 @@ impl World {
             self.logger,
             "inserted {entity_count_added} entities",
             entity_count_added = self.allocator.allocation_buffer().len();
-            "archetype_id" => arch_id
+            "archetype_id" => arch_index
         );
 
         self.allocator.allocation_buffer()
@@ -386,9 +442,11 @@ impl World {
             })
     }
 
-    fn archetype<'a, S: SharedDataSet, C: ComponentSource>(
-        logger: &slog::Logger,
+    fn prep_archetype<'a, S: SharedDataSet, C: ComponentSource>(
+        id: &WorldId,
         archetypes: &'a mut Vec<Archetype>,
+        next_arch_id: &mut u16,
+        logger: &slog::Logger,
         shared: &S,
         components: &C,
     ) -> (ArchetypeIndex, &'a mut Archetype) {
@@ -403,8 +461,10 @@ impl World {
                 archetypes.get_unchecked_mut(i)
             }),
             None => {
-                let archetype_id = archetypes.len() as ArchetypeIndex;
-                let logger = logger.new(o!("archetype_id" => archetype_id));
+                let archetype_id = id.archetype(*next_arch_id);
+                let logger = logger.new(o!("archetype_id" => archetype_id.1));
+                *next_arch_id += 1;
+
                 let archetype = Archetype::new(
                     archetype_id,
                     logger.clone(),
@@ -415,7 +475,10 @@ impl World {
 
                 debug!(logger, "allocated archetype");
 
-                (archetype_id, archetypes.last_mut().unwrap())
+                (
+                    (archetypes.len() - 1) as ArchetypeIndex,
+                    archetypes.last_mut().unwrap(),
+                )
             }
         }
     }

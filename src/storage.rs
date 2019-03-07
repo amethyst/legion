@@ -65,7 +65,7 @@ impl<T: SharedData> SharedComponentStorage for SharedComponentStore<T> {}
 
 #[derive(Debug)]
 pub struct Chunk {
-    id: ChunkID,
+    id: ChunkId,
     capacity: usize,
     entities: StorageVec<Entity>,
     components: HashMap<TypeId, Box<dyn ComponentStorage>>,
@@ -76,7 +76,7 @@ pub struct Chunk {
 unsafe impl Sync for Chunk {}
 
 impl Chunk {
-    pub fn id(&self) -> ChunkID {
+    pub fn id(&self) -> ChunkId {
         self.id
     }
 
@@ -222,7 +222,7 @@ impl ChunkBuilder {
         );
     }
 
-    pub fn build(self, id: ChunkID) -> Chunk {
+    pub fn build(self, id: ChunkId) -> Chunk {
         let size_bytes = *self
             .components
             .iter()
@@ -251,8 +251,9 @@ impl ChunkBuilder {
 
 #[derive(Debug)]
 pub struct Archetype {
-    index: ArchetypeIndex,
+    id: ArchetypeId,
     logger: slog::Logger,
+    next_chunk_id: u16,
     pub components: HashSet<TypeId>,
     pub shared: HashSet<TypeId>,
     pub chunks: Vec<Chunk>,
@@ -260,14 +261,15 @@ pub struct Archetype {
 
 impl Archetype {
     pub fn new(
-        index: ArchetypeIndex,
+        id: ArchetypeId,
         logger: slog::Logger,
         components: HashSet<TypeId>,
         shared: HashSet<TypeId>,
     ) -> Archetype {
         Archetype {
-            index,
+            id,
             logger,
+            next_chunk_id: 0,
             components,
             shared,
             chunks: Vec::new(),
@@ -313,14 +315,16 @@ impl Archetype {
                 shared.configure_chunk(&mut builder);
                 components.configure_chunk(&mut builder);
 
-                let chunk_id = self.chunks.len() as ChunkIndex;
-                self.chunks.push(builder.build((self.index, chunk_id)));
+                let chunk_id = self.id.chunk(self.next_chunk_id);
+                let chunk_index = self.chunks.len() as ChunkIndex;
+                self.next_chunk_id += 1;
+                self.chunks.push(builder.build(chunk_id));
 
                 let chunk = self.chunks.last_mut().unwrap();
 
-                debug!(self.logger, "allocated chunk"; "chunk_id" => chunk_id);
+                debug!(self.logger, "allocated chunk"; "chunk_id" => chunk_id.2);
 
-                (chunk_id, chunk)
+                (chunk_index, chunk)
             }
         }
     }

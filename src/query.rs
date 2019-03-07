@@ -239,6 +239,26 @@ impl Filter for Passthrough {
     }
 }
 
+impl<Rhs: Filter> std::ops::BitAnd<Rhs> for Passthrough {
+    type Output = And<(Self, Rhs)>;
+
+    fn bitand(self, rhs: Rhs) -> Self::Output {
+        And {
+            filters: (self, rhs),
+        }
+    }
+}
+
+impl<Rhs: Filter> std::ops::BitOr<Rhs> for Passthrough {
+    type Output = Or<(Self, Rhs)>;
+
+    fn bitor(self, rhs: Rhs) -> Self::Output {
+        Or {
+            filters: (self, rhs),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Not<F> {
     filter: F,
@@ -253,6 +273,26 @@ impl<F: Filter> Filter for Not<F> {
     #[inline]
     fn filter_chunk(&self, chunk: &Chunk) -> bool {
         !self.filter.filter_chunk(chunk)
+    }
+}
+
+impl<F: Filter, Rhs: Filter> std::ops::BitAnd<Rhs> for Not<F> {
+    type Output = And<(Self, Rhs)>;
+
+    fn bitand(self, rhs: Rhs) -> Self::Output {
+        And {
+            filters: (self, rhs),
+        }
+    }
+}
+
+impl<F: Filter, Rhs: Filter> std::ops::BitOr<Rhs> for Not<F> {
+    type Output = Or<(Self, Rhs)>;
+
+    fn bitor(self, rhs: Rhs) -> Self::Output {
+        Or {
+            filters: (self, rhs),
+        }
     }
 }
 
@@ -276,6 +316,28 @@ macro_rules! impl_and_filter {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
                 $( $ty.filter_chunk(chunk) )&&*
+            }
+        }
+
+        impl<$( $ty: Filter ),*, Rhs: Filter> std::ops::BitAnd<Rhs> for And<($( $ty, )*)> {
+            type Output = And<($( $ty, )* Rhs)>;
+
+            fn bitand(self, rhs: Rhs) -> Self::Output {
+                #![allow(non_snake_case)]
+                let ($( $ty, )*) = self.filters;
+                And {
+                    filters: ($( $ty, )* rhs),
+                }
+            }
+        }
+
+        impl<$( $ty: Filter ),*, Rhs: Filter> std::ops::BitOr<Rhs> for And<($( $ty, )*)> {
+            type Output = Or<(Self, Rhs)>;
+
+            fn bitor(self, rhs: Rhs) -> Self::Output {
+                Or {
+                    filters: (self, rhs),
+                }
             }
         }
     };
@@ -310,6 +372,28 @@ macro_rules! impl_or_filter {
                 $( $ty.filter_chunk(chunk) )||*
             }
         }
+
+        impl<$( $ty: Filter ),*, Rhs: Filter> std::ops::BitAnd<Rhs> for Or<($( $ty, )*)> {
+            type Output = And<(Self, Rhs)>;
+
+            fn bitand(self, rhs: Rhs) -> Self::Output {
+                And {
+                    filters: (self, rhs),
+                }
+            }
+        }
+
+        impl<$( $ty: Filter ),*, Rhs: Filter> std::ops::BitOr<Rhs> for Or<($( $ty, )*)> {
+            type Output = Or<($( $ty, )* Rhs)>;
+
+            fn bitor(self, rhs: Rhs) -> Self::Output {
+                #![allow(non_snake_case)]
+                let ($( $ty, )*) = self.filters;
+                Or {
+                    filters: ($( $ty, )* rhs),
+                }
+            }
+        }
     };
 }
 
@@ -341,6 +425,26 @@ impl<T: EntityData> Filter for EntityDataFilter<T> {
     }
 }
 
+impl<Rhs: Filter, T: EntityData> std::ops::BitAnd<Rhs> for EntityDataFilter<T> {
+    type Output = And<(Self, Rhs)>;
+
+    fn bitand(self, rhs: Rhs) -> Self::Output {
+        And {
+            filters: (self, rhs),
+        }
+    }
+}
+
+impl<Rhs: Filter, T: EntityData> std::ops::BitOr<Rhs> for EntityDataFilter<T> {
+    type Output = Or<(Self, Rhs)>;
+
+    fn bitor(self, rhs: Rhs) -> Self::Output {
+        Or {
+            filters: (self, rhs),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SharedDataFilter<T>(PhantomData<T>);
 
@@ -359,6 +463,26 @@ impl<T: SharedData> Filter for SharedDataFilter<T> {
     #[inline]
     fn filter_chunk(&self, _: &Chunk) -> bool {
         true
+    }
+}
+
+impl<Rhs: Filter, T: SharedData> std::ops::BitAnd<Rhs> for SharedDataFilter<T> {
+    type Output = And<(Self, Rhs)>;
+
+    fn bitand(self, rhs: Rhs) -> Self::Output {
+        And {
+            filters: (self, rhs),
+        }
+    }
+}
+
+impl<Rhs: Filter, T: SharedData> std::ops::BitOr<Rhs> for SharedDataFilter<T> {
+    type Output = Or<(Self, Rhs)>;
+
+    fn bitor(self, rhs: Rhs) -> Self::Output {
+        Or {
+            filters: (self, rhs),
+        }
     }
 }
 
@@ -385,8 +509,28 @@ impl<'a, T: SharedData> Filter for SharedDataValueFilter<'a, T> {
     }
 }
 
+impl<'a, Rhs: Filter, T: SharedData> std::ops::BitAnd<Rhs> for SharedDataValueFilter<'a, T> {
+    type Output = And<(Self, Rhs)>;
+
+    fn bitand(self, rhs: Rhs) -> Self::Output {
+        And {
+            filters: (self, rhs),
+        }
+    }
+}
+
+impl<'a, Rhs: Filter, T: SharedData> std::ops::BitOr<Rhs> for SharedDataValueFilter<'a, T> {
+    type Output = Or<(Self, Rhs)>;
+
+    fn bitor(self, rhs: Rhs) -> Self::Output {
+        Or {
+            filters: (self, rhs),
+        }
+    }
+}
+
 pub struct EntityDataChangedFilter<T: EntityData> {
-    versions: Mutex<HashMap<(ArchetypeIndex, ChunkIndex), usize>>,
+    versions: Mutex<HashMap<ChunkId, usize>>,
     phantom: PhantomData<T>,
 }
 
@@ -423,6 +567,26 @@ impl<T: EntityData> Filter for EntityDataChangedFilter<T> {
             }
         } else {
             false
+        }
+    }
+}
+
+impl<Rhs: Filter, T: EntityData> std::ops::BitAnd<Rhs> for EntityDataChangedFilter<T> {
+    type Output = And<(Self, Rhs)>;
+
+    fn bitand(self, rhs: Rhs) -> Self::Output {
+        And {
+            filters: (self, rhs),
+        }
+    }
+}
+
+impl<Rhs: Filter, T: EntityData> std::ops::BitOr<Rhs> for EntityDataChangedFilter<T> {
+    type Output = Or<(Self, Rhs)>;
+
+    fn bitor(self, rhs: Rhs) -> Self::Output {
+        Or {
+            filters: (self, rhs),
         }
     }
 }
