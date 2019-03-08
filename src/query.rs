@@ -1,3 +1,4 @@
+use fnv::FnvHashMap;
 use itertools::multizip;
 use std::iter::Repeat;
 use std::iter::Take;
@@ -530,14 +531,14 @@ impl<'a, Rhs: Filter, T: SharedData> std::ops::BitOr<Rhs> for SharedDataValueFil
 }
 
 pub struct EntityDataChangedFilter<T: EntityData> {
-    versions: Mutex<HashMap<ChunkId, usize>>,
+    versions: Mutex<FnvHashMap<ChunkId, usize>>,
     phantom: PhantomData<T>,
 }
 
 impl<T: EntityData> EntityDataChangedFilter<T> {
     fn new() -> EntityDataChangedFilter<T> {
         EntityDataChangedFilter {
-            versions: Mutex::new(HashMap::new()),
+            versions: Mutex::new(FnvHashMap::default()),
             phantom: PhantomData,
         }
     }

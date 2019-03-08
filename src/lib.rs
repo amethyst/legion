@@ -6,11 +6,10 @@ pub use crate::borrows::*;
 pub use crate::query::*;
 pub use crate::storage::*;
 
+use fnv::FnvHashSet;
 use parking_lot::Mutex;
 use slog::{debug, info, o, trace, Drain};
 use std::any::TypeId;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::Peekable;
@@ -137,6 +136,7 @@ struct EntityBlock {
     len: usize,
     versions: Vec<EntityVersion>,
     free: Vec<EntityIndex>,
+    locations: Vec<(ArchetypeIndex, ChunkIndex, ComponentIndex)>,
 }
 
 impl EntityBlock {
@@ -144,13 +144,24 @@ impl EntityBlock {
         EntityBlock {
             start: start,
             len: len,
-            versions: Vec::new(),
+            versions: Vec::with_capacity(len),
             free: Vec::new(),
+            locations: std::iter::repeat((
+                0 as ArchetypeIndex,
+                0 as ChunkIndex,
+                0 as ComponentIndex,
+            ))
+            .take(len)
+            .collect(),
         }
     }
 
     fn index(&self, index: EntityIndex) -> usize {
         (index - self.start) as usize
+    }
+
+    pub fn in_range(&self, index: EntityIndex) -> bool {
+        index >= self.start && index < (self.start + self.len as u16)
     }
 
     pub fn is_alive(&self, entity: &Entity) -> Option<bool> {
@@ -184,6 +195,28 @@ impl EntityBlock {
         } else {
             None
         }
+    }
+
+    pub fn set_location(
+        &mut self,
+        entity: &EntityIndex,
+        location: (ArchetypeIndex, ChunkIndex, ComponentIndex),
+    ) {
+        assert!(*entity >= self.start);
+        let index = (entity - self.start) as usize;
+        *self.locations.get_mut(index).unwrap() = location;
+    }
+
+    pub fn get_location(
+        &self,
+        entity: &EntityIndex,
+    ) -> Option<(ArchetypeIndex, ChunkIndex, ComponentIndex)> {
+        if *entity < self.start {
+            return None;
+        }
+
+        let index = (entity - self.start) as usize;
+        self.locations.get(index).map(|x| *x)
     }
 }
 
@@ -239,6 +272,31 @@ impl EntityAllocator {
             .unwrap_or(false)
     }
 
+    pub fn set_location(
+        &mut self,
+        entity: &EntityIndex,
+        location: (ArchetypeIndex, ChunkIndex, ComponentIndex),
+    ) {
+        self.blocks
+            .iter_mut()
+            .rev()
+            .filter(|b| b.in_range(*entity))
+            .next()
+            .unwrap()
+            .set_location(entity, location);
+    }
+
+    pub fn get_location(
+        &self,
+        entity: &EntityIndex,
+    ) -> Option<(ArchetypeIndex, ChunkIndex, ComponentIndex)> {
+        self.blocks
+            .iter()
+            .filter(|b| b.in_range(*entity))
+            .next()
+            .and_then(|b| b.get_location(entity))
+    }
+
     pub fn allocation_buffer(&self) -> &[Entity] {
         self.entity_buffer.as_slice()
     }
@@ -267,7 +325,7 @@ pub struct World {
     logger: slog::Logger,
     allocator: EntityAllocator,
     archetypes: Vec<Archetype>,
-    entities: HashMap<Entity, (ArchetypeIndex, ChunkIndex, ComponentIndex)>,
+    //entities: FnvHashMap<Entity, (ArchetypeIndex, ChunkIndex, ComponentIndex)>,
     next_arch_id: u16,
 }
 
@@ -281,7 +339,7 @@ impl World {
             logger,
             allocator: allocator,
             archetypes: Vec::new(),
-            entities: HashMap::new(),
+            //entities: FnvHashMap::with_capacity_and_hasher(1024, Default::default()),
             next_arch_id: 0,
         }
     }
@@ -296,8 +354,8 @@ impl World {
             let archetype = self.archetypes.get(archetype_index).unwrap();
             for (chunk_index, chunk) in archetype.chunks().iter().enumerate() {
                 for (entity_index, entity) in unsafe { chunk.entities().iter().enumerate() } {
-                    self.entities.insert(
-                        *entity,
+                    self.allocator.set_location(
+                        &entity.index,
                         (
                             archetype_index as ArchetypeIndex,
                             chunk_index as ChunkIndex,
@@ -354,7 +412,8 @@ impl World {
             let added = unsafe { chunk.entities().iter().enumerate().skip(start) };
             for (i, e) in added {
                 let comp_id = i as ComponentIndex;
-                self.entities.insert(*e, (arch_index, chunk_index, comp_id));
+                self.allocator
+                    .set_location(&e.index, (arch_index, chunk_index, comp_id));
             }
 
             trace!(
@@ -381,12 +440,7 @@ impl World {
 
         if deleted {
             // lookup entity location
-            let ids = self
-                .entities
-                .get(&entity)
-                .map(|(archetype_id, chunk_id, component_id)| {
-                    (*archetype_id, *chunk_id, *component_id)
-                });
+            let ids = self.allocator.get_location(&entity.index);
 
             // swap remove with last entity in chunk
             let swapped = ids.and_then(|(archetype_id, chunk_id, component_id)| {
@@ -398,7 +452,7 @@ impl World {
 
             // record swapped entity's new location
             if let Some(swapped) = swapped {
-                self.entities.insert(swapped, ids.unwrap());
+                self.allocator.set_location(&swapped.index, ids.unwrap());
             }
         }
 
@@ -406,38 +460,37 @@ impl World {
     }
 
     pub fn component<'a, T: EntityData>(&'a self, entity: Entity) -> Option<Borrowed<'a, T>> {
-        self.entities
-            .get(&entity)
-            .and_then(|(archetype_id, chunk_id, component_id)| {
+        self.allocator.get_location(&entity.index).and_then(
+            |(archetype_id, chunk_id, component_id)| {
                 self.archetypes
-                    .get(*archetype_id as usize)
-                    .and_then(|archetype| archetype.chunk(*chunk_id))
+                    .get(archetype_id as usize)
+                    .and_then(|archetype| archetype.chunk(chunk_id))
                     .and_then(|chunk| chunk.entity_data::<T>())
-                    .and_then(|vec| vec.single(*component_id as usize))
-            })
+                    .and_then(|vec| vec.single(component_id as usize))
+            },
+        )
     }
 
     pub fn component_mut<T: EntityData>(&mut self, entity: Entity) -> Option<&mut T> {
-        let entities = &self.entities;
         let archetypes = &self.archetypes;
-        entities
-            .get(&entity)
-            .and_then(|(archetype_id, chunk_id, component_id)| {
+        self.allocator.get_location(&entity.index).and_then(
+            |(archetype_id, chunk_id, component_id)| {
                 archetypes
-                    .get(*archetype_id as usize)
-                    .and_then(|archetype| archetype.chunk(*chunk_id))
+                    .get(archetype_id as usize)
+                    .and_then(|archetype| archetype.chunk(chunk_id))
                     .and_then(|chunk| unsafe { chunk.entity_data_mut_unchecked::<T>() })
-                    .and_then(|vec| vec.get_mut(*component_id as usize))
-            })
+                    .and_then(|vec| vec.get_mut(component_id as usize))
+            },
+        )
     }
 
     pub fn shared<T: SharedData>(&self, entity: Entity) -> Option<&T> {
-        self.entities
-            .get(&entity)
+        self.allocator
+            .get_location(&entity.index)
             .and_then(|(archetype_id, chunk_id, _)| {
                 self.archetypes
-                    .get(*archetype_id as usize)
-                    .and_then(|archetype| archetype.chunk(*chunk_id))
+                    .get(archetype_id as usize)
+                    .and_then(|archetype| archetype.chunk(chunk_id))
                     .and_then(|chunk| unsafe { chunk.shared_component::<T>() })
             })
     }
@@ -488,7 +541,7 @@ pub trait SharedDataSet {
     fn is_archetype_match(&self, archetype: &Archetype) -> bool;
     fn is_chunk_match(&self, chunk: &Chunk) -> bool;
     fn configure_chunk(&self, chunk: &mut ChunkBuilder);
-    fn types(&self) -> HashSet<TypeId>;
+    fn types(&self) -> FnvHashSet<TypeId>;
 }
 
 pub trait ComponentDataSet: Sized {
@@ -500,7 +553,7 @@ pub trait ComponentDataSet: Sized {
 pub trait ComponentSource {
     fn is_archetype_match(&self, archetype: &Archetype) -> bool;
     fn configure_chunk(&self, chunk: &mut ChunkBuilder);
-    fn types(&self) -> HashSet<TypeId>;
+    fn types(&self) -> FnvHashSet<TypeId>;
     fn is_empty(&mut self) -> bool;
     fn write<'a>(&mut self, chunk: &'a mut Chunk, allocator: &mut EntityAllocator) -> usize;
 }
@@ -516,8 +569,8 @@ impl SharedDataSet for () {
 
     fn configure_chunk(&self, _: &mut ChunkBuilder) {}
 
-    fn types(&self) -> HashSet<TypeId> {
-        HashSet::new()
+    fn types(&self) -> FnvHashSet<TypeId> {
+        FnvHashSet::default()
     }
 }
 
@@ -547,7 +600,7 @@ macro_rules! impl_shared_data_set {
                 $( chunk.register_shared($ty.clone()); )*
             }
 
-            fn types(&self) -> HashSet<TypeId> {
+            fn types(&self) -> FnvHashSet<TypeId> {
                 [$( TypeId::of::<$ty>() ),*].iter().cloned().collect()
             }
         }
@@ -580,7 +633,7 @@ macro_rules! impl_component_source {
         where I: Iterator<Item=($( $ty, )*)>,
               $( $ty: EntityData ),*
         {
-            fn types(&self) -> HashSet<TypeId> {
+            fn types(&self) -> FnvHashSet<TypeId> {
                 [$( TypeId::of::<$ty>() ),*].iter().cloned().collect()
             }
 
@@ -747,8 +800,8 @@ mod tests {
         let mut allocator_a = EntityAllocator::new(blocks.clone());
         let mut allocator_b = EntityAllocator::new(blocks.clone());
 
-        let mut entities_a = HashSet::<Entity>::new();
-        let mut entities_b = HashSet::<Entity>::new();
+        let mut entities_a = FnvHashSet::<Entity>::default();
+        let mut entities_b = FnvHashSet::<Entity>::default();
 
         for _ in 0..5 {
             entities_a.extend((0..1500).map(|_| allocator_a.create_entity()));

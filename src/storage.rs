@@ -1,9 +1,8 @@
 use crate::*;
 use downcast_rs::{impl_downcast, Downcast};
+use fnv::{FnvHashMap, FnvHashSet};
 use std::any::TypeId;
 use std::cell::UnsafeCell;
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::mem::size_of;
 use std::sync::atomic::AtomicIsize;
@@ -68,9 +67,9 @@ pub struct Chunk {
     id: ChunkId,
     capacity: usize,
     entities: StorageVec<Entity>,
-    components: HashMap<TypeId, Box<dyn ComponentStorage>>,
-    shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>,
-    borrows: HashMap<TypeId, AtomicIsize>,
+    components: FnvHashMap<TypeId, Box<dyn ComponentStorage>>,
+    shared: FnvHashMap<TypeId, Arc<dyn SharedComponentStorage>>,
+    borrows: FnvHashMap<TypeId, AtomicIsize>,
 }
 
 unsafe impl Sync for Chunk {}
@@ -193,7 +192,7 @@ pub struct ChunkBuilder {
         usize,
         Box<dyn FnMut(usize) -> Box<dyn ComponentStorage>>,
     )>,
-    shared: HashMap<TypeId, Arc<dyn SharedComponentStorage>>,
+    shared: FnvHashMap<TypeId, Arc<dyn SharedComponentStorage>>,
 }
 
 impl ChunkBuilder {
@@ -202,7 +201,7 @@ impl ChunkBuilder {
     pub fn new() -> ChunkBuilder {
         ChunkBuilder {
             components: Vec::new(),
-            shared: HashMap::new(),
+            shared: FnvHashMap::default(),
         }
     }
 
@@ -254,8 +253,8 @@ pub struct Archetype {
     id: ArchetypeId,
     logger: slog::Logger,
     next_chunk_id: u16,
-    pub components: HashSet<TypeId>,
-    pub shared: HashSet<TypeId>,
+    pub components: FnvHashSet<TypeId>,
+    pub shared: FnvHashSet<TypeId>,
     pub chunks: Vec<Chunk>,
 }
 
@@ -263,8 +262,8 @@ impl Archetype {
     pub fn new(
         id: ArchetypeId,
         logger: slog::Logger,
-        components: HashSet<TypeId>,
-        shared: HashSet<TypeId>,
+        components: FnvHashSet<TypeId>,
+        shared: FnvHashSet<TypeId>,
     ) -> Archetype {
         Archetype {
             id,
