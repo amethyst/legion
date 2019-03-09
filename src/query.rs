@@ -230,7 +230,7 @@ pub mod filter {
         SharedDataFilter::new()
     }
 
-    pub fn shared_data_filter<'a, T: SharedData>(data: &'a T) -> SharedDataValueFilter<'a, T> {
+    pub fn shared_data_value<'a, T: SharedData>(data: &'a T) -> SharedDataValueFilter<'a, T> {
         SharedDataValueFilter::new(data)
     }
 
@@ -251,6 +251,14 @@ impl Filter for Passthrough {
     #[inline]
     fn filter_chunk(&self, _: &Chunk) -> bool {
         true
+    }
+}
+
+impl std::ops::Not for Passthrough {
+    type Output = Not<Self>;
+
+    fn not(self) -> Self::Output {
+        Not { filter: self }
     }
 }
 
@@ -288,6 +296,14 @@ impl<F: Filter> Filter for Not<F> {
     #[inline]
     fn filter_chunk(&self, chunk: &Chunk) -> bool {
         !self.filter.filter_chunk(chunk)
+    }
+}
+
+impl<T: Filter> std::ops::Not for Not<T> {
+    type Output = T;
+
+    fn not(self) -> Self::Output {
+        self.filter
     }
 }
 
@@ -331,6 +347,14 @@ macro_rules! impl_and_filter {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
                 $( $ty.filter_chunk(chunk) )&&*
+            }
+        }
+
+        impl<$( $ty: Filter ),*> std::ops::Not for And<($( $ty, )*)> {
+            type Output = Not<Self>;
+
+            fn not(self) -> Self::Output {
+                Not { filter: self }
             }
         }
 
@@ -388,6 +412,14 @@ macro_rules! impl_or_filter {
             }
         }
 
+        impl<$( $ty: Filter ),*> std::ops::Not for Or<($( $ty, )*)> {
+            type Output = Not<Self>;
+
+            fn not(self) -> Self::Output {
+                Not { filter: self }
+            }
+        }
+
         impl<$( $ty: Filter ),*, Rhs: Filter> std::ops::BitAnd<Rhs> for Or<($( $ty, )*)> {
             type Output = And<(Self, Rhs)>;
 
@@ -440,6 +472,14 @@ impl<T: EntityData> Filter for EntityDataFilter<T> {
     }
 }
 
+impl<T: EntityData> std::ops::Not for EntityDataFilter<T> {
+    type Output = Not<Self>;
+
+    fn not(self) -> Self::Output {
+        Not { filter: self }
+    }
+}
+
 impl<Rhs: Filter, T: EntityData> std::ops::BitAnd<Rhs> for EntityDataFilter<T> {
     type Output = And<(Self, Rhs)>;
 
@@ -478,6 +518,14 @@ impl<T: SharedData> Filter for SharedDataFilter<T> {
     #[inline]
     fn filter_chunk(&self, _: &Chunk) -> bool {
         true
+    }
+}
+
+impl<T: SharedData> std::ops::Not for SharedDataFilter<T> {
+    type Output = Not<Self>;
+
+    fn not(self) -> Self::Output {
+        Not { filter: self }
     }
 }
 
@@ -524,6 +572,14 @@ impl<'a, T: SharedData> Filter for SharedDataValueFilter<'a, T> {
     }
 }
 
+impl<'a, T: SharedData> std::ops::Not for SharedDataValueFilter<'a, T> {
+    type Output = Not<Self>;
+
+    fn not(self) -> Self::Output {
+        Not { filter: self }
+    }
+}
+
 impl<'a, Rhs: Filter, T: SharedData> std::ops::BitAnd<Rhs> for SharedDataValueFilter<'a, T> {
     type Output = And<(Self, Rhs)>;
 
@@ -555,6 +611,14 @@ impl<T: EntityData> EntityDataChangedFilter<T> {
             versions: Mutex::new(FnvHashMap::default()),
             phantom: PhantomData,
         }
+    }
+}
+
+impl<T: EntityData> std::ops::Not for EntityDataChangedFilter<T> {
+    type Output = Not<Self>;
+
+    fn not(self) -> Self::Output {
+        Not { filter: self }
     }
 }
 
