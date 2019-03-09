@@ -1,6 +1,7 @@
 [package]
 name = "legion"
 version = "0.1.0"
+description = "High performance entity component system (ECS) library"
 authors = ["Thomas Gillen <thomas.gillen@googlemail.com>"]
 repository = "https://github.com/TomGillen/legion"
 keywords = ["ecs", "game"]
