@@ -1,4 +1,4 @@
-use hydro::*;
+use legion::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Pos(f32, f32, f32);

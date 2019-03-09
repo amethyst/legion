@@ -3,7 +3,7 @@
 extern crate test;
 use test::Bencher;
 
-use hydro::*;
+use legion::*;
 
 pub const N_POS_PER_VEL: usize = 10;
 pub const N_POS: usize = 10000;
@@ -20,7 +20,7 @@ pub struct Velocity {
     pub dy: f32,
 }
 
-fn build() -> World {
+fn build() -> (World, impl Query<View = (Write<Position>, Read<Velocity>)>) {
     let universe = Universe::new(None);
     let mut world = universe.create_world();
 
@@ -38,7 +38,7 @@ fn build() -> World {
             .take(pos_with_vel),
     );
 
-    world
+    (world, <(Write<Position>, Read<Velocity>)>::query())
 }
 
 #[bench]
@@ -48,8 +48,7 @@ fn bench_build(b: &mut Bencher) {
 
 #[bench]
 fn bench_update(b: &mut Bencher) {
-    let world = build();
-    let query = <(Write<Position>, Read<Velocity>)>::query();
+    let (world, query) = build();
 
     b.iter(|| {
         for (pos, vel) in query.iter(&world) {
@@ -61,8 +60,7 @@ fn bench_update(b: &mut Bencher) {
 
 #[bench]
 fn bench_par_update(b: &mut Bencher) {
-    let world = build();
-    let query = <(Write<Position>, Read<Velocity>)>::query();
+    let (world, query) = build();
 
     b.iter(|| {
         query.par_for_each(&world, |(pos, vel)| {

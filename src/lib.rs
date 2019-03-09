@@ -17,8 +17,8 @@ use std::num::Wrapping;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 
-pub type EntityIndex = u16;
-pub type EntityVersion = Wrapping<u16>;
+pub type EntityIndex = u32;
+pub type EntityVersion = Wrapping<u32>;
 pub type ComponentIndex = u16;
 pub type ChunkIndex = u16;
 pub type ArchetypeIndex = u16;
@@ -140,7 +140,7 @@ struct EntityBlock {
 }
 
 impl EntityBlock {
-    pub fn new(start: u16, len: usize) -> EntityBlock {
+    pub fn new(start: EntityIndex, len: usize) -> EntityBlock {
         EntityBlock {
             start: start,
             len: len,
@@ -161,7 +161,7 @@ impl EntityBlock {
     }
 
     pub fn in_range(&self, index: EntityIndex) -> bool {
-        index >= self.start && index < (self.start + self.len as u16)
+        index >= self.start && index < (self.start + self.len as u32)
     }
 
     pub fn is_alive(&self, entity: &Entity) -> Option<bool> {

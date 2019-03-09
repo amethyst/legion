@@ -11,12 +11,16 @@ use rayon::prelude::*;
 
 use crate::*;
 
-pub trait View<'a>: Sized + Send + Sync + 'static {
-    type Iter: Iterator + 'a;
+pub trait DefaultFilter {
     type Filter: Filter;
 
-    fn fetch(chunk: &'a Chunk) -> Self::Iter;
     fn filter() -> Self::Filter;
+}
+
+pub trait View<'a>: Sized + Send + Sync + 'static {
+    type Iter: Iterator + 'a;
+
+    fn fetch(chunk: &'a Chunk) -> Self::Iter;
     fn validate() -> bool;
     fn reads<T: EntityData>() -> bool;
     fn writes<T: EntityData>() -> bool;
@@ -26,12 +30,12 @@ pub trait ViewElement {
     type Component;
 }
 
-pub trait IntoQuery<'a>: View<'a> {
-    fn query() -> QueryDef<'a, Self, <Self as View<'a>>::Filter>;
+pub trait IntoQuery: DefaultFilter + for<'a> View<'a> {
+    fn query() -> QueryDef<Self, <Self as DefaultFilter>::Filter>;
 }
 
-impl<'a, T: View<'a>> IntoQuery<'a> for T {
-    fn query() -> QueryDef<'a, Self, Self::Filter> {
+impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
+    fn query() -> QueryDef<Self, <Self as DefaultFilter>::Filter> {
         if !Self::validate() {
             panic!("invalid view, please ensure the view contains no duplicate component types");
         }
@@ -46,16 +50,19 @@ impl<'a, T: View<'a>> IntoQuery<'a> for T {
 #[derive(Debug)]
 pub struct Read<T: EntityData>(PhantomData<T>);
 
-impl<'a, T: EntityData> View<'a> for Read<T> {
-    type Iter = BorrowedIter<'a, Iter<'a, T>>;
+impl<T: EntityData> DefaultFilter for Read<T> {
     type Filter = EntityDataFilter<T>;
-
-    fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        chunk.entity_data().unwrap().into_iter()
-    }
 
     fn filter() -> Self::Filter {
         EntityDataFilter::new()
+    }
+}
+
+impl<'a, T: EntityData> View<'a> for Read<T> {
+    type Iter = BorrowedIter<'a, Iter<'a, T>>;
+
+    fn fetch(chunk: &'a Chunk) -> Self::Iter {
+        chunk.entity_data().unwrap().into_iter()
     }
 
     fn validate() -> bool {
@@ -78,16 +85,18 @@ impl<T: EntityData> ViewElement for Read<T> {
 #[derive(Debug)]
 pub struct Write<T: EntityData>(PhantomData<T>);
 
+impl<T: EntityData> DefaultFilter for Write<T> {
+    type Filter = EntityDataFilter<T>;
+    fn filter() -> Self::Filter {
+        EntityDataFilter::new()
+    }
+}
+
 impl<'a, T: EntityData> View<'a> for Write<T> {
     type Iter = BorrowedIter<'a, IterMut<'a, T>>;
-    type Filter = EntityDataFilter<T>;
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter {
         chunk.entity_data_mut().unwrap().into_iter()
-    }
-
-    fn filter() -> Self::Filter {
-        EntityDataFilter::new()
     }
 
     fn validate() -> bool {
@@ -110,19 +119,21 @@ impl<T: EntityData> ViewElement for Write<T> {
 #[derive(Debug)]
 pub struct Shared<T: SharedData>(PhantomData<T>);
 
+impl<T: SharedData> DefaultFilter for Shared<T> {
+    type Filter = SharedDataFilter<T>;
+    fn filter() -> Self::Filter {
+        SharedDataFilter::new()
+    }
+}
+
 impl<'a, T: SharedData> View<'a> for Shared<T> {
     type Iter = Take<Repeat<&'a T>>;
-    type Filter = SharedDataFilter<T>;
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter {
         unsafe {
             let data: &T = chunk.shared_component().unwrap();
             std::iter::repeat(data).take(chunk.len())
         }
-    }
-
-    fn filter() -> Self::Filter {
-        SharedDataFilter::new()
     }
 
     fn validate() -> bool {
@@ -144,18 +155,21 @@ impl<T: SharedData> ViewElement for Shared<T> {
 
 macro_rules! impl_view_tuple {
     ( $( $ty: ident ),* ) => {
-        impl<'a, $( $ty: ViewElement + View<'a> ),* > View<'a> for ($( $ty, )*) {
-            type Iter = itertools::Zip<($( $ty::Iter, )*)>;
+        impl<$( $ty: ViewElement + DefaultFilter ),*> DefaultFilter for ($( $ty, )*) {
             type Filter = And<($( $ty::Filter, )*)>;
-
-            fn fetch(chunk: &'a Chunk) -> Self::Iter {
-                multizip(($( $ty::fetch(chunk), )*))
-            }
 
             fn filter() -> Self::Filter {
                 And {
                     filters: ($( $ty::filter(), )*)
                 }
+            }
+        }
+
+        impl<'a, $( $ty: ViewElement + View<'a> ),* > View<'a> for ($( $ty, )*) {
+            type Iter = itertools::Zip<($( $ty::Iter, )*)>;
+
+            fn fetch(chunk: &'a Chunk) -> Self::Iter {
+                multizip(($( $ty::fetch(chunk), )*))
             }
 
             fn validate() -> bool {
@@ -684,28 +698,28 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
     }
 }
 
-pub trait Query<'data> {
+pub trait Query {
     type Filter: Filter;
-    type View: View<'data>;
+    type View: for<'data> View<'data>;
 
-    fn filter<T: Filter>(self, filter: T) -> QueryDef<'data, Self::View, And<(Self::Filter, T)>>;
+    fn filter<T: Filter>(self, filter: T) -> QueryDef<Self::View, And<(Self::Filter, T)>>;
 
-    fn iter_chunks<'a>(
+    fn iter_chunks<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, Self::View, Self::Filter>;
 
-    fn iter<'a>(
+    fn iter<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkDataIter<'data, 'a, Self::View, Self::Filter>;
 
-    fn iter_entities<'a>(
+    fn iter_entities<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkEntityIter<'data, 'a, Self::View, Self::Filter>;
 
-    fn for_each<'a, T>(&'a self, world: &'data World, mut f: T)
+    fn for_each<'a, 'data, T>(&'a self, world: &'data World, mut f: T)
     where
         T: Fn(<<Self::View as View<'data>>::Iter as Iterator>::Item),
     {
@@ -713,29 +727,29 @@ pub trait Query<'data> {
     }
 
     #[cfg(feature = "par-iter")]
-    fn par_for_each<'a, T>(&'a self, world: &'data World, f: T)
+    fn par_for_each<'a, T>(&'a self, world: &'a World, f: T)
     where
-        T: Fn(<<Self::View as View<'data>>::Iter as Iterator>::Item) + Send + Sync;
+        T: Fn(<<Self::View as View<'a>>::Iter as Iterator>::Item) + Send + Sync;
 }
 
 #[derive(Debug)]
-pub struct QueryDef<'a, V: View<'a>, F: Filter> {
-    view: PhantomData<&'a V>,
+pub struct QueryDef<V: for<'a> View<'a>, F: Filter> {
+    view: PhantomData<V>,
     filter: F,
 }
 
-impl<'data, V: View<'data>, F: Filter> Query<'data> for QueryDef<'data, V, F> {
+impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
     type View = V;
     type Filter = F;
 
-    fn filter<T: Filter>(self, filter: T) -> QueryDef<'data, Self::View, And<(Self::Filter, T)>> {
+    fn filter<T: Filter>(self, filter: T) -> QueryDef<Self::View, And<(Self::Filter, T)>> {
         QueryDef {
             view: self.view,
             filter: self.filter.and(filter),
         }
     }
 
-    fn iter_chunks<'a>(
+    fn iter_chunks<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, Self::View, Self::Filter> {
@@ -747,7 +761,7 @@ impl<'data, V: View<'data>, F: Filter> Query<'data> for QueryDef<'data, V, F> {
         }
     }
 
-    fn iter<'a>(
+    fn iter<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkDataIter<'data, 'a, Self::View, Self::Filter> {
@@ -758,7 +772,7 @@ impl<'data, V: View<'data>, F: Filter> Query<'data> for QueryDef<'data, V, F> {
         }
     }
 
-    fn iter_entities<'a>(
+    fn iter_entities<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkEntityIter<'data, 'a, Self::View, Self::Filter> {
@@ -770,9 +784,9 @@ impl<'data, V: View<'data>, F: Filter> Query<'data> for QueryDef<'data, V, F> {
     }
 
     #[cfg(feature = "par-iter")]
-    fn par_for_each<'a, T>(&'a self, world: &'data World, f: T)
+    fn par_for_each<'a, T>(&'a self, world: &'a World, f: T)
     where
-        T: Fn(<<V as View<'data>>::Iter as Iterator>::Item) + Send + Sync,
+        T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
     {
         self.par_iter_chunks(world).for_each(|mut chunk| {
             for data in chunk.iter() {
@@ -782,12 +796,12 @@ impl<'data, V: View<'data>, F: Filter> Query<'data> for QueryDef<'data, V, F> {
     }
 }
 
-impl<'a, V: View<'a>, F: Filter> QueryDef<'a, V, F> {
+impl<V: for<'a> View<'a>, F: Filter> QueryDef<V, F> {
     #[cfg(feature = "par-iter")]
-    pub fn par_iter_chunks<'b>(
-        &'b self,
+    pub fn par_iter_chunks<'a>(
+        &'a self,
         world: &'a World,
-    ) -> impl ParallelIterator<Item = ChunkView<'a, V>> + 'b {
+    ) -> impl ParallelIterator<Item = ChunkView<'a, V>> {
         let filter = &self.filter;
         let archetypes = &world.archetypes;
         archetypes
