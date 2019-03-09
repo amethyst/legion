@@ -1,6 +1,6 @@
 [package]
 name = "legion"
-version = "0.1.0"
+version = "0.1.1"
 description = "High performance entity component system (ECS) library"
 authors = ["Thomas Gillen <thomas.gillen@googlemail.com>"]
 repository = "https://github.com/TomGillen/legion"
@@ -11,7 +11,7 @@ license = "MIT"
 edition = "2018"
 
 [badges]
-travis-ci = { repository = "https://travis-ci.org/TomGillen/legion", branch = "master" }
+travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
 default = ["par-iter", "serde"]

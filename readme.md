@@ -1,6 +1,13 @@
 # Legion
 
-[![Build Status](https://travis-ci.org/TomGillen/legion.svg?branch=master)](https://travis-ci.org/TomGillen/legion)
+[![Build Status][build_img]][build_lnk] [![Crates.io][crates_img]][crates_lnk] [![Docs.rs][doc_img]][doc_lnk]
+
+[build_img]: https://img.shields.io/travis/TomGillen/legion/master.svg
+[build_lnk]: https://travis-ci.org/TomGillen/legion
+[crates_img]: https://img.shields.io/crates/v/legion.svg
+[crates_lnk]: https://crates.io/crates/legion
+[doc_img]: https://docs.rs/legion/badge.svg
+[doc_lnk]: https://docs.rs/legion
 
 Legion aims to be a feature rich high performance ECS library for Rust game projects with minimal boilerplate.
 
