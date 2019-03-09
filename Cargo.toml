@@ -9,6 +9,9 @@ readme = "readme.md"
 license = "MIT"
 edition = "2018"
 
+[badges]
+travis-ci = { repository = "https://travis-ci.org/TomGillen/legion", branch = "master" }
+
 [features]
 default = ["par-iter", "serde"]
 par-iter = ["rayon"]

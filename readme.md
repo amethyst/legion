@@ -1,12 +1,16 @@
+# Legion
+
+[![Build Status](https://travis-ci.org/TomGillen/legion.svg?branch=master)](https://travis-ci.org/TomGillen/legion)
+
 Legion aims to be a feature rich high performance ECS library for Rust game projects with minimal boilerplate.
 
-# Benchmarks
+## Benchmarks
 
 Based on the [ecs_bench](https://github.com/lschmierer/ecs_bench) project.
 
 ![](bench.png)
 
-# Getting Started
+## Getting Started
 
 ```rust
 use legion::*;
@@ -58,7 +62,7 @@ for (pos, vel) in query.iter(&world) {
 }
 ```
 
-# Features
+## Features
 
 Legion aims to be a more feature-complete game-ready ECS than many of its predecessors.
 
