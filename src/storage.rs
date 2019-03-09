@@ -62,6 +62,11 @@ struct SharedComponentStore<T>(UnsafeCell<T>);
 
 impl<T: SharedData> SharedComponentStorage for SharedComponentStore<T> {}
 
+/// Raw unsafe storage for components associated with entities.
+///
+/// All entities contained within a chunk have the same shared data values and entity data types.
+///
+/// Data slices obtained from a chunk when indexed with a given index all refer to the same entity.
 #[derive(Debug)]
 pub struct Chunk {
     id: ChunkId,
@@ -75,26 +80,49 @@ pub struct Chunk {
 unsafe impl Sync for Chunk {}
 
 impl Chunk {
+    /// Gets the ID of the chunk.
     pub fn id(&self) -> ChunkId {
         self.id
     }
 
+    /// Gets the number of entities stored within the chunk.
     pub fn len(&self) -> usize {
         self.entities.len()
     }
 
+    /// Determines if the chunk has reached capacity and can no longer accept more entities.
     pub fn is_full(&self) -> bool {
         self.len() == self.capacity
     }
 
+    /// Gets a slice of `Entity` IDs of entities contained within the chunk.
+    ///
+    /// # Safety
+    ///
+    /// This function bypasses any borrow checking. Ensure no other code is writing into
+    /// the chunk's entities vector before calling this function.
     pub unsafe fn entities(&self) -> &[Entity] {
         self.entities.data()
     }
 
+    /// Gets a mutable vector of entity IDs contained within the chunk.
+    ///
+    /// # Safety
+    ///
+    /// This function bypasses any borrow checking. Ensure no other code is reading or writing
+    /// the chunk's entities vector before calling this function.
     pub unsafe fn entities_unchecked(&self) -> &mut Vec<Entity> {
         self.entities.data_mut()
     }
 
+    /// Gets a vector of entity data.
+    ///
+    /// Returns `None` if the chunk does not contain the requested data type.
+    ///
+    /// # Safety
+    ///
+    /// This function bypasses any borrow checking. Ensure no other code is writing to
+    /// this component type in the chunk before calling this function.
     pub unsafe fn entity_data_unchecked<T: EntityData>(&self) -> Option<&Vec<T>> {
         self.components
             .get(&TypeId::of::<T>())
@@ -102,6 +130,14 @@ impl Chunk {
             .map(|c| c.data())
     }
 
+    /// Gets a mutable vector of entity data.
+    ///
+    /// Returns `None` if the chunk does not contain the requested data type.
+    ///
+    /// # Safety
+    ///
+    /// This function bypasses any borrow checking. Ensure no other code is reaing or writing to
+    /// this component type in the chunk before calling this function.
     pub unsafe fn entity_data_mut_unchecked<T: EntityData>(&self) -> Option<&mut Vec<T>> {
         self.components
             .get(&TypeId::of::<T>())
@@ -109,6 +145,14 @@ impl Chunk {
             .map(|c| c.data_mut())
     }
 
+    /// Gets a slice of entity data.
+    ///
+    /// Returns `None` if the chunk does not contain the requested data type.
+    ///
+    /// # Panics
+    ///
+    /// This function performs runtime borrow checking. It will panic if other code is borrowing
+    /// the same component type mutably.
     pub fn entity_data<'a, T: EntityData>(&'a self) -> Option<BorrowedSlice<'a, T>> {
         match unsafe { self.entity_data_unchecked() } {
             Some(data) => {
@@ -119,6 +163,14 @@ impl Chunk {
         }
     }
 
+    /// Gets a mutable slice of entity data.
+    ///
+    /// Returns `None` if the chunk does not contain the requested data type.
+    ///
+    /// # Panics
+    ///
+    /// This function performs runtime borrow checking. It will panic if other code is borrowing
+    /// the same component type.
     pub fn entity_data_mut<'a, T: EntityData>(&'a self) -> Option<BorrowedMutSlice<'a, T>> {
         match unsafe { self.entity_data_mut_unchecked() } {
             Some(data) => {
@@ -129,6 +181,10 @@ impl Chunk {
         }
     }
 
+    /// Gets the version number of a given component type.
+    ///
+    /// Each component array in the slice has a version number which is
+    /// automatically incremented every time it is retrieved mutably.
     pub fn entity_data_version<T: EntityData>(&self) -> Option<usize> {
         self.components
             .get(&TypeId::of::<T>())
@@ -136,27 +192,39 @@ impl Chunk {
             .map(|c| c.version())
     }
 
-    pub unsafe fn shared_component<T: SharedData>(&self) -> Option<&T> {
-        self.shared
-            .get(&TypeId::of::<T>())
-            .and_then(|s| s.downcast_ref::<SharedComponentStore<T>>())
-            .map(|s| &*s.0.get())
-    }
-
-    pub unsafe fn remove(&mut self, id: ComponentIndex) -> Option<Entity> {
-        let index = id as usize;
-        self.entities.data_mut().swap_remove(index);
-        for storage in self.components.values_mut() {
-            storage.remove(id);
-        }
-
-        if self.entities.len() > index {
-            Some(*self.entities.data().get(index).unwrap())
-        } else {
-            None
+    /// Gets a shared data value associated with all entities in the chunk.
+    ///
+    /// Returns `None` if the chunk does not contain the requested data type.
+    pub fn shared_data<T: SharedData>(&self) -> Option<&T> {
+        unsafe {
+            self.shared
+                .get(&TypeId::of::<T>())
+                .and_then(|s| s.downcast_ref::<SharedComponentStore<T>>())
+                .map(|s| &*s.0.get())
         }
     }
 
+    /// Removes an entity from the chunk.
+    ///
+    /// Returns the ID of any entity which was swapped into the location of the
+    /// removed entity.
+    pub fn remove(&mut self, id: ComponentIndex) -> Option<Entity> {
+        unsafe {
+            let index = id as usize;
+            self.entities.data_mut().swap_remove(index);
+            for storage in self.components.values_mut() {
+                storage.remove(id);
+            }
+
+            if self.entities.len() > index {
+                Some(*self.entities.data().get(index).unwrap())
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Validates that the chunk contains a balanced number of components and entities.
     pub fn validate(&self) {
         let valid = self
             .components
@@ -186,6 +254,7 @@ impl Chunk {
     }
 }
 
+/// Constructs a new `Chunk`.
 pub struct ChunkBuilder {
     components: Vec<(
         TypeId,
@@ -198,6 +267,7 @@ pub struct ChunkBuilder {
 impl ChunkBuilder {
     const MAX_SIZE: usize = 16 * 1024;
 
+    /// Constructs a new `ChunkBuilder`.
     pub fn new() -> ChunkBuilder {
         ChunkBuilder {
             components: Vec::new(),
@@ -205,6 +275,7 @@ impl ChunkBuilder {
         }
     }
 
+    /// Registers an entity data component type.
     pub fn register_component<T: EntityData>(&mut self) {
         let constructor = |capacity| {
             Box::new(StorageVec::<T>::with_capacity(capacity)) as Box<dyn ComponentStorage>
@@ -213,6 +284,7 @@ impl ChunkBuilder {
             .push((TypeId::of::<T>(), size_of::<T>(), Box::new(constructor)));
     }
 
+    /// Registers a shared data component type.
     pub fn register_shared<T: SharedData>(&mut self, data: T) {
         self.shared.insert(
             TypeId::of::<T>(),
@@ -221,6 +293,7 @@ impl ChunkBuilder {
         );
     }
 
+    /// Builds a new `Chunk`.
     pub fn build(self, id: ChunkId) -> Chunk {
         let size_bytes = *self
             .components
@@ -248,17 +321,22 @@ impl ChunkBuilder {
     }
 }
 
+/// Stores all chunks with a given data layout.
 #[derive(Debug)]
 pub struct Archetype {
     id: ArchetypeId,
     logger: slog::Logger,
     next_chunk_id: u16,
+    /// The entity data component types that all chunks contain.
     pub components: FnvHashSet<TypeId>,
+    /// The shared data component types that all chunks contains.
     pub shared: FnvHashSet<TypeId>,
+    /// The chunks that belong to this archetype.
     pub chunks: Vec<Chunk>,
 }
 
 impl Archetype {
+    /// Constructs a new `Archetype`.
     pub fn new(
         id: ArchetypeId,
         logger: slog::Logger,
@@ -275,27 +353,33 @@ impl Archetype {
         }
     }
 
+    /// Gets a chunk reference.
     pub fn chunk(&self, id: ChunkIndex) -> Option<&Chunk> {
         self.chunks.get(id as usize)
     }
 
+    /// Gets a mutable chunk reference.
     pub fn chunk_mut(&mut self, id: ChunkIndex) -> Option<&mut Chunk> {
         self.chunks.get_mut(id as usize)
     }
 
+    /// Determines if the archetype's chunks contain the given entity data component type.
     pub fn has_component<T: EntityData>(&self) -> bool {
         self.components.contains(&TypeId::of::<T>())
     }
 
+    /// Determines if the archetype's chunks contain the given shared data component type.
     pub fn has_shared<T: SharedData>(&self) -> bool {
         self.shared.contains(&TypeId::of::<T>())
     }
 
+    /// Gets a slice reference of chunks.
     pub fn chunks(&self) -> &[Chunk] {
         &self.chunks
     }
 
-    pub fn get_or_create_chunk<'a, 'b, 'c, S: SharedDataSet, C: ComponentSource>(
+    /// Finds a chunk which is suitable for the given data sources, or constructs a new one.
+    pub fn get_or_create_chunk<'a, 'b, 'c, S: SharedDataSet, C: EntitySource>(
         &'a mut self,
         shared: &'b S,
         components: &'c C,

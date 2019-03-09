@@ -69,3 +69,19 @@ fn bench_par_update(b: &mut Bencher) {
         });
     });
 }
+
+#[bench]
+fn bench_update_ideal(b: &mut Bencher) {
+    let pos_with_vel = N_POS / N_POS_PER_VEL;
+
+    let mut pos_vel: Vec<(Position, Velocity)> = (0..pos_with_vel)
+        .map(|_| (Position { x: 0.0, y: 0.0 }, Velocity { dx: 0.0, dy: 0.0 }))
+        .collect();
+
+    b.iter(|| {
+        for (pos, vel) in pos_vel.iter_mut() {
+            pos.x += vel.dx;
+            pos.y += vel.dy;
+        }
+    })
+}

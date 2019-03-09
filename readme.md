@@ -43,7 +43,7 @@ world.insert_from(
 // Create entities with `Position` data and a shared `Model` data, tagged as `Static`
 // Shared data values are shared across many entities,
 // and enable further batch processing and filtering use cases
-world.insert_from(
+let entities: &[Entity] = world.insert_from(
     (Model(5), Static),
     (0..999).map(|_| (Position { x: 0.0, y: 0.0 },))
 );
@@ -66,32 +66,42 @@ Legion aims to be a more feature-complete game-ready ECS than many of its predec
 
 The query API can do much more than pull entity data out of the world.
 
+Additional data type filters:
+
 ```rust
-// *Additional data type filters*
 // It is possible to specify that entities must contain data beyond that being fetched
 let query = Read::<Position>::query()
     .filter(entity_data::<Velocity>());
 for position in query.iter(&world) {
     // these entities also have `Velocity`
 }
+```
 
-// *Filter boolean operations*
+Filter boolean operations:
+
+```rust
 // Filters can be combined with boolean operators
 let query = Read::<Position>::query()
     .filter(shared_data::<Static>() | !entity_data::<Velocity>());
 for position in query.iter(&world) {
     // these entities are also either marked as `Static`, or do *not* have a `Velocity`
 }
+```
 
-// *Filter by shared data value*
+Filter by shared data value:
+
+```rust
 // Filters can filter by specific shared data values
 let query = Read::<Position>::query()
     .filter(shared_data_value(&Model(3)));
 for position in query.iter(&world) {
     // these entities all have shared data value `Model(3)`
 }
+```
 
-// *Change detection*
+Change detection:
+
+```rust
 // Queries can perform coarse-grained change detection, rejecting entities who's data
 // has not changed since the last time the query was iterated.
 let query = <(Read<Position>, Shared<Model>)>::query()
@@ -119,9 +129,14 @@ world_a.merge(world_b);
 
 ### Chunk Iteration
 
-Entity data is allocated in blocks called "chunks", each approximately containing 64KiB of data. The query API exposes each chunk via 'iter_chunk'. As all entities in a chunk are guarenteed to contain the same set of entity data and shared data values, it is possible to do batch processing via the chunk API.
+Entity data is allocated in blocks called "chunks", each approximately containing 64KiB of data. The query API exposes each chunk via `iter_chunk`. As all entities in a chunk are guarenteed to contain the same set of entity data and shared data values, it is possible to do batch processing via the chunk API.
 
 ```rust
+fn render_instanced(model: &Model, transforms: &[Transform]) {
+    // pass `transforms` pointer to graphics API to load into constant buffer
+    // issue instanced draw call with model data and transforms
+}
+
 let query = Read::<Transform>::query()
     .filter(shared_data::<Model>());
 

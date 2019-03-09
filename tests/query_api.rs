@@ -426,7 +426,7 @@ fn query_on_changed_first() {
     }
 
     use filter::*;
-    let query = Read::<Pos>::query().filter(changed::<Pos>().or(changed::<Rot>()));
+    let query = Read::<Pos>::query().filter(changed::<Pos>() | changed::<Rot>());
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {

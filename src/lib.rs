@@ -60,9 +60,11 @@
 //!
 //! Legion aims to be a more complete game-ready ECS than many of its predecessors.
 //!
-//! ## Advanced Query Filters
+//! ### Advanced Query Filters
 //!
 //! The query API can do much more than pull entity data out of the world.
+//!
+//! Additional data type filters:
 //!
 //! ```rust
 //! # use legion::*;
@@ -72,47 +74,104 @@
 //! #     x: f32,
 //! #     y: f32,
 //! # }
-//!
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Velocity {
 //! #     dx: f32,
 //! #     dy: f32,
 //! # }
-//!
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Model(usize);
-//!
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Static;
-//!
 //! # let universe = Universe::new(None);
 //! # let mut world = universe.create_world();
-//!
-//! // *Additional data type filters*
 //! // It is possible to specify that entities must contain data beyond that being fetched
 //! let query = Read::<Position>::query()
 //!     .filter(entity_data::<Velocity>());
 //! for position in query.iter(&world) {
 //!     // these entities also have `Velocity`
 //! }
+//! ```
 //!
-//! // *Filter boolean operations*
+//! Filter boolean operations:
+//!
+//! ```rust
+//! # use legion::*;
+//! # use legion::filter::*;
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Position {
+//! #     x: f32,
+//! #     y: f32,
+//! # }
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Velocity {
+//! #     dx: f32,
+//! #     dy: f32,
+//! # }
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Model(usize);
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Static;
+//! # let universe = Universe::new(None);
+//! # let mut world = universe.create_world();
 //! // Filters can be combined with boolean operators
 //! let query = Read::<Position>::query()
 //!     .filter(shared_data::<Static>() | !entity_data::<Velocity>());
 //! for position in query.iter(&world) {
 //!     // these entities are also either marked as `Static`, or do *not* have a `Velocity`
 //! }
+//! ```
 //!
-//! // *Filter by shared data value*
+//! Filter by shared data value:
+//!
+//! ```rust
+//! # use legion::*;
+//! # use legion::filter::*;
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Position {
+//! #     x: f32,
+//! #     y: f32,
+//! # }
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Velocity {
+//! #     dx: f32,
+//! #     dy: f32,
+//! # }
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Model(usize);
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Static;
+//! # let universe = Universe::new(None);
+//! # let mut world = universe.create_world();
 //! // Filters can filter by specific shared data values
 //! let query = Read::<Position>::query()
 //!     .filter(shared_data_value(&Model(3)));
 //! for position in query.iter(&world) {
 //!     // these entities all have shared data value `Model(3)`
 //! }
+//! ```
 //!
-//! // *Change detection*
+//! Change detection:
+//!
+//! ```rust
+//! # use legion::*;
+//! # use legion::filter::*;
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Position {
+//! #     x: f32,
+//! #     y: f32,
+//! # }
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Velocity {
+//! #     dx: f32,
+//! #     dy: f32,
+//! # }
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Model(usize);
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Static;
+//! # let universe = Universe::new(None);
+//! # let mut world = universe.create_world();
 //! // Queries can perform coarse-grained change detection, rejecting entities who's data
 //! // has not changed since the last time the query was iterated.
 //! let query = <(Read<Position>, Shared<Model>)>::query()
@@ -122,7 +181,7 @@
 //! }
 //! ```
 //!
-//! ## Content Streaming
+//! ### Content Streaming
 //!
 //! Entities can be loaded and initialized in a background `World` on separate threads and then
 //! when ready, merged into the main `World` near instantaneously.
@@ -146,17 +205,16 @@
 //! ```rust
 //! # use legion::*;
 //! # use legion::filter::*;
-//!
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Transform;
-//!
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Model(usize);
-//!
 //! # let universe = Universe::new(None);
 //! # let mut world = universe.create_world();
-//!
-//! # fn render_instanced(_: &Model, _: &[Transform]) {}
+//! fn render_instanced(model: &Model, transforms: &[Transform]) {
+//!     // pass `transforms` pointer to graphics API to load into constant buffer
+//!     // issue instanced draw call with model data and transforms
+//! }
 //!
 //! let query = Read::<Transform>::query()
 //!     .filter(shared_data::<Model>());
@@ -192,12 +250,7 @@ use std::num::Wrapping;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 
-pub type EntityIndex = u32;
-pub type EntityVersion = Wrapping<u32>;
-pub type ComponentIndex = u16;
-pub type ChunkIndex = u16;
-pub type ArchetypeIndex = u16;
-
+/// Unique world ID.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct WorldId(u16);
 
@@ -207,6 +260,7 @@ impl WorldId {
     }
 }
 
+/// Unique Archetype ID.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ArchetypeId(u16, u16);
 
@@ -216,9 +270,14 @@ impl ArchetypeId {
     }
 }
 
+/// Unique Chunk ID.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ChunkId(u16, u16, u16);
 
+pub(crate) type EntityIndex = u32;
+pub(crate) type EntityVersion = Wrapping<u32>;
+
+/// A handle to an entity.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Entity {
     index: EntityIndex,
@@ -226,7 +285,7 @@ pub struct Entity {
 }
 
 impl Entity {
-    pub fn new(index: EntityIndex, version: EntityVersion) -> Entity {
+    pub(crate) fn new(index: EntityIndex, version: EntityVersion) -> Entity {
         Entity {
             index: index,
             version: version,
@@ -240,6 +299,12 @@ impl Display for Entity {
     }
 }
 
+/// The `Universe` is a factory for creating `World`s.
+///
+/// Entities inserted into worlds created within the same universe are guarenteed to have
+/// unique `Entity` IDs, even across worlds.
+///
+/// Worlds belonging to the same universe can be safely merged via `World.merge`.
 #[derive(Debug)]
 pub struct Universe {
     name: String,
@@ -249,6 +314,24 @@ pub struct Universe {
 }
 
 impl Universe {
+    /// Creates a new `Universe`.
+    ///
+    /// # Examples
+    /// ```
+    /// # use slog::*;
+    /// # use std::sync::Mutex;
+    /// # use legion::*;
+    /// // Create an slog logger
+    /// let decorator = slog_term::TermDecorator::new().build();
+    /// let drain = Mutex::new(slog_term::FullFormat::new(decorator).build()).fuse();
+    /// let log = slog::Logger::root(drain, o!());
+    ///
+    /// // Create world with logger
+    /// let universe = Universe::new(log);
+    ///
+    /// // Create world without logger
+    /// let universe = Universe::new(None);
+    /// ```
     pub fn new<L: Into<Option<slog::Logger>>>(logger: L) -> Self {
         let name = names::Generator::default().next().unwrap();
         let logger = logger
@@ -265,6 +348,12 @@ impl Universe {
         }
     }
 
+    /// Creates a new `World` within this `Universe`.
+    ///
+    /// Entities inserted into worlds created within the same universe are guarenteed to have
+    /// unique `Entity` IDs, even across worlds.
+    ///
+    /// Worlds belonging to the same universe can be safely merged via `World.merge`.
     pub fn create_world(&self) -> World {
         World::new(
             WorldId(self.next_id.fetch_add(1, Ordering::SeqCst)),
@@ -273,6 +362,10 @@ impl Universe {
         )
     }
 }
+
+pub(crate) type ComponentIndex = u16;
+pub(crate) type ChunkIndex = u16;
+pub(crate) type ArchetypeIndex = u16;
 
 #[derive(Debug)]
 struct BlockAllocator {
@@ -395,6 +488,7 @@ impl EntityBlock {
     }
 }
 
+/// Manages the allocation and deletion of `Entity` IDs within a world.
 #[derive(Debug)]
 pub struct EntityAllocator {
     allocator: Arc<Mutex<BlockAllocator>>,
@@ -411,6 +505,7 @@ impl EntityAllocator {
         }
     }
 
+    /// Determines if the given `Entity` is considered alive.
     pub fn is_alive(&self, entity: &Entity) -> bool {
         self.blocks
             .iter()
@@ -419,6 +514,7 @@ impl EntityAllocator {
             .unwrap_or(false)
     }
 
+    /// Allocates a new unused `Entity` ID.
     pub fn create_entity(&mut self) -> Entity {
         let entity = if let Some(entity) = self
             .blocks
@@ -439,7 +535,7 @@ impl EntityAllocator {
         entity
     }
 
-    pub fn delete_entity(&mut self, entity: Entity) -> bool {
+    pub(crate) fn delete_entity(&mut self, entity: Entity) -> bool {
         self.blocks
             .iter_mut()
             .filter_map(|b| b.free(entity))
@@ -447,7 +543,7 @@ impl EntityAllocator {
             .unwrap_or(false)
     }
 
-    pub fn set_location(
+    pub(crate) fn set_location(
         &mut self,
         entity: &EntityIndex,
         location: (ArchetypeIndex, ChunkIndex, ComponentIndex),
@@ -461,7 +557,7 @@ impl EntityAllocator {
             .set_location(entity, location);
     }
 
-    pub fn get_location(
+    pub(crate) fn get_location(
         &self,
         entity: &EntityIndex,
     ) -> Option<(ArchetypeIndex, ChunkIndex, ComponentIndex)> {
@@ -472,15 +568,15 @@ impl EntityAllocator {
             .and_then(|b| b.get_location(entity))
     }
 
-    pub fn allocation_buffer(&self) -> &[Entity] {
+    pub(crate) fn allocation_buffer(&self) -> &[Entity] {
         self.entity_buffer.as_slice()
     }
 
-    pub fn clear_allocation_buffer(&mut self) {
+    pub(crate) fn clear_allocation_buffer(&mut self) {
         self.entity_buffer.clear();
     }
 
-    pub fn merge(&mut self, mut other: EntityAllocator) {
+    pub(crate) fn merge(&mut self, mut other: EntityAllocator) {
         assert!(Arc::ptr_eq(&self.allocator, &other.allocator));
         self.blocks.append(&mut other.blocks);
     }
@@ -494,6 +590,7 @@ impl Drop for EntityAllocator {
     }
 }
 
+/// Contains queryable collections of data associated with `Entity`s.
 #[derive(Debug)]
 pub struct World {
     id: WorldId,
@@ -517,6 +614,19 @@ impl World {
         }
     }
 
+    /// Merges two worlds together.
+    ///
+    /// This function moves all chunks from `other` into `self`. This operation is very fast,
+    /// however the resulting memory layout may be inefficient if `other` contains a very small
+    /// number of entities.
+    ///
+    /// Merge is most effectively used to allow large numbers of entities to be loaded and
+    /// initialized in the background, and then shunted into the "main" world all at once, once ready.
+    ///
+    /// # Safety
+    ///
+    /// It is only safe to merge worlds which belong to the same `Universe`. This is currently not
+    /// validated by the API.
     pub fn merge(&mut self, mut other: World) {
         self.allocator.merge(other.allocator);
 
@@ -540,25 +650,51 @@ impl World {
         }
     }
 
+    /// Determines if the given `Entity` is alive within this `World`.
     pub fn is_alive(&self, entity: &Entity) -> bool {
         self.allocator.is_alive(entity)
     }
 
+    /// Inserts entities from an iterator of component tuples.
+    ///
+    /// # Examples
+    ///
+    /// Inserting entity tuples:
+    ///
+    /// ```
+    /// # use legion::*;
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Position(f32);
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Rotation(f32);
+    /// # let universe = Universe::new(None);
+    /// # let mut world = universe.create_world();
+    /// # let model = 0u8;
+    /// # let color = 0u16;
+    /// let shared = (model, color);
+    /// let data = vec![
+    ///     (Position(0.0), Rotation(0.0)),
+    ///     (Position(1.0), Rotation(1.0)),
+    ///     (Position(2.0), Rotation(2.0)),
+    /// ];
+    /// world.insert_from(shared, data);
+    /// ```
     pub fn insert_from<S, T>(&mut self, shared: S, components: T) -> &[Entity]
     where
         S: SharedDataSet,
         T: IntoIterator,
-        T::Item: ComponentDataSet,
-        IterComponentSource<T::IntoIter, T::Item>: ComponentSource,
+        T::Item: EntityDataSet,
+        IterEntitySource<T::IntoIter, T::Item>: EntitySource,
     {
         let source = T::Item::component_source(components.into_iter());
         self.insert(shared, source)
     }
 
+    /// Inserts entities from an `EntitySource`.
     pub fn insert<S, T>(&mut self, shared: S, mut components: T) -> &[Entity]
     where
         S: SharedDataSet,
-        T: ComponentSource,
+        T: EntitySource,
     {
         // find or create archetype
         let (arch_index, archetype) = World::prep_archetype(
@@ -608,6 +744,9 @@ impl World {
         self.allocator.allocation_buffer()
     }
 
+    /// Removes the given `Entity` from the `World`.
+    ///
+    /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
         let deleted = self.allocator.delete_entity(entity);
 
@@ -620,7 +759,7 @@ impl World {
                 self.archetypes
                     .get_mut(archetype_id as usize)
                     .and_then(|archetype| archetype.chunk_mut(chunk_id))
-                    .and_then(|chunk| unsafe { chunk.remove(component_id) })
+                    .and_then(|chunk| chunk.remove(component_id))
             });
 
             // record swapped entity's new location
@@ -632,7 +771,16 @@ impl World {
         deleted
     }
 
-    pub fn component<'a, T: EntityData>(&'a self, entity: Entity) -> Option<Borrowed<'a, T>> {
+    /// Borrows entity data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    ///
+    /// # Panics
+    ///
+    /// This function borrows all components of type `T` in the world. It may panic if
+    /// any other code is currently borrowing `T` mutably (such as in a query).
+    pub fn entity_data<'a, T: EntityData>(&'a self, entity: Entity) -> Option<Borrowed<'a, T>> {
         self.allocator.get_location(&entity.index).and_then(
             |(archetype_id, chunk_id, component_id)| {
                 self.archetypes
@@ -644,7 +792,11 @@ impl World {
         )
     }
 
-    pub fn component_mut<T: EntityData>(&mut self, entity: Entity) -> Option<&mut T> {
+    /// Mutably borrows entity data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    pub fn entity_data_mut<T: EntityData>(&mut self, entity: Entity) -> Option<&mut T> {
         let archetypes = &self.archetypes;
         self.allocator.get_location(&entity.index).and_then(
             |(archetype_id, chunk_id, component_id)| {
@@ -657,6 +809,10 @@ impl World {
         )
     }
 
+    /// Borrows shared data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
     pub fn shared<T: SharedData>(&self, entity: Entity) -> Option<&T> {
         self.allocator
             .get_location(&entity.index)
@@ -664,11 +820,11 @@ impl World {
                 self.archetypes
                     .get(archetype_id as usize)
                     .and_then(|archetype| archetype.chunk(chunk_id))
-                    .and_then(|chunk| unsafe { chunk.shared_component::<T>() })
+                    .and_then(|chunk| chunk.shared_data::<T>())
             })
     }
 
-    fn prep_archetype<'a, S: SharedDataSet, C: ComponentSource>(
+    fn prep_archetype<'a, S: SharedDataSet, C: EntitySource>(
         id: &WorldId,
         archetypes: &'a mut Vec<Archetype>,
         next_arch_id: &mut u16,
@@ -710,24 +866,52 @@ impl World {
     }
 }
 
+/// Inserts shared data into a `Chunk` in a `World`.
 pub trait SharedDataSet {
+    /// Determines if the given archetype is compatible with the data
+    /// contained in the data set.
     fn is_archetype_match(&self, archetype: &Archetype) -> bool;
+
+    /// Determines if the given chunk is compatible with the data
+    /// contained in the data set.
     fn is_chunk_match(&self, chunk: &Chunk) -> bool;
+
+    /// Configures a new chunk to include the shared data in this data set.
     fn configure_chunk(&self, chunk: &mut ChunkBuilder);
+
+    /// Gets the type of shared data contained in this data set.
     fn types(&self) -> FnvHashSet<TypeId>;
 }
 
-pub trait ComponentDataSet: Sized {
-    fn component_source<T>(source: T) -> IterComponentSource<T, Self>
+/// A set of entity data components.
+pub trait EntityDataSet: Sized {
+    /// Converts an iterator of `Self` into an `EntitySource`.
+    fn component_source<T>(source: T) -> IterEntitySource<T, Self>
     where
         T: Iterator<Item = Self>;
 }
 
-pub trait ComponentSource {
+/// Inserts entity data into a `Chunk` in a `World`.
+pub trait EntitySource {
+    /// Determines if the given archetype is compatible with the data
+    /// contained in the source.
     fn is_archetype_match(&self, archetype: &Archetype) -> bool;
+
+    /// Configures a new chunk to support the data contained within this source.
     fn configure_chunk(&self, chunk: &mut ChunkBuilder);
+
+    /// Gets the entity data component types contained within this source.
     fn types(&self) -> FnvHashSet<TypeId>;
+
+    /// Determines if the source is empty.
     fn is_empty(&mut self) -> bool;
+
+    /// Writes as many entities into the given `Chunk` as possible, consuming the
+    /// data in `self`.
+    ///
+    /// The provided `EntityAllocator` can be used to allocate new `Entity` IDs.
+    ///
+    /// Returns the number of entities written.
     fn write<'a>(&mut self, chunk: &'a mut Chunk, allocator: &mut EntityAllocator) -> usize;
 }
 
@@ -758,13 +942,11 @@ macro_rules! impl_shared_data_set {
             }
 
             fn is_chunk_match(&self, chunk: &Chunk) -> bool {
-                unsafe {
-                    #![allow(non_snake_case)]
-                    let ($($ty,)*) = self;
-                    $(
-                        (*chunk.shared_component::<$ty>().unwrap() == *$ty)
-                    )&&*
-                }
+                #![allow(non_snake_case)]
+                let ($($ty,)*) = self;
+                $(
+                    (*chunk.shared_data::<$ty>().unwrap() == *$ty)
+                )&&*
             }
 
             fn configure_chunk(&self, chunk: &mut ChunkBuilder) {
@@ -786,23 +968,24 @@ impl_shared_data_set!(3; A, B, C);
 impl_shared_data_set!(4; A, B, C, D);
 impl_shared_data_set!(5; A, B, C, D, E);
 
-pub struct IterComponentSource<T: Iterator<Item = K>, K> {
+#[doc(hidden)]
+pub struct IterEntitySource<T: Iterator<Item = K>, K> {
     source: Peekable<T>,
 }
 
 macro_rules! impl_component_source {
     ( $arity: expr; $( $ty: ident => $id: ident ),* ) => {
-        impl<$( $ty ),*> ComponentDataSet for ($( $ty, )*)
+        impl<$( $ty ),*> EntityDataSet for ($( $ty, )*)
         where $( $ty: EntityData ),*
         {
-            fn component_source<T>(source: T) -> IterComponentSource<T, Self>
+            fn component_source<T>(source: T) -> IterEntitySource<T, Self>
                 where T: Iterator<Item=Self>
             {
-                IterComponentSource::<T, Self> { source: source.peekable() }
+                IterEntitySource::<T, Self> { source: source.peekable() }
             }
         }
 
-        impl<I, $( $ty ),*> ComponentSource for IterComponentSource<I, ($( $ty, )*)>
+        impl<I, $( $ty ),*> EntitySource for IterEntitySource<I, ($( $ty, )*)>
         where I: Iterator<Item=($( $ty, )*)>,
               $( $ty: EntityData ),*
         {
@@ -860,7 +1043,10 @@ impl_component_source!(3; A => a, B => b, C => c);
 impl_component_source!(4; A => a, B => b, C => c, D => d);
 impl_component_source!(5; A => a, B => b, C => c, D => d, E => e);
 
+/// Components that are stored once per entity.
 pub trait EntityData: Send + Sync + Sized + Debug + 'static {}
+
+/// Components that are shared across multiple entities.
 pub trait SharedData: Send + Sync + Sized + PartialEq + Clone + Debug + 'static {}
 
 impl<T: Send + Sync + Sized + Debug + 'static> EntityData for T {}
@@ -992,5 +1178,21 @@ mod tests {
             assert_eq!(false, allocator_a.is_alive(&e));
             assert_eq!(true, allocator_b.is_alive(&e));
         }
+    }
+
+    #[test]
+    fn get_component_empty_world() {
+        let universe = Universe::new(None);
+        let world = universe.create_world();
+
+        assert_eq!(None, world.entity_data::<i32>(Entity::new(0, Wrapping(0))));
+    }
+
+    #[test]
+    fn get_shared_empty_world() {
+        let universe = Universe::new(None);
+        let world = universe.create_world();
+
+        assert_eq!(None, world.shared::<i32>(Entity::new(0, Wrapping(0))));
     }
 }

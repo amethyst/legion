@@ -6,12 +6,14 @@ use std::slice::Iter;
 use std::slice::IterMut;
 use std::sync::atomic::{AtomicIsize, Ordering};
 
+/// Tracks the borrowing of a piece of memory.
 pub enum Borrow<'a> {
     Read { state: &'a AtomicIsize },
     Write { state: &'a AtomicIsize },
 }
 
 impl<'a> Borrow<'a> {
+    /// Attempts to aquire a readonly borrow.
     pub fn aquire_read(state: &'a AtomicIsize) -> Result<Borrow<'a>, &'static str> {
         loop {
             let read = state.load(Ordering::SeqCst);
@@ -27,6 +29,7 @@ impl<'a> Borrow<'a> {
         Ok(Borrow::Read { state })
     }
 
+    /// Attempts to aquire a mutable borrow.
     pub fn aquire_write(state: &'a AtomicIsize) -> Result<Borrow<'a>, &'static str> {
         let borrowed = state.compare_and_swap(0, -1, Ordering::SeqCst);
         match borrowed {
@@ -50,6 +53,7 @@ impl<'a> Drop for Borrow<'a> {
     }
 }
 
+/// Represents a piece of runtime borrow checked data.
 pub struct Borrowed<'a, T: 'a> {
     value: &'a T,
     #[allow(dead_code)]
@@ -58,6 +62,7 @@ pub struct Borrowed<'a, T: 'a> {
 }
 
 impl<'a, T: 'a> Borrowed<'a, T> {
+    /// Constructs a new `Borrowed<'a, T>`.
     pub fn new(value: &'a T, borrow: Borrow<'a>) -> Borrowed<'a, T> {
         Borrowed {
             value,
@@ -112,6 +117,7 @@ impl<'a, T: 'a> std::borrow::Borrow<T> for Borrowed<'a, T> {
     }
 }
 
+/// Represents a piece of mutable runtime borrow checked data.
 pub struct BorrowedMut<'a, T: 'a> {
     value: &'a mut T,
     #[allow(dead_code)]
@@ -120,6 +126,7 @@ pub struct BorrowedMut<'a, T: 'a> {
 }
 
 impl<'a, T: 'a> BorrowedMut<'a, T> {
+    /// Constructs a new `Borrowedmut<'a, T>`.
     pub fn new(value: &'a mut T, borrow: Borrow<'a>) -> BorrowedMut<'a, T> {
         BorrowedMut {
             value,
@@ -166,12 +173,14 @@ impl<'a, 'b, T: 'a + Display> Display for BorrowedMut<'a, T> {
     }
 }
 
+/// Represents a runtime borrow checked slice.
 pub struct BorrowedSlice<'a, T: 'a> {
     slice: &'a [T],
     state: Borrow<'a>,
 }
 
 impl<'a, T: 'a> BorrowedSlice<'a, T> {
+    /// Constructs a new `BorrowedSlice<'a, T>`.
     pub fn new(slice: &'a [T], borrow: Borrow<'a>) -> BorrowedSlice<'a, T> {
         BorrowedSlice {
             slice,
@@ -179,6 +188,7 @@ impl<'a, T: 'a> BorrowedSlice<'a, T> {
         }
     }
 
+    /// Borrows a single element from the slice.
     pub fn single(self, i: usize) -> Option<Borrowed<'a, T>> {
         let slice = self.slice;
         let state = self.state;
@@ -206,12 +216,14 @@ impl<'a, T: 'a> IntoIterator for BorrowedSlice<'a, T> {
     }
 }
 
+/// Represents a runtime borrow checked mut slice.
 pub struct BorrowedMutSlice<'a, T: 'a> {
     slice: &'a mut [T],
     state: Borrow<'a>,
 }
 
 impl<'a, T: 'a> BorrowedMutSlice<'a, T> {
+    /// Constructs a new `BorrowedMutSlice<'a, T>`.
     pub fn new(slice: &'a mut [T], borrow: Borrow<'a>) -> BorrowedMutSlice<'a, T> {
         BorrowedMutSlice {
             slice,
@@ -219,6 +231,7 @@ impl<'a, T: 'a> BorrowedMutSlice<'a, T> {
         }
     }
 
+    /// Borrows a single element from the slice.
     pub fn single(self, i: usize) -> Option<BorrowedMut<'a, T>> {
         let slice = self.slice;
         let state = self.state;
@@ -252,6 +265,7 @@ impl<'a, T: 'a> IntoIterator for BorrowedMutSlice<'a, T> {
     }
 }
 
+/// Represents a runtime borrow checked iterator.
 pub struct BorrowedIter<'a, I: 'a + Iterator> {
     inner: I,
     #[allow(dead_code)]

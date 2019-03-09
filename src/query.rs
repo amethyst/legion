@@ -11,26 +11,42 @@ use rayon::prelude::*;
 
 use crate::*;
 
+/// A type which can construct a default entity filter.
 pub trait DefaultFilter {
+    /// The type of entity filter constructed.
     type Filter: Filter;
 
+    /// constructs an entity filter.
     fn filter() -> Self::Filter;
 }
 
+/// A type which can fetch a strongly-typed view of the data contained
+/// within a `Chunk`.
 pub trait View<'a>: Sized + Send + Sync + 'static {
+    /// The iterator over the chunk data.
     type Iter: Iterator + 'a;
 
+    /// Pulls data out of a chunk.
     fn fetch(chunk: &'a Chunk) -> Self::Iter;
+
+    /// Validates that the view does not break any component borrowing rules.
     fn validate() -> bool;
+
+    /// Determines if the view reads the specified data type.
     fn reads<T: EntityData>() -> bool;
+
+    /// Determines if the view writes to the specified data type.
     fn writes<T: EntityData>() -> bool;
 }
 
+#[doc(hidden)]
 pub trait ViewElement {
     type Component;
 }
 
+/// Converts a `View` into a `Query`.
 pub trait IntoQuery: DefaultFilter + for<'a> View<'a> {
+    /// Converts the `View` type into a `Query`.
     fn query() -> QueryDef<Self, <Self as DefaultFilter>::Filter>;
 }
 
@@ -47,6 +63,7 @@ impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
     }
 }
 
+/// Reads a single entity data component type from a `Chunk`.
 #[derive(Debug)]
 pub struct Read<T: EntityData>(PhantomData<T>);
 
@@ -82,6 +99,7 @@ impl<T: EntityData> ViewElement for Read<T> {
     type Component = T;
 }
 
+/// Writes to a single entity data component type in a `Chunk`.
 #[derive(Debug)]
 pub struct Write<T: EntityData>(PhantomData<T>);
 
@@ -116,6 +134,7 @@ impl<T: EntityData> ViewElement for Write<T> {
     type Component = T;
 }
 
+/// Reads a single shared data component type in a `Chunk`.
 #[derive(Debug)]
 pub struct Shared<T: SharedData>(PhantomData<T>);
 
@@ -130,10 +149,8 @@ impl<'a, T: SharedData> View<'a> for Shared<T> {
     type Iter = Take<Repeat<&'a T>>;
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        unsafe {
-            let data: &T = chunk.shared_component().unwrap();
-            std::iter::repeat(data).take(chunk.len())
-        }
+        let data: &T = chunk.shared_data().unwrap();
+        std::iter::repeat(data).take(chunk.len())
     }
 
     fn validate() -> bool {
@@ -202,43 +219,45 @@ impl_view_tuple!(A, B, C);
 impl_view_tuple!(A, B, C, D);
 impl_view_tuple!(A, B, C, D, E);
 
+/// Filters chunks to determine which are to be included in a `Query`.
 pub trait Filter: Sync + Sized {
+    /// Determines if an archetype matches the filter's conditions.
     fn filter_archetype(&self, archetype: &Archetype) -> bool;
+
+    /// Determines if a chunk matches the filter's conditions.
     fn filter_chunk(&self, chunk: &Chunk) -> bool;
-
-    fn or<T: Filter>(self, filter: T) -> Or<(Self, T)> {
-        Or {
-            filters: (self, filter),
-        }
-    }
-
-    fn and<T: Filter>(self, filter: T) -> And<(Self, T)> {
-        And {
-            filters: (self, filter),
-        }
-    }
 }
 
 pub mod filter {
+    ///! Contains functions for constructing filters.
     use super::*;
 
+    /// Creates an entity data filter which includes chunks that contain
+    /// entity data components of type `T`.
     pub fn entity_data<T: EntityData>() -> EntityDataFilter<T> {
         EntityDataFilter::new()
     }
 
+    /// Creates a shared data filter which includes chunks that contain
+    /// shared data components of type `T`.
     pub fn shared_data<T: SharedData>() -> SharedDataFilter<T> {
         SharedDataFilter::new()
     }
 
+    /// Creates a shared data filter which includes chunks that contain
+    /// specific shared data values.
     pub fn shared_data_value<'a, T: SharedData>(data: &'a T) -> SharedDataValueFilter<'a, T> {
         SharedDataValueFilter::new(data)
     }
 
+    /// Creates a filter which includes chunks for which entity data components
+    /// of type `T` have changed since the filter was last executed.
     pub fn changed<T: EntityData>() -> EntityDataChangedFilter<T> {
         EntityDataChangedFilter::new()
     }
 }
 
+/// A passthrough filter which allows all chunks.
 #[derive(Debug)]
 pub struct Passthrough;
 
@@ -282,6 +301,7 @@ impl<Rhs: Filter> std::ops::BitOr<Rhs> for Passthrough {
     }
 }
 
+/// A filter which negates `F`.
 #[derive(Debug)]
 pub struct Not<F> {
     filter: F,
@@ -327,6 +347,7 @@ impl<F: Filter, Rhs: Filter> std::ops::BitOr<Rhs> for Not<F> {
     }
 }
 
+/// A filter which requires all filters within `T` match.
 #[derive(Debug)]
 pub struct And<T> {
     filters: T,
@@ -389,6 +410,7 @@ impl_and_filter!(A, B, C, D);
 impl_and_filter!(A, B, C, D, E);
 impl_and_filter!(A, B, C, D, E, F);
 
+/// A filter which requires that any filter within `T` match.
 #[derive(Debug)]
 pub struct Or<T> {
     filters: T,
@@ -451,6 +473,7 @@ impl_or_filter!(A, B, C, D);
 impl_or_filter!(A, B, C, D, E);
 impl_or_filter!(A, B, C, D, E, F);
 
+/// A filter which requires the chunk contain entity data components of type `T`.
 #[derive(Debug)]
 pub struct EntityDataFilter<T>(PhantomData<T>);
 
@@ -500,6 +523,7 @@ impl<Rhs: Filter, T: EntityData> std::ops::BitOr<Rhs> for EntityDataFilter<T> {
     }
 }
 
+/// A filter which requires the chunk contain shared data components of type `T`.
 #[derive(Debug)]
 pub struct SharedDataFilter<T>(PhantomData<T>);
 
@@ -549,6 +573,7 @@ impl<Rhs: Filter, T: SharedData> std::ops::BitOr<Rhs> for SharedDataFilter<T> {
     }
 }
 
+/// A filter which requires the chunk contain entity data values of a specific value.
 #[derive(Debug)]
 pub struct SharedDataValueFilter<'a, T> {
     value: &'a T,
@@ -568,7 +593,7 @@ impl<'a, T: SharedData> Filter for SharedDataValueFilter<'a, T> {
 
     #[inline]
     fn filter_chunk(&self, chunk: &Chunk) -> bool {
-        unsafe { chunk.shared_component::<T>() }.map_or(false, |s| s == self.value)
+        chunk.shared_data::<T>().map_or(false, |s| s == self.value)
     }
 }
 
@@ -600,6 +625,8 @@ impl<'a, Rhs: Filter, T: SharedData> std::ops::BitOr<Rhs> for SharedDataValueFil
     }
 }
 
+/// A filter which requires that entity data of type `T` has changed within the
+/// chunk since the last time the filter was executed.
 pub struct EntityDataChangedFilter<T: EntityData> {
     versions: Mutex<FnvHashMap<ChunkId, usize>>,
     phantom: PhantomData<T>,
@@ -670,6 +697,7 @@ impl<Rhs: Filter, T: EntityData> std::ops::BitOr<Rhs> for EntityDataChangedFilte
     }
 }
 
+/// An iterator which filters chunks by filter `F` and yields `ChunkView`s.
 pub struct ChunkViewIter<'data, 'filter, V: View<'data>, F: Filter> {
     archetypes: Iter<'data, Archetype>,
     filter: &'filter F,
@@ -712,6 +740,7 @@ where
     }
 }
 
+/// An iterator which iterates through all entity data in all chunks.
 pub struct ChunkDataIter<'data, 'query, V: View<'data>, F: Filter> {
     iter: ChunkViewIter<'data, 'query, V, F>,
     frontier: Option<V::Iter>,
@@ -737,6 +766,7 @@ impl<'data, 'query, F: Filter, V: View<'data>> Iterator for ChunkDataIter<'data,
     }
 }
 
+/// An iterator which iterates through all entity data in all chunks, zipped with entity ID.
 pub struct ChunkEntityIter<'data, 'query, V: View<'data>, F: Filter> {
     iter: ChunkViewIter<'data, 'query, V, F>,
     frontier: Option<ZipEntities<'data, V>>,
@@ -762,27 +792,160 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
     }
 }
 
+/// Queries for entities within a `World`.
+///
+/// # Examples
+///
+/// Queries can be constructed from any `View` type, including tuples of `View`s.
+///
+/// ```rust
+/// # use legion::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// // A query which matches any entity with a `Position` component
+/// let query = Read::<Position>::query();
+///
+/// // A query which matches any entity with both a `Position` and a `Velocity` component
+/// let query = <(Read<Position>, Read<Velocity>)>::query();
+/// ```
+///
+/// The view determines what data is accessed, and whether it is accessed mutably or not.
+///
+/// ```rust
+/// # use legion::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// // A query which writes `Position`, reads `Velocity` and reads `Model`
+/// // Shared data is read-only, and is distinguished from entity data reads with `Shared<T>`.
+/// let query = <(Write<Position>, Read<Velocity>, Shared<Model>)>::query();
+/// ```
+///
+/// By default, a query will filter its results to include only entities with the data
+/// types accessed by the view. However, additional filters can be specified if needed:
+///
+/// ```rust
+/// # use legion::*;
+/// # use legion::filter::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// #[derive(Copy, Clone, Debug, PartialEq)]
+/// struct Static;
+///
+/// // A query which also requires that entities have `Static` shared data
+/// // In this case, `Static` is used as a marker type
+/// let query = <(Read<Position>, Shared<Model>)>::query().filter(shared_data::<Static>());
+/// ```
+///
+/// Filters can be combined with bitwise operators:
+///
+/// ```rust
+/// # use legion::*;
+/// # use legion::filter::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// #[derive(Copy, Clone, Debug, PartialEq)]
+/// struct Static;
+///
+/// // This query matches entities with positions and a model
+/// // But it also requires that the entity is not static, or has moved (even if static)
+/// let query = <(Read<Position>, Shared<Model>)>::query()
+///     .filter(!shared_data::<Static>() | changed::<Position>());
+/// ```
+///
+/// Filters can be iterated through to pull data out of a `World`:
+///
+/// ```rust
+/// # use legion::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// # let universe = Universe::new(None);
+/// # let world = universe.create_world();
+/// // A query which writes `Position`, reads `Velocity` and reads `Model`
+/// // Shared data is read-only, and is distinguished from entity data reads with `Shared<T>`.
+/// let query = <(Write<Position>, Read<Velocity>, Shared<Model>)>::query();
+///
+/// for (pos, vel, model) in query.iter(&world) {
+///     // `.iter` yields tuples of references to a single entity's data:
+///     // pos: &mut Position
+///     // vel: &Velocity
+///     // model: &Model
+/// }
+/// ```
+///
+/// The lower level `iter_chunks` function allows access to each underlying chunk of entity data.
+/// This allows you to run code for each shared data value, or to retrieve a contiguous data slice.
+///
+/// ```rust
+/// # use legion::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// # let universe = Universe::new(None);
+/// # let world = universe.create_world();
+/// let query = <(Write<Position>, Read<Velocity>, Shared<Model>)>::query();
+///
+/// for chunk in query.iter_chunks(&world) {
+///     let model = chunk.shared_data::<Model>();
+///     let positions = chunk.data_mut::<Position>();
+///     let velocities = chunk.data::<Velocity>();
+/// }
+/// ```
+///
+/// The `ChunkView` yielded from `iter_chunks` allows access to all shared data in the chunk (queried for or not),
+/// but entity data slices can only be accessed if they were requested in the query's view. Attempting to access
+/// other data types, or attempting to write to components that were only requested via a `Read` will panic.
 pub trait Query {
+    /// The chunk filter used to determine which chunks to include in the output.
     type Filter: Filter;
+
+    /// The view used to determine which components are accessed.
     type View: for<'data> View<'data>;
 
+    /// Adds an additional filter to the query.
     fn filter<T: Filter>(self, filter: T) -> QueryDef<Self::View, And<(Self::Filter, T)>>;
 
+    /// Gets an iterator which iterates through all chunks that match the query.
     fn iter_chunks<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, Self::View, Self::Filter>;
 
+    /// Gets an iterator which iterates through all entity data that matches the query.
     fn iter<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkDataIter<'data, 'a, Self::View, Self::Filter>;
 
+    /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     fn iter_entities<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkEntityIter<'data, 'a, Self::View, Self::Filter>;
 
+    /// Iterates through all entity data that matches the query.
     fn for_each<'a, 'data, T>(&'a self, world: &'data World, mut f: T)
     where
         T: Fn(<<Self::View as View<'data>>::Iter as Iterator>::Item),
@@ -790,12 +953,14 @@ pub trait Query {
         self.iter(world).for_each(&mut f);
     }
 
+    /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
     fn par_for_each<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn(<<Self::View as View<'a>>::Iter as Iterator>::Item) + Send + Sync;
 }
 
+/// Queries for entities within a `World`.
 #[derive(Debug)]
 pub struct QueryDef<V: for<'a> View<'a>, F: Filter> {
     view: PhantomData<V>,
@@ -809,7 +974,9 @@ impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
     fn filter<T: Filter>(self, filter: T) -> QueryDef<Self::View, And<(Self::Filter, T)>> {
         QueryDef {
             view: self.view,
-            filter: self.filter.and(filter),
+            filter: And {
+                filters: (self.filter, filter),
+            },
         }
     }
 
@@ -861,6 +1028,7 @@ impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
 }
 
 impl<V: for<'a> View<'a>, F: Filter> QueryDef<V, F> {
+    /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
     pub fn par_iter_chunks<'a>(
         &'a self,
@@ -880,6 +1048,7 @@ impl<V: for<'a> View<'a>, F: Filter> QueryDef<V, F> {
     }
 }
 
+/// An iterator which yields view data tuples and entity IDs from a `ChunkView`.
 pub struct ZipEntities<'data, V: View<'data>> {
     entities: &'data [Entity],
     data: <V as View<'data>>::Iter,
@@ -908,6 +1077,7 @@ impl<'data, V: View<'data>> Iterator for ZipEntities<'data, V> {
     }
 }
 
+/// A type-safe view of a `Chunk`.
 #[derive(Debug)]
 pub struct ChunkView<'a, V: View<'a>> {
     chunk: &'a Chunk,
@@ -915,14 +1085,17 @@ pub struct ChunkView<'a, V: View<'a>> {
 }
 
 impl<'a, V: View<'a>> ChunkView<'a, V> {
+    /// Get a slice of all entities contained within the chunk.
     pub fn entities(&self) -> &'a [Entity] {
         unsafe { self.chunk.entities() }
     }
 
+    /// Get an iterator of all data contained within the chunk.
     pub fn iter(&mut self) -> V::Iter {
         V::fetch(self.chunk)
     }
 
+    /// Get an iterator of all data and entity IDs contained within the chunk.
     pub fn iter_entities(&mut self) -> ZipEntities<'a, V> {
         ZipEntities {
             entities: self.entities(),
@@ -932,10 +1105,17 @@ impl<'a, V: View<'a>> ChunkView<'a, V> {
         }
     }
 
+    /// Get a shared data value.
     pub fn shared_data<T: SharedData>(&self) -> Option<&T> {
-        unsafe { self.chunk.shared_component() }
+        self.chunk.shared_data()
     }
 
+    /// Get a slice of entity data.
+    ///
+    /// # Panics
+    ///
+    /// This method performs runtime borrow checking. It will panic if
+    /// any other code is concurrently writing to the data slice.
     pub fn data<T: EntityData>(&self) -> Option<BorrowedSlice<'a, T>> {
         if !V::reads::<T>() {
             panic!("data type not readable via this query");
@@ -943,6 +1123,12 @@ impl<'a, V: View<'a>> ChunkView<'a, V> {
         self.chunk.entity_data()
     }
 
+    /// Get a mutable slice of entity data.
+    ///
+    /// # Panics
+    ///
+    /// This method performs runtime borrow checking. It will panic if
+    /// any other code is concurrently accessing the data slice.
     pub fn data_mut<T: EntityData>(&self) -> Option<BorrowedMutSlice<'a, T>> {
         if !V::writes::<T>() {
             panic!("data type not writable via this query");
