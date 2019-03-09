@@ -241,7 +241,7 @@ use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::Peekable;
 use std::num::Wrapping;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 pub mod prelude {
@@ -309,7 +309,7 @@ pub struct Universe {
     name: String,
     logger: slog::Logger,
     allocator: Arc<Mutex<BlockAllocator>>,
-    next_id: AtomicU16,
+    next_id: AtomicUsize,
 }
 
 impl Universe {
@@ -343,7 +343,7 @@ impl Universe {
             name,
             logger,
             allocator: Arc::from(Mutex::new(BlockAllocator::new())),
-            next_id: AtomicU16::new(0),
+            next_id: AtomicUsize::new(0),
         }
     }
 
@@ -355,7 +355,7 @@ impl Universe {
     /// Worlds belonging to the same universe can be safely merged via `World.merge`.
     pub fn create_world(&self) -> World {
         World::new(
-            WorldId(self.next_id.fetch_add(1, Ordering::SeqCst)),
+            WorldId(self.next_id.fetch_add(1, Ordering::SeqCst) as u16),
             self.logger.clone(),
             EntityAllocator::new(self.allocator.clone()),
         )
