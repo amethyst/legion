@@ -8,7 +8,7 @@ Based on the [ecs_bench](https://github.com/lschmierer/ecs_bench) project.
 
 # Getting Started
 
-```
+```rust
 use legion::*;
 
 // Define our entity data types
@@ -66,7 +66,7 @@ Legion aims to be a more complete game-ready ECS than many of its predecessors.
 
 The query API can do much more than pull entity data out of the world.
 
-```
+```rust
 // *Additional data type filters*
 // It is possible to specify that entities must contain data beyond that being fetched
 let query = Read::<Position>::query()
