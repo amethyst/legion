@@ -7,7 +7,7 @@
 //! # Getting Started
 //!
 //! ```rust
-//! use legion::*;
+//! use legion::prelude::*;
 //!
 //! // Define our entity data types
 //! #[derive(Clone, Copy, Debug, PartialEq)]
@@ -67,8 +67,7 @@
 //! Additional data type filters:
 //!
 //! ```rust
-//! # use legion::*;
-//! # use legion::filter::*;
+//! # use legion::prelude::*;
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Position {
 //! #     x: f32,
@@ -96,8 +95,7 @@
 //! Filter boolean operations:
 //!
 //! ```rust
-//! # use legion::*;
-//! # use legion::filter::*;
+//! # use legion::prelude::*;
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Position {
 //! #     x: f32,
@@ -125,8 +123,7 @@
 //! Filter by shared data value:
 //!
 //! ```rust
-//! # use legion::*;
-//! # use legion::filter::*;
+//! # use legion::prelude::*;
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Position {
 //! #     x: f32,
@@ -154,8 +151,7 @@
 //! Change detection:
 //!
 //! ```rust
-//! # use legion::*;
-//! # use legion::filter::*;
+//! # use legion::prelude::*;
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Position {
 //! #     x: f32,
@@ -187,7 +183,7 @@
 //! when ready, merged into the main `World` near instantaneously.
 //!
 //! ```rust
-//! # use legion::*;
+//! # use legion::prelude::*;
 //! let universe = Universe::new(None);
 //! let mut world_a = universe.create_world();
 //! let mut world_b = universe.create_world();
@@ -203,8 +199,7 @@
 //! Entity data is allocated in blocks called "chunks", each approximately containing 64KiB of data. The query API exposes each chunk via 'iter_chunk'. As all entities in a chunk are guarenteed to contain the same set of entity data and shared data values, it is possible to do batch processing via the chunk API.
 //!
 //! ```rust
-//! # use legion::*;
-//! # use legion::filter::*;
+//! # use legion::prelude::*;
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Transform;
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
@@ -231,13 +226,12 @@
 //! }
 //! ```
 
-mod borrows;
-mod query;
-mod storage;
+pub mod borrows;
+pub mod query;
+pub mod storage;
 
-pub use crate::borrows::*;
-pub use crate::query::*;
-pub use crate::storage::*;
+use crate::borrows::*;
+use crate::storage::*;
 
 use fnv::FnvHashSet;
 use parking_lot::Mutex;
@@ -249,6 +243,11 @@ use std::iter::Peekable;
 use std::num::Wrapping;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
+
+pub mod prelude {
+    pub use crate::query::{filter::*, IntoQuery, Query, Read, Shared, Write};
+    pub use crate::{Entity, Universe, World};
+}
 
 /// Unique world ID.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -320,7 +319,7 @@ impl Universe {
     /// ```
     /// # use slog::*;
     /// # use std::sync::Mutex;
-    /// # use legion::*;
+    /// # use legion::prelude::*;
     /// // Create an slog logger
     /// let decorator = slog_term::TermDecorator::new().build();
     /// let drain = Mutex::new(slog_term::FullFormat::new(decorator).build()).fuse();
@@ -662,7 +661,7 @@ impl World {
     /// Inserting entity tuples:
     ///
     /// ```
-    /// # use legion::*;
+    /// # use legion::prelude::*;
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
     /// # struct Position(f32);
     /// # #[derive(Copy, Clone, Debug, PartialEq)]

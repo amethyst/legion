@@ -2,6 +2,11 @@
 name = "legion"
 version = "0.1.0"
 authors = ["Thomas Gillen <thomas.gillen@googlemail.com>"]
+repository = "https://github.com/TomGillen/legion"
+keywords = ["ecs", "game"]
+categories = ["game-engines", "data-structures"]
+readme = "readme.md"
+license = "MIT"
 edition = "2018"
 
 [features]

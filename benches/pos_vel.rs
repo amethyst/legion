@@ -3,7 +3,7 @@
 extern crate test;
 use test::Bencher;
 
-use legion::*;
+use legion::prelude::*;
 
 pub const N_POS_PER_VEL: usize = 10;
 pub const N_POS: usize = 10000;

@@ -1,4 +1,4 @@
-use legion::*;
+use legion::prelude::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Pos(f32, f32, f32);

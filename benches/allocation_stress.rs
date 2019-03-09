@@ -4,7 +4,7 @@ extern crate test;
 use test::Bencher;
 use std::iter::repeat;
 
-use legion::*;
+use legion::prelude::*;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct A(f32);

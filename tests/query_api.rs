@@ -1,5 +1,4 @@
-use legion::filter::*;
-use legion::*;
+use legion::prelude::*;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -425,7 +424,6 @@ fn query_on_changed_first() {
         }
     }
 
-    use filter::*;
     let query = Read::<Pos>::query().filter(changed::<Pos>() | changed::<Rot>());
 
     let mut count = 0;
