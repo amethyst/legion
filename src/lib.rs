@@ -6,7 +6,7 @@
 //!
 //! # Getting Started
 //!
-//! ```
+//! ```rust
 //! use legion::*;
 //!
 //! // Define our entity data types
@@ -64,7 +64,7 @@
 //!
 //! The query API can do much more than pull entity data out of the world.
 //!
-//! ```
+//! ```rust
 //! # use legion::*;
 //! # use legion::filter::*;
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,7 +127,7 @@
 //! Entities can be loaded and initialized in a background `World` on separate threads and then
 //! when ready, merged into the main `World` near instantaneously.
 //!
-//! ```
+//! ```rust
 //! # use legion::*;
 //! let universe = Universe::new(None);
 //! let mut world_a = universe.create_world();
@@ -137,6 +137,40 @@
 //! // Entity IDs are guarenteed to be unique across worlds and will
 //! // remain unchanged across the merge.
 //! world_a.merge(world_b);
+//! ```
+//!
+//! ### Chunk Iteration
+//!
+//! Entity data is allocated in blocks called "chunks", each approximately containing 64KiB of data. The query API exposes each chunk via 'iter_chunk'. As all entities in a chunk are guarenteed to contain the same set of entity data and shared data values, it is possible to do batch processing via the chunk API.
+//!
+//! ```rust
+//! # use legion::*;
+//! # use legion::filter::*;
+//!
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Transform;
+//!
+//! # #[derive(Clone, Copy, Debug, PartialEq)]
+//! # struct Model(usize);
+//!
+//! # let universe = Universe::new(None);
+//! # let mut world = universe.create_world();
+//!
+//! # fn render_instanced(_: &Model, _: &[Transform]) {}
+//!
+//! let query = Read::<Transform>::query()
+//!     .filter(shared_data::<Model>());
+//!
+//! for chunk in query.iter_chunks(&world) {
+//!     // get the chunk's model
+//!     let model: &Model = chunk.shared_data().unwrap();
+//!
+//!     // get a (runtime borrow checked) slice of transforms
+//!     let transforms = chunk.data::<Transform>().unwrap();
+//!
+//!     // give the model and transform slice to our renderer
+//!     render_instanced(model, &transforms);
+//! }
 //! ```
 
 mod borrows;
