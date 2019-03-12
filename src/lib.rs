@@ -38,9 +38,8 @@
 //!     (0..999).map(|_| (Position { x: 0.0, y: 0.0 }, Velocity { dx: 0.0, dy: 0.0 }))
 //! );
 //!
-//! // Create entities with `Position` data and a shared `Model` data, tagged as `Static`
-//! // Shared data values are shared across many entities,
-//! // and enable further batch processing and filtering use cases
+//! // Create entities with `Position` data and a tagged with `Model` data and as `Static`
+//! // Tags are shared across many entities, and enable further batch processing and filtering use cases
 //! world.insert_from(
 //!     (Model(5), Static),
 //!     (0..999).map(|_| (Position { x: 0.0, y: 0.0 },))
@@ -86,7 +85,7 @@
 //! # let mut world = universe.create_world();
 //! // It is possible to specify that entities must contain data beyond that being fetched
 //! let query = Read::<Position>::query()
-//!     .filter(entity_data::<Velocity>());
+//!     .filter(component::<Velocity>());
 //! for position in query.iter(&world) {
 //!     // these entities also have `Velocity`
 //! }
@@ -114,13 +113,13 @@
 //! # let mut world = universe.create_world();
 //! // Filters can be combined with boolean operators
 //! let query = Read::<Position>::query()
-//!     .filter(shared_data::<Static>() | !entity_data::<Velocity>());
+//!     .filter(tag::<Static>() | !component::<Velocity>());
 //! for position in query.iter(&world) {
 //!     // these entities are also either marked as `Static`, or do *not* have a `Velocity`
 //! }
 //! ```
 //!
-//! Filter by shared data value:
+//! Filter by tag data value:
 //!
 //! ```rust
 //! # use legion::prelude::*;
@@ -140,11 +139,11 @@
 //! # struct Static;
 //! # let universe = Universe::new(None);
 //! # let mut world = universe.create_world();
-//! // Filters can filter by specific shared data values
+//! // Filters can filter by specific tag values
 //! let query = Read::<Position>::query()
-//!     .filter(shared_data_value(&Model(3)));
+//!     .filter(tag_value(&Model(3)));
 //! for position in query.iter(&world) {
-//!     // these entities all have shared data value `Model(3)`
+//!     // these entities all have tag value `Model(3)`
 //! }
 //! ```
 //!
@@ -170,7 +169,7 @@
 //! # let mut world = universe.create_world();
 //! // Queries can perform coarse-grained change detection, rejecting entities who's data
 //! // has not changed since the last time the query was iterated.
-//! let query = <(Read<Position>, Shared<Model>)>::query()
+//! let query = <(Read<Position>, Tagged<Model>)>::query()
 //!     .filter(changed::<Position>());
 //! for (pos, model) in query.iter(&world) {
 //!     // entities who have changed position
@@ -212,14 +211,14 @@
 //! }
 //!
 //! let query = Read::<Transform>::query()
-//!     .filter(shared_data::<Model>());
+//!     .filter(tag::<Model>());
 //!
 //! for chunk in query.iter_chunks(&world) {
 //!     // get the chunk's model
-//!     let model: &Model = chunk.shared_data().unwrap();
+//!     let model: &Model = chunk.tag().unwrap();
 //!
 //!     // get a (runtime borrow checked) slice of transforms
-//!     let transforms = chunk.data::<Transform>().unwrap();
+//!     let transforms = chunk.components::<Transform>().unwrap();
 //!
 //!     // give the model and transform slice to our renderer
 //!     render_instanced(model, &transforms);
@@ -245,7 +244,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 pub mod prelude {
-    pub use crate::query::{filter::*, IntoQuery, Query, Read, Shared, Write};
+    pub use crate::query::{filter::*, IntoQuery, Query, Read, Tagged, Write};
     pub use crate::{Entity, Universe, World};
 }
 
@@ -670,30 +669,30 @@ impl World {
     /// # let mut world = universe.create_world();
     /// # let model = 0u8;
     /// # let color = 0u16;
-    /// let shared = (model, color);
+    /// let tags = (model, color);
     /// let data = vec![
     ///     (Position(0.0), Rotation(0.0)),
     ///     (Position(1.0), Rotation(1.0)),
     ///     (Position(2.0), Rotation(2.0)),
     /// ];
-    /// world.insert_from(shared, data);
+    /// world.insert_from(tags, data);
     /// ```
-    pub fn insert_from<S, T>(&mut self, shared: S, components: T) -> &[Entity]
+    pub fn insert_from<T, C>(&mut self, tags: T, components: C) -> &[Entity]
     where
-        S: SharedDataSet,
-        T: IntoIterator,
-        T::Item: EntityDataSet,
-        IterEntitySource<T::IntoIter, T::Item>: EntitySource,
+        T: TagSet,
+        C: IntoIterator,
+        C::Item: ComponentSet,
+        IterEntitySource<C::IntoIter, C::Item>: EntitySource,
     {
-        let source = T::Item::component_source(components.into_iter());
-        self.insert(shared, source)
+        let source = C::Item::component_source(components.into_iter());
+        self.insert(tags, source)
     }
 
     /// Inserts entities from an `EntitySource`.
-    pub fn insert<S, T>(&mut self, shared: S, mut components: T) -> &[Entity]
+    pub fn insert<T, C>(&mut self, tags: T, mut components: C) -> &[Entity]
     where
-        S: SharedDataSet,
-        T: EntitySource,
+        T: TagSet,
+        C: EntitySource,
     {
         // find or create archetype
         let (arch_index, archetype) = World::prep_archetype(
@@ -701,7 +700,7 @@ impl World {
             &mut self.archetypes,
             &mut self.next_arch_id,
             &mut self.logger,
-            &shared,
+            &tags,
             &components,
         );
 
@@ -710,7 +709,7 @@ impl World {
         // insert components into chunks
         while !components.is_empty() {
             // find or create chunk
-            let (chunk_index, chunk) = archetype.get_or_create_chunk(&shared, &components);
+            let (chunk_index, chunk) = archetype.get_or_create_chunk(&tags, &components);
 
             // insert as many components as we can into the chunk
             let allocated = components.write(chunk, &mut self.allocator);
@@ -779,13 +778,13 @@ impl World {
     ///
     /// This function borrows all components of type `T` in the world. It may panic if
     /// any other code is currently borrowing `T` mutably (such as in a query).
-    pub fn entity_data<'a, T: EntityData>(&'a self, entity: Entity) -> Option<Borrowed<'a, T>> {
+    pub fn component<'a, T: Component>(&'a self, entity: Entity) -> Option<Borrowed<'a, T>> {
         self.allocator.get_location(&entity.index).and_then(
             |(archetype_id, chunk_id, component_id)| {
                 self.archetypes
                     .get(archetype_id as usize)
                     .and_then(|archetype| archetype.chunk(chunk_id))
-                    .and_then(|chunk| chunk.entity_data::<T>())
+                    .and_then(|chunk| chunk.components::<T>())
                     .and_then(|vec| vec.single(component_id as usize))
             },
         )
@@ -795,14 +794,14 @@ impl World {
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
-    pub fn entity_data_mut<T: EntityData>(&mut self, entity: Entity) -> Option<&mut T> {
+    pub fn component_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
         let archetypes = &self.archetypes;
         self.allocator.get_location(&entity.index).and_then(
             |(archetype_id, chunk_id, component_id)| {
                 archetypes
                     .get(archetype_id as usize)
                     .and_then(|archetype| archetype.chunk(chunk_id))
-                    .and_then(|chunk| unsafe { chunk.entity_data_mut_unchecked::<T>() })
+                    .and_then(|chunk| unsafe { chunk.components_mut_unchecked::<T>() })
                     .and_then(|vec| vec.get_mut(component_id as usize))
             },
         )
@@ -812,29 +811,29 @@ impl World {
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
-    pub fn shared<T: SharedData>(&self, entity: Entity) -> Option<&T> {
+    pub fn tag<T: Tag>(&self, entity: Entity) -> Option<&T> {
         self.allocator
             .get_location(&entity.index)
             .and_then(|(archetype_id, chunk_id, _)| {
                 self.archetypes
                     .get(archetype_id as usize)
                     .and_then(|archetype| archetype.chunk(chunk_id))
-                    .and_then(|chunk| chunk.shared_data::<T>())
+                    .and_then(|chunk| chunk.tag::<T>())
             })
     }
 
-    fn prep_archetype<'a, S: SharedDataSet, C: EntitySource>(
+    fn prep_archetype<'a, T: TagSet, C: EntitySource>(
         id: &WorldId,
         archetypes: &'a mut Vec<Archetype>,
         next_arch_id: &mut u16,
         logger: &slog::Logger,
-        shared: &S,
+        tags: &T,
         components: &C,
     ) -> (ArchetypeIndex, &'a mut Archetype) {
         match archetypes
             .iter()
             .enumerate()
-            .filter(|(_, a)| components.is_archetype_match(a) && shared.is_archetype_match(a))
+            .filter(|(_, a)| components.is_archetype_match(a) && tags.is_archetype_match(a))
             .map(|(i, _)| i)
             .next()
         {
@@ -850,7 +849,7 @@ impl World {
                     archetype_id,
                     logger.clone(),
                     components.types(),
-                    shared.types(),
+                    tags.types(),
                 );
                 archetypes.push(archetype);
 
@@ -865,8 +864,8 @@ impl World {
     }
 }
 
-/// Inserts shared data into a `Chunk` in a `World`.
-pub trait SharedDataSet {
+/// Inserts tags into a `Chunk` in a `World`.
+pub trait TagSet {
     /// Determines if the given archetype is compatible with the data
     /// contained in the data set.
     fn is_archetype_match(&self, archetype: &Archetype) -> bool;
@@ -875,15 +874,15 @@ pub trait SharedDataSet {
     /// contained in the data set.
     fn is_chunk_match(&self, chunk: &Chunk) -> bool;
 
-    /// Configures a new chunk to include the shared data in this data set.
+    /// Configures a new chunk to include the tags in this data set.
     fn configure_chunk(&self, chunk: &mut ChunkBuilder);
 
-    /// Gets the type of shared data contained in this data set.
+    /// Gets the type of tags contained in this data set.
     fn types(&self) -> FnvHashSet<TypeId>;
 }
 
 /// A set of entity data components.
-pub trait EntityDataSet: Sized {
+pub trait ComponentSet: Sized {
     /// Converts an iterator of `Self` into an `EntitySource`.
     fn component_source<T>(source: T) -> IterEntitySource<T, Self>
     where
@@ -914,9 +913,9 @@ pub trait EntitySource {
     fn write<'a>(&mut self, chunk: &'a mut Chunk, allocator: &mut EntityAllocator) -> usize;
 }
 
-impl SharedDataSet for () {
+impl TagSet for () {
     fn is_archetype_match(&self, archetype: &Archetype) -> bool {
-        archetype.shared.len() == 0
+        archetype.tags.len() == 0
     }
 
     fn is_chunk_match(&self, _: &Chunk) -> bool {
@@ -932,26 +931,26 @@ impl SharedDataSet for () {
 
 macro_rules! impl_shared_data_set {
     ( $arity: expr; $( $ty: ident ),* ) => {
-        impl<$( $ty ),*> SharedDataSet for ($( $ty, )*)
-        where $( $ty: SharedData ),*
+        impl<$( $ty ),*> TagSet for ($( $ty, )*)
+        where $( $ty: Tag ),*
         {
             fn is_archetype_match(&self, archetype: &Archetype) -> bool {
-                archetype.shared.len() == $arity &&
-                $( archetype.shared.contains(&TypeId::of::<$ty>()) )&&*
+                archetype.tags.len() == $arity &&
+                $( archetype.tags.contains(&TypeId::of::<$ty>()) )&&*
             }
 
             fn is_chunk_match(&self, chunk: &Chunk) -> bool {
                 #![allow(non_snake_case)]
                 let ($($ty,)*) = self;
                 $(
-                    (*chunk.shared_data::<$ty>().unwrap() == *$ty)
+                    (*chunk.tag::<$ty>().unwrap() == *$ty)
                 )&&*
             }
 
             fn configure_chunk(&self, chunk: &mut ChunkBuilder) {
                 #![allow(non_snake_case)]
                 let ($( ref $ty, )*) = self;
-                $( chunk.register_shared($ty.clone()); )*
+                $( chunk.register_tag($ty.clone()); )*
             }
 
             fn types(&self) -> FnvHashSet<TypeId> {
@@ -974,8 +973,8 @@ pub struct IterEntitySource<T: Iterator<Item = K>, K> {
 
 macro_rules! impl_component_source {
     ( $arity: expr; $( $ty: ident => $id: ident ),* ) => {
-        impl<$( $ty ),*> EntityDataSet for ($( $ty, )*)
-        where $( $ty: EntityData ),*
+        impl<$( $ty ),*> ComponentSet for ($( $ty, )*)
+        where $( $ty: Component ),*
         {
             fn component_source<T>(source: T) -> IterEntitySource<T, Self>
                 where T: Iterator<Item=Self>
@@ -986,7 +985,7 @@ macro_rules! impl_component_source {
 
         impl<I, $( $ty ),*> EntitySource for IterEntitySource<I, ($( $ty, )*)>
         where I: Iterator<Item=($( $ty, )*)>,
-              $( $ty: EntityData ),*
+              $( $ty: Component ),*
         {
             fn types(&self) -> FnvHashSet<TypeId> {
                 [$( TypeId::of::<$ty>() ),*].iter().cloned().collect()
@@ -1016,7 +1015,7 @@ macro_rules! impl_component_source {
                 unsafe {
                     let entities = chunk.entities_unchecked();
                     $(
-                        let $ty = chunk.entity_data_mut_unchecked::<$ty>().unwrap();
+                        let $ty = chunk.components_mut_unchecked::<$ty>().unwrap();
                     )*
 
                     while let Some(($( $id, )*)) = { if chunk.is_full() { None } else { self.source.next() } } {
@@ -1043,13 +1042,13 @@ impl_component_source!(4; A => a, B => b, C => c, D => d);
 impl_component_source!(5; A => a, B => b, C => c, D => d, E => e);
 
 /// Components that are stored once per entity.
-pub trait EntityData: Send + Sync + Sized + Debug + 'static {}
+pub trait Component: Send + Sync + Sized + Debug + 'static {}
 
 /// Components that are shared across multiple entities.
-pub trait SharedData: Send + Sync + Sized + PartialEq + Clone + Debug + 'static {}
+pub trait Tag: Send + Sync + Sized + PartialEq + Clone + Debug + 'static {}
 
-impl<T: Send + Sync + Sized + Debug + 'static> EntityData for T {}
-impl<T: Send + Sized + PartialEq + Clone + Sync + Debug + 'static> SharedData for T {}
+impl<T: Send + Sync + Sized + Debug + 'static> Component for T {}
+impl<T: Send + Sized + PartialEq + Clone + Sync + Debug + 'static> Tag for T {}
 
 #[cfg(test)]
 mod tests {
@@ -1184,7 +1183,7 @@ mod tests {
         let universe = Universe::new(None);
         let world = universe.create_world();
 
-        assert_eq!(None, world.entity_data::<i32>(Entity::new(0, Wrapping(0))));
+        assert_eq!(None, world.component::<i32>(Entity::new(0, Wrapping(0))));
     }
 
     #[test]
@@ -1192,6 +1191,6 @@ mod tests {
         let universe = Universe::new(None);
         let world = universe.create_world();
 
-        assert_eq!(None, world.shared::<i32>(Entity::new(0, Wrapping(0))));
+        assert_eq!(None, world.tag::<i32>(Entity::new(0, Wrapping(0))));
     }
 }

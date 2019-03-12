@@ -390,7 +390,7 @@ fn query_read_shared_data() {
 
     world.insert_from(shared, components.clone());
 
-    let query = Shared::<Static>::query();
+    let query = Tagged::<Static>::query();
 
     let mut count = 0;
     for marker in query.iter(&world) {

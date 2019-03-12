@@ -54,13 +54,13 @@ impl<T: Debug + 'static> ComponentStorage for StorageVec<T> {
     }
 }
 
-impl_downcast!(SharedComponentStorage);
-trait SharedComponentStorage: Downcast + Debug {}
+impl_downcast!(TagStorage);
+trait TagStorage: Downcast + Debug {}
 
 #[derive(Debug)]
-struct SharedComponentStore<T>(UnsafeCell<T>);
+struct TagStore<T>(UnsafeCell<T>);
 
-impl<T: SharedData> SharedComponentStorage for SharedComponentStore<T> {}
+impl<T: Tag> TagStorage for TagStore<T> {}
 
 /// Raw unsafe storage for components associated with entities.
 ///
@@ -73,7 +73,7 @@ pub struct Chunk {
     capacity: usize,
     entities: StorageVec<Entity>,
     components: FnvHashMap<TypeId, Box<dyn ComponentStorage>>,
-    shared: FnvHashMap<TypeId, Arc<dyn SharedComponentStorage>>,
+    tags: FnvHashMap<TypeId, Arc<dyn TagStorage>>,
     borrows: FnvHashMap<TypeId, AtomicIsize>,
 }
 
@@ -115,7 +115,7 @@ impl Chunk {
         self.entities.data_mut()
     }
 
-    /// Gets a vector of entity data.
+    /// Gets a vector of component data.
     ///
     /// Returns `None` if the chunk does not contain the requested data type.
     ///
@@ -123,14 +123,14 @@ impl Chunk {
     ///
     /// This function bypasses any borrow checking. Ensure no other code is writing to
     /// this component type in the chunk before calling this function.
-    pub unsafe fn entity_data_unchecked<T: EntityData>(&self) -> Option<&Vec<T>> {
+    pub unsafe fn components_unchecked<T: Component>(&self) -> Option<&Vec<T>> {
         self.components
             .get(&TypeId::of::<T>())
             .and_then(|c| c.downcast_ref::<StorageVec<T>>())
             .map(|c| c.data())
     }
 
-    /// Gets a mutable vector of entity data.
+    /// Gets a mutable vector of component data.
     ///
     /// Returns `None` if the chunk does not contain the requested data type.
     ///
@@ -138,14 +138,14 @@ impl Chunk {
     ///
     /// This function bypasses any borrow checking. Ensure no other code is reaing or writing to
     /// this component type in the chunk before calling this function.
-    pub unsafe fn entity_data_mut_unchecked<T: EntityData>(&self) -> Option<&mut Vec<T>> {
+    pub unsafe fn components_mut_unchecked<T: Component>(&self) -> Option<&mut Vec<T>> {
         self.components
             .get(&TypeId::of::<T>())
             .and_then(|c| c.downcast_ref::<StorageVec<T>>())
             .map(|c| c.data_mut())
     }
 
-    /// Gets a slice of entity data.
+    /// Gets a slice of component data.
     ///
     /// Returns `None` if the chunk does not contain the requested data type.
     ///
@@ -153,8 +153,8 @@ impl Chunk {
     ///
     /// This function performs runtime borrow checking. It will panic if other code is borrowing
     /// the same component type mutably.
-    pub fn entity_data<'a, T: EntityData>(&'a self) -> Option<BorrowedSlice<'a, T>> {
-        match unsafe { self.entity_data_unchecked() } {
+    pub fn components<'a, T: Component>(&'a self) -> Option<BorrowedSlice<'a, T>> {
+        match unsafe { self.components_unchecked() } {
             Some(data) => {
                 let borrow = self.borrow::<T>();
                 Some(BorrowedSlice::new(data, borrow))
@@ -163,7 +163,7 @@ impl Chunk {
         }
     }
 
-    /// Gets a mutable slice of entity data.
+    /// Gets a mutable slice of component data.
     ///
     /// Returns `None` if the chunk does not contain the requested data type.
     ///
@@ -171,8 +171,8 @@ impl Chunk {
     ///
     /// This function performs runtime borrow checking. It will panic if other code is borrowing
     /// the same component type.
-    pub fn entity_data_mut<'a, T: EntityData>(&'a self) -> Option<BorrowedMutSlice<'a, T>> {
-        match unsafe { self.entity_data_mut_unchecked() } {
+    pub fn components_mut<'a, T: Component>(&'a self) -> Option<BorrowedMutSlice<'a, T>> {
+        match unsafe { self.components_mut_unchecked() } {
             Some(data) => {
                 let borrow = self.borrow_mut::<T>();
                 Some(BorrowedMutSlice::new(data, borrow))
@@ -185,21 +185,21 @@ impl Chunk {
     ///
     /// Each component array in the slice has a version number which is
     /// automatically incremented every time it is retrieved mutably.
-    pub fn entity_data_version<T: EntityData>(&self) -> Option<usize> {
+    pub fn component_version<T: Component>(&self) -> Option<usize> {
         self.components
             .get(&TypeId::of::<T>())
             .and_then(|c| c.downcast_ref::<StorageVec<T>>())
             .map(|c| c.version())
     }
 
-    /// Gets a shared data value associated with all entities in the chunk.
+    /// Gets a tag value associated with all entities in the chunk.
     ///
     /// Returns `None` if the chunk does not contain the requested data type.
-    pub fn shared_data<T: SharedData>(&self) -> Option<&T> {
+    pub fn tag<T: Tag>(&self) -> Option<&T> {
         unsafe {
-            self.shared
+            self.tags
                 .get(&TypeId::of::<T>())
-                .and_then(|s| s.downcast_ref::<SharedComponentStore<T>>())
+                .and_then(|s| s.downcast_ref::<TagStore<T>>())
                 .map(|s| &*s.0.get())
         }
     }
@@ -235,7 +235,7 @@ impl Chunk {
         }
     }
 
-    fn borrow<'a, T: EntityData>(&'a self) -> Borrow<'a> {
+    fn borrow<'a, T: Component>(&'a self) -> Borrow<'a> {
         let id = TypeId::of::<T>();
         let state = self
             .borrows
@@ -244,7 +244,7 @@ impl Chunk {
         Borrow::aquire_read(state).unwrap()
     }
 
-    fn borrow_mut<'a, T: EntityData>(&'a self) -> Borrow<'a> {
+    fn borrow_mut<'a, T: Component>(&'a self) -> Borrow<'a> {
         let id = TypeId::of::<T>();
         let state = self
             .borrows
@@ -261,7 +261,7 @@ pub struct ChunkBuilder {
         usize,
         Box<dyn FnMut(usize) -> Box<dyn ComponentStorage>>,
     )>,
-    shared: FnvHashMap<TypeId, Arc<dyn SharedComponentStorage>>,
+    tags: FnvHashMap<TypeId, Arc<dyn TagStorage>>,
 }
 
 impl ChunkBuilder {
@@ -271,12 +271,12 @@ impl ChunkBuilder {
     pub fn new() -> ChunkBuilder {
         ChunkBuilder {
             components: Vec::new(),
-            shared: FnvHashMap::default(),
+            tags: FnvHashMap::default(),
         }
     }
 
     /// Registers an entity data component type.
-    pub fn register_component<T: EntityData>(&mut self) {
+    pub fn register_component<T: Component>(&mut self) {
         let constructor = |capacity| {
             Box::new(StorageVec::<T>::with_capacity(capacity)) as Box<dyn ComponentStorage>
         };
@@ -284,12 +284,11 @@ impl ChunkBuilder {
             .push((TypeId::of::<T>(), size_of::<T>(), Box::new(constructor)));
     }
 
-    /// Registers a shared data component type.
-    pub fn register_shared<T: SharedData>(&mut self, data: T) {
-        self.shared.insert(
+    /// Registers a tag type.
+    pub fn register_tag<T: Tag>(&mut self, data: T) {
+        self.tags.insert(
             TypeId::of::<T>(),
-            Arc::new(SharedComponentStore(UnsafeCell::new(data)))
-                as Arc<dyn SharedComponentStorage>,
+            Arc::new(TagStore(UnsafeCell::new(data))) as Arc<dyn TagStorage>,
         );
     }
 
@@ -316,7 +315,7 @@ impl ChunkBuilder {
                 .into_iter()
                 .map(|(id, _, mut con)| (id, con(capacity)))
                 .collect(),
-            shared: self.shared,
+            tags: self.tags,
         }
     }
 }
@@ -329,8 +328,8 @@ pub struct Archetype {
     next_chunk_id: u16,
     /// The entity data component types that all chunks contain.
     pub components: FnvHashSet<TypeId>,
-    /// The shared data component types that all chunks contains.
-    pub shared: FnvHashSet<TypeId>,
+    /// The tag types that all chunks contains.
+    pub tags: FnvHashSet<TypeId>,
     /// The chunks that belong to this archetype.
     pub chunks: Vec<Chunk>,
 }
@@ -341,14 +340,14 @@ impl Archetype {
         id: ArchetypeId,
         logger: slog::Logger,
         components: FnvHashSet<TypeId>,
-        shared: FnvHashSet<TypeId>,
+        tags: FnvHashSet<TypeId>,
     ) -> Archetype {
         Archetype {
             id,
             logger,
             next_chunk_id: 0,
             components,
-            shared,
+            tags,
             chunks: Vec::new(),
         }
     }
@@ -364,13 +363,13 @@ impl Archetype {
     }
 
     /// Determines if the archetype's chunks contain the given entity data component type.
-    pub fn has_component<T: EntityData>(&self) -> bool {
+    pub fn has_component<T: Component>(&self) -> bool {
         self.components.contains(&TypeId::of::<T>())
     }
 
-    /// Determines if the archetype's chunks contain the given shared data component type.
-    pub fn has_shared<T: SharedData>(&self) -> bool {
-        self.shared.contains(&TypeId::of::<T>())
+    /// Determines if the archetype's chunks contain the given tag type.
+    pub fn has_tag<T: Tag>(&self) -> bool {
+        self.tags.contains(&TypeId::of::<T>())
     }
 
     /// Gets a slice reference of chunks.
@@ -379,23 +378,23 @@ impl Archetype {
     }
 
     /// Finds a chunk which is suitable for the given data sources, or constructs a new one.
-    pub fn get_or_create_chunk<'a, 'b, 'c, S: SharedDataSet, C: EntitySource>(
+    pub fn get_or_create_chunk<'a, 'b, 'c, S: TagSet, C: EntitySource>(
         &'a mut self,
-        shared: &'b S,
+        tags: &'b S,
         components: &'c C,
     ) -> (ChunkIndex, &'a mut Chunk) {
         match self
             .chunks
             .iter()
             .enumerate()
-            .filter(|(_, c)| !c.is_full() && shared.is_chunk_match(c))
+            .filter(|(_, c)| !c.is_full() && tags.is_chunk_match(c))
             .map(|(i, _)| i)
             .next()
         {
             Some(i) => (i as ChunkIndex, unsafe { self.chunks.get_unchecked_mut(i) }),
             None => {
                 let mut builder = ChunkBuilder::new();
-                shared.configure_chunk(&mut builder);
+                tags.configure_chunk(&mut builder);
                 components.configure_chunk(&mut builder);
 
                 let chunk_id = self.id.chunk(self.next_chunk_id);

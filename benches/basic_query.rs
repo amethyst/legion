@@ -1,7 +1,4 @@
-#[macro_use]
-extern crate criterion;
-
-use criterion::Criterion;
+use criterion::*;
 
 use itertools::*;
 use legion::prelude::*;

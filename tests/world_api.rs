@@ -44,11 +44,11 @@ fn get_component() {
     }
 
     for (i, e) in entities.iter().enumerate() {
-        match world.entity_data(*e) {
+        match world.component(*e) {
             Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
             None => assert_eq!(components.get(i).map(|(x, _)| x), None),
         }
-        match world.entity_data(*e) {
+        match world.component(*e) {
             Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
             None => assert_eq!(components.get(i).map(|(_, x)| x), None),
         }
@@ -62,7 +62,7 @@ fn get_component_wrong_type() {
 
     let entity = *world.insert_from((), vec![(0f64,)]).get(0).unwrap();
 
-    assert_eq!(None, world.entity_data::<i32>(entity));
+    assert_eq!(None, world.component::<i32>(entity));
 }
 
 #[test]
@@ -82,8 +82,8 @@ fn get_shared() {
     }
 
     for e in entities.iter() {
-        assert_eq!(Some(&Static), world.shared(*e));
-        assert_eq!(Some(&Model(5)), world.shared(*e));
+        assert_eq!(Some(&Static), world.tag(*e));
+        assert_eq!(Some(&Model(5)), world.tag(*e));
     }
 }
 
@@ -94,7 +94,7 @@ fn get_shared_wrong_type() {
 
     let entity = *world.insert_from((Static,), vec![(0f64,)]).get(0).unwrap();
 
-    assert_eq!(None, world.shared::<Model>(entity));
+    assert_eq!(None, world.tag::<Model>(entity));
 }
 
 #[test]
@@ -145,11 +145,11 @@ fn delete_last() {
 
     for (i, e) in entities.iter().take(entities.len() - 1).enumerate() {
         assert_eq!(true, world.is_alive(e));
-        match world.entity_data(*e) {
+        match world.component(*e) {
             Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
             None => assert_eq!(components.get(i).map(|(x, _)| x), None),
         }
-        match world.entity_data(*e) {
+        match world.component(*e) {
             Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
             None => assert_eq!(components.get(i).map(|(_, x)| x), None),
         }
@@ -179,11 +179,11 @@ fn delete_first() {
 
     for (i, e) in entities.iter().skip(1).enumerate() {
         assert_eq!(true, world.is_alive(e));
-        match world.entity_data(*e) {
+        match world.component(*e) {
             Some(x) => assert_eq!(components.get(i + 1).map(|(x, _)| x), Some(&x as &Pos)),
             None => assert_eq!(components.get(i + 1).map(|(x, _)| x), None),
         }
-        match world.entity_data(*e) {
+        match world.component(*e) {
             Some(x) => assert_eq!(components.get(i + 1).map(|(_, x)| x), Some(&x as &Rot)),
             None => assert_eq!(components.get(i + 1).map(|(_, x)| x), None),
         }
@@ -218,7 +218,7 @@ fn merge() {
         assert!(world_1.is_alive(e));
 
         let (pos, rot) = components.get(i).unwrap();
-        assert_eq!(pos, &world_1.entity_data(*e).unwrap() as &Pos);
-        assert_eq!(rot, &world_1.entity_data(*e).unwrap() as &Rot);
+        assert_eq!(pos, &world_1.component(*e).unwrap() as &Pos);
+        assert_eq!(rot, &world_1.component(*e).unwrap() as &Rot);
     }
 }

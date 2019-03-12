@@ -33,10 +33,10 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
     fn validate() -> bool;
 
     /// Determines if the view reads the specified data type.
-    fn reads<T: EntityData>() -> bool;
+    fn reads<T: Component>() -> bool;
 
     /// Determines if the view writes to the specified data type.
-    fn writes<T: EntityData>() -> bool;
+    fn writes<T: Component>() -> bool;
 }
 
 #[doc(hidden)]
@@ -65,91 +65,91 @@ impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
 
 /// Reads a single entity data component type from a `Chunk`.
 #[derive(Debug)]
-pub struct Read<T: EntityData>(PhantomData<T>);
+pub struct Read<T: Component>(PhantomData<T>);
 
-impl<T: EntityData> DefaultFilter for Read<T> {
-    type Filter = EntityDataFilter<T>;
+impl<T: Component> DefaultFilter for Read<T> {
+    type Filter = ComponentFilter<T>;
 
     fn filter() -> Self::Filter {
-        EntityDataFilter::new()
+        ComponentFilter::new()
     }
 }
 
-impl<'a, T: EntityData> View<'a> for Read<T> {
+impl<'a, T: Component> View<'a> for Read<T> {
     type Iter = BorrowedIter<'a, Iter<'a, T>>;
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        chunk.entity_data().unwrap().into_iter()
+        chunk.components().unwrap().into_iter()
     }
 
     fn validate() -> bool {
         true
     }
 
-    fn reads<D: EntityData>() -> bool {
+    fn reads<D: Component>() -> bool {
         TypeId::of::<T>() == TypeId::of::<D>()
     }
 
-    fn writes<D: EntityData>() -> bool {
+    fn writes<D: Component>() -> bool {
         false
     }
 }
 
-impl<T: EntityData> ViewElement for Read<T> {
+impl<T: Component> ViewElement for Read<T> {
     type Component = T;
 }
 
 /// Writes to a single entity data component type in a `Chunk`.
 #[derive(Debug)]
-pub struct Write<T: EntityData>(PhantomData<T>);
+pub struct Write<T: Component>(PhantomData<T>);
 
-impl<T: EntityData> DefaultFilter for Write<T> {
-    type Filter = EntityDataFilter<T>;
+impl<T: Component> DefaultFilter for Write<T> {
+    type Filter = ComponentFilter<T>;
     fn filter() -> Self::Filter {
-        EntityDataFilter::new()
+        ComponentFilter::new()
     }
 }
 
-impl<'a, T: EntityData> View<'a> for Write<T> {
+impl<'a, T: Component> View<'a> for Write<T> {
     type Iter = BorrowedIter<'a, IterMut<'a, T>>;
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        chunk.entity_data_mut().unwrap().into_iter()
+        chunk.components_mut().unwrap().into_iter()
     }
 
     fn validate() -> bool {
         true
     }
 
-    fn reads<D: EntityData>() -> bool {
+    fn reads<D: Component>() -> bool {
         TypeId::of::<T>() == TypeId::of::<D>()
     }
 
-    fn writes<D: EntityData>() -> bool {
+    fn writes<D: Component>() -> bool {
         TypeId::of::<T>() == TypeId::of::<D>()
     }
 }
 
-impl<T: EntityData> ViewElement for Write<T> {
+impl<T: Component> ViewElement for Write<T> {
     type Component = T;
 }
 
 /// Reads a single shared data component type in a `Chunk`.
 #[derive(Debug)]
-pub struct Shared<T: SharedData>(PhantomData<T>);
+pub struct Tagged<T: Tag>(PhantomData<T>);
 
-impl<T: SharedData> DefaultFilter for Shared<T> {
-    type Filter = SharedDataFilter<T>;
+impl<T: Tag> DefaultFilter for Tagged<T> {
+    type Filter = TagFilter<T>;
     fn filter() -> Self::Filter {
-        SharedDataFilter::new()
+        TagFilter::new()
     }
 }
 
-impl<'a, T: SharedData> View<'a> for Shared<T> {
+impl<'a, T: Tag> View<'a> for Tagged<T> {
     type Iter = Take<Repeat<&'a T>>;
 
     fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        let data: &T = chunk.shared_data().unwrap();
+        let data: &T = chunk.tag().unwrap();
         std::iter::repeat(data).take(chunk.len())
     }
 
@@ -157,17 +157,17 @@ impl<'a, T: SharedData> View<'a> for Shared<T> {
         true
     }
 
-    fn reads<D: EntityData>() -> bool {
+    fn reads<D: Component>() -> bool {
         false
     }
 
-    fn writes<D: EntityData>() -> bool {
+    fn writes<D: Component>() -> bool {
         false
     }
 }
 
-impl<T: SharedData> ViewElement for Shared<T> {
-    type Component = Shared<T>;
+impl<T: Tag> ViewElement for Tagged<T> {
+    type Component = Tagged<T>;
 }
 
 macro_rules! impl_view_tuple {
@@ -202,11 +202,11 @@ macro_rules! impl_view_tuple {
                 true
             }
 
-            fn reads<Data: EntityData>() -> bool {
+            fn reads<Data: Component>() -> bool {
                 $( $ty::reads::<Data>() )||*
             }
 
-            fn writes<Data: EntityData>() -> bool {
+            fn writes<Data: Component>() -> bool {
                 $( $ty::reads::<Data>() )||*
             }
         }
@@ -234,26 +234,26 @@ pub mod filter {
 
     /// Creates an entity data filter which includes chunks that contain
     /// entity data components of type `T`.
-    pub fn entity_data<T: EntityData>() -> EntityDataFilter<T> {
-        EntityDataFilter::new()
+    pub fn component<T: Component>() -> ComponentFilter<T> {
+        ComponentFilter::new()
     }
 
     /// Creates a shared data filter which includes chunks that contain
     /// shared data components of type `T`.
-    pub fn shared_data<T: SharedData>() -> SharedDataFilter<T> {
-        SharedDataFilter::new()
+    pub fn tag<T: Tag>() -> TagFilter<T> {
+        TagFilter::new()
     }
 
     /// Creates a shared data filter which includes chunks that contain
     /// specific shared data values.
-    pub fn shared_data_value<'a, T: SharedData>(data: &'a T) -> SharedDataValueFilter<'a, T> {
-        SharedDataValueFilter::new(data)
+    pub fn tag_value<'a, T: Tag>(data: &'a T) -> TagValueFilter<'a, T> {
+        TagValueFilter::new(data)
     }
 
     /// Creates a filter which includes chunks for which entity data components
     /// of type `T` have changed since the filter was last executed.
-    pub fn changed<T: EntityData>() -> EntityDataChangedFilter<T> {
-        EntityDataChangedFilter::new()
+    pub fn changed<T: Component>() -> ComponentChangedFilter<T> {
+        ComponentChangedFilter::new()
     }
 }
 
@@ -475,15 +475,15 @@ impl_or_filter!(A, B, C, D, E, F);
 
 /// A filter which requires the chunk contain entity data components of type `T`.
 #[derive(Debug)]
-pub struct EntityDataFilter<T>(PhantomData<T>);
+pub struct ComponentFilter<T>(PhantomData<T>);
 
-impl<T: EntityData> EntityDataFilter<T> {
+impl<T: Component> ComponentFilter<T> {
     fn new() -> Self {
-        EntityDataFilter(PhantomData)
+        ComponentFilter(PhantomData)
     }
 }
 
-impl<T: EntityData> Filter for EntityDataFilter<T> {
+impl<T: Component> Filter for ComponentFilter<T> {
     #[inline]
     fn filter_archetype(&self, archetype: &Archetype) -> bool {
         archetype.has_component::<T>()
@@ -495,7 +495,7 @@ impl<T: EntityData> Filter for EntityDataFilter<T> {
     }
 }
 
-impl<T: EntityData> std::ops::Not for EntityDataFilter<T> {
+impl<T: Component> std::ops::Not for ComponentFilter<T> {
     type Output = Not<Self>;
 
     fn not(self) -> Self::Output {
@@ -503,7 +503,7 @@ impl<T: EntityData> std::ops::Not for EntityDataFilter<T> {
     }
 }
 
-impl<Rhs: Filter, T: EntityData> std::ops::BitAnd<Rhs> for EntityDataFilter<T> {
+impl<Rhs: Filter, T: Component> std::ops::BitAnd<Rhs> for ComponentFilter<T> {
     type Output = And<(Self, Rhs)>;
 
     fn bitand(self, rhs: Rhs) -> Self::Output {
@@ -513,7 +513,7 @@ impl<Rhs: Filter, T: EntityData> std::ops::BitAnd<Rhs> for EntityDataFilter<T> {
     }
 }
 
-impl<Rhs: Filter, T: EntityData> std::ops::BitOr<Rhs> for EntityDataFilter<T> {
+impl<Rhs: Filter, T: Component> std::ops::BitOr<Rhs> for ComponentFilter<T> {
     type Output = Or<(Self, Rhs)>;
 
     fn bitor(self, rhs: Rhs) -> Self::Output {
@@ -525,18 +525,18 @@ impl<Rhs: Filter, T: EntityData> std::ops::BitOr<Rhs> for EntityDataFilter<T> {
 
 /// A filter which requires the chunk contain shared data components of type `T`.
 #[derive(Debug)]
-pub struct SharedDataFilter<T>(PhantomData<T>);
+pub struct TagFilter<T>(PhantomData<T>);
 
-impl<T: SharedData> SharedDataFilter<T> {
+impl<T: Tag> TagFilter<T> {
     fn new() -> Self {
-        SharedDataFilter(PhantomData)
+        TagFilter(PhantomData)
     }
 }
 
-impl<T: SharedData> Filter for SharedDataFilter<T> {
+impl<T: Tag> Filter for TagFilter<T> {
     #[inline]
     fn filter_archetype(&self, archetype: &Archetype) -> bool {
-        archetype.has_shared::<T>()
+        archetype.has_tag::<T>()
     }
 
     #[inline]
@@ -545,7 +545,7 @@ impl<T: SharedData> Filter for SharedDataFilter<T> {
     }
 }
 
-impl<T: SharedData> std::ops::Not for SharedDataFilter<T> {
+impl<T: Tag> std::ops::Not for TagFilter<T> {
     type Output = Not<Self>;
 
     fn not(self) -> Self::Output {
@@ -553,7 +553,7 @@ impl<T: SharedData> std::ops::Not for SharedDataFilter<T> {
     }
 }
 
-impl<Rhs: Filter, T: SharedData> std::ops::BitAnd<Rhs> for SharedDataFilter<T> {
+impl<Rhs: Filter, T: Tag> std::ops::BitAnd<Rhs> for TagFilter<T> {
     type Output = And<(Self, Rhs)>;
 
     fn bitand(self, rhs: Rhs) -> Self::Output {
@@ -563,7 +563,7 @@ impl<Rhs: Filter, T: SharedData> std::ops::BitAnd<Rhs> for SharedDataFilter<T> {
     }
 }
 
-impl<Rhs: Filter, T: SharedData> std::ops::BitOr<Rhs> for SharedDataFilter<T> {
+impl<Rhs: Filter, T: Tag> std::ops::BitOr<Rhs> for TagFilter<T> {
     type Output = Or<(Self, Rhs)>;
 
     fn bitor(self, rhs: Rhs) -> Self::Output {
@@ -573,19 +573,19 @@ impl<Rhs: Filter, T: SharedData> std::ops::BitOr<Rhs> for SharedDataFilter<T> {
     }
 }
 
-/// A filter which requires the chunk contain entity data values of a specific value.
+/// A filter which requires the chunk contain tags of a specific value.
 #[derive(Debug)]
-pub struct SharedDataValueFilter<'a, T> {
+pub struct TagValueFilter<'a, T> {
     value: &'a T,
 }
 
-impl<'a, T: SharedData> SharedDataValueFilter<'a, T> {
+impl<'a, T: Tag> TagValueFilter<'a, T> {
     fn new(value: &'a T) -> Self {
-        SharedDataValueFilter { value }
+        TagValueFilter { value }
     }
 }
 
-impl<'a, T: SharedData> Filter for SharedDataValueFilter<'a, T> {
+impl<'a, T: Tag> Filter for TagValueFilter<'a, T> {
     #[inline]
     fn filter_archetype(&self, _: &Archetype) -> bool {
         true
@@ -593,11 +593,11 @@ impl<'a, T: SharedData> Filter for SharedDataValueFilter<'a, T> {
 
     #[inline]
     fn filter_chunk(&self, chunk: &Chunk) -> bool {
-        chunk.shared_data::<T>().map_or(false, |s| s == self.value)
+        chunk.tag::<T>().map_or(false, |s| s == self.value)
     }
 }
 
-impl<'a, T: SharedData> std::ops::Not for SharedDataValueFilter<'a, T> {
+impl<'a, T: Tag> std::ops::Not for TagValueFilter<'a, T> {
     type Output = Not<Self>;
 
     fn not(self) -> Self::Output {
@@ -605,7 +605,7 @@ impl<'a, T: SharedData> std::ops::Not for SharedDataValueFilter<'a, T> {
     }
 }
 
-impl<'a, Rhs: Filter, T: SharedData> std::ops::BitAnd<Rhs> for SharedDataValueFilter<'a, T> {
+impl<'a, Rhs: Filter, T: Tag> std::ops::BitAnd<Rhs> for TagValueFilter<'a, T> {
     type Output = And<(Self, Rhs)>;
 
     fn bitand(self, rhs: Rhs) -> Self::Output {
@@ -615,7 +615,7 @@ impl<'a, Rhs: Filter, T: SharedData> std::ops::BitAnd<Rhs> for SharedDataValueFi
     }
 }
 
-impl<'a, Rhs: Filter, T: SharedData> std::ops::BitOr<Rhs> for SharedDataValueFilter<'a, T> {
+impl<'a, Rhs: Filter, T: Tag> std::ops::BitOr<Rhs> for TagValueFilter<'a, T> {
     type Output = Or<(Self, Rhs)>;
 
     fn bitor(self, rhs: Rhs) -> Self::Output {
@@ -627,21 +627,21 @@ impl<'a, Rhs: Filter, T: SharedData> std::ops::BitOr<Rhs> for SharedDataValueFil
 
 /// A filter which requires that entity data of type `T` has changed within the
 /// chunk since the last time the filter was executed.
-pub struct EntityDataChangedFilter<T: EntityData> {
+pub struct ComponentChangedFilter<T: Component> {
     versions: Mutex<FnvHashMap<ChunkId, usize>>,
     phantom: PhantomData<T>,
 }
 
-impl<T: EntityData> EntityDataChangedFilter<T> {
-    fn new() -> EntityDataChangedFilter<T> {
-        EntityDataChangedFilter {
+impl<T: Component> ComponentChangedFilter<T> {
+    fn new() -> ComponentChangedFilter<T> {
+        ComponentChangedFilter {
             versions: Mutex::new(FnvHashMap::default()),
             phantom: PhantomData,
         }
     }
 }
 
-impl<T: EntityData> std::ops::Not for EntityDataChangedFilter<T> {
+impl<T: Component> std::ops::Not for ComponentChangedFilter<T> {
     type Output = Not<Self>;
 
     fn not(self) -> Self::Output {
@@ -649,7 +649,7 @@ impl<T: EntityData> std::ops::Not for EntityDataChangedFilter<T> {
     }
 }
 
-impl<T: EntityData> Filter for EntityDataChangedFilter<T> {
+impl<T: Component> Filter for ComponentChangedFilter<T> {
     #[inline]
     fn filter_archetype(&self, _: &Archetype) -> bool {
         true
@@ -657,7 +657,7 @@ impl<T: EntityData> Filter for EntityDataChangedFilter<T> {
 
     fn filter_chunk(&self, chunk: &Chunk) -> bool {
         use std::collections::hash_map::Entry;
-        if let Some(version) = chunk.entity_data_version::<T>() {
+        if let Some(version) = chunk.component_version::<T>() {
             let mut versions = self.versions.lock();
             match versions.entry(chunk.id()) {
                 Entry::Occupied(mut entry) => {
@@ -677,7 +677,7 @@ impl<T: EntityData> Filter for EntityDataChangedFilter<T> {
     }
 }
 
-impl<Rhs: Filter, T: EntityData> std::ops::BitAnd<Rhs> for EntityDataChangedFilter<T> {
+impl<Rhs: Filter, T: Component> std::ops::BitAnd<Rhs> for ComponentChangedFilter<T> {
     type Output = And<(Self, Rhs)>;
 
     fn bitand(self, rhs: Rhs) -> Self::Output {
@@ -687,7 +687,7 @@ impl<Rhs: Filter, T: EntityData> std::ops::BitAnd<Rhs> for EntityDataChangedFilt
     }
 }
 
-impl<Rhs: Filter, T: EntityData> std::ops::BitOr<Rhs> for EntityDataChangedFilter<T> {
+impl<Rhs: Filter, T: Component> std::ops::BitOr<Rhs> for ComponentChangedFilter<T> {
     type Output = Or<(Self, Rhs)>;
 
     fn bitor(self, rhs: Rhs) -> Self::Output {
@@ -824,8 +824,8 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Model;
 /// // A query which writes `Position`, reads `Velocity` and reads `Model`
-/// // Shared data is read-only, and is distinguished from entity data reads with `Shared<T>`.
-/// let query = <(Write<Position>, Read<Velocity>, Shared<Model>)>::query();
+/// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
+/// let query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 /// ```
 ///
 /// By default, a query will filter its results to include only entities with the data
@@ -842,9 +842,8 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// #[derive(Copy, Clone, Debug, PartialEq)]
 /// struct Static;
 ///
-/// // A query which also requires that entities have `Static` shared data
-/// // In this case, `Static` is used as a marker type
-/// let query = <(Read<Position>, Shared<Model>)>::query().filter(shared_data::<Static>());
+/// // A query which also requires that entities have the `Static` tag
+/// let query = <(Read<Position>, Tagged<Model>)>::query().filter(tag::<Static>());
 /// ```
 ///
 /// Filters can be combined with bitwise operators:
@@ -862,8 +861,8 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 ///
 /// // This query matches entities with positions and a model
 /// // But it also requires that the entity is not static, or has moved (even if static)
-/// let query = <(Read<Position>, Shared<Model>)>::query()
-///     .filter(!shared_data::<Static>() | changed::<Position>());
+/// let query = <(Read<Position>, Tagged<Model>)>::query()
+///     .filter(!tag::<Static>() | changed::<Position>());
 /// ```
 ///
 /// Filters can be iterated through to pull data out of a `World`:
@@ -879,8 +878,8 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// # let universe = Universe::new(None);
 /// # let world = universe.create_world();
 /// // A query which writes `Position`, reads `Velocity` and reads `Model`
-/// // Shared data is read-only, and is distinguished from entity data reads with `Shared<T>`.
-/// let query = <(Write<Position>, Read<Velocity>, Shared<Model>)>::query();
+/// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
+/// let query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
 /// for (pos, vel, model) in query.iter(&world) {
 ///     // `.iter` yields tuples of references to a single entity's data:
@@ -891,7 +890,7 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// ```
 ///
 /// The lower level `iter_chunks` function allows access to each underlying chunk of entity data.
-/// This allows you to run code for each shared data value, or to retrieve a contiguous data slice.
+/// This allows you to run code for each tag value, or to retrieve a contiguous data slice.
 ///
 /// ```rust
 /// # use legion::prelude::*;
@@ -903,12 +902,12 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// # struct Model;
 /// # let universe = Universe::new(None);
 /// # let world = universe.create_world();
-/// let query = <(Write<Position>, Read<Velocity>, Shared<Model>)>::query();
+/// let query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
 /// for chunk in query.iter_chunks(&world) {
-///     let model = chunk.shared_data::<Model>();
-///     let positions = chunk.data_mut::<Position>();
-///     let velocities = chunk.data::<Velocity>();
+///     let model = chunk.tag::<Model>();
+///     let positions = chunk.components_mut::<Position>();
+///     let velocities = chunk.components::<Velocity>();
 /// }
 /// ```
 ///
@@ -1103,34 +1102,34 @@ impl<'a, V: View<'a>> ChunkView<'a, V> {
         }
     }
 
-    /// Get a shared data value.
-    pub fn shared_data<T: SharedData>(&self) -> Option<&T> {
-        self.chunk.shared_data()
+    /// Get a tag value.
+    pub fn tag<T: Tag>(&self) -> Option<&T> {
+        self.chunk.tag()
     }
 
-    /// Get a slice of entity data.
+    /// Get a slice of component data.
     ///
     /// # Panics
     ///
     /// This method performs runtime borrow checking. It will panic if
     /// any other code is concurrently writing to the data slice.
-    pub fn data<T: EntityData>(&self) -> Option<BorrowedSlice<'a, T>> {
+    pub fn components<T: Component>(&self) -> Option<BorrowedSlice<'a, T>> {
         if !V::reads::<T>() {
             panic!("data type not readable via this query");
         }
-        self.chunk.entity_data()
+        self.chunk.components()
     }
 
-    /// Get a mutable slice of entity data.
+    /// Get a mutable slice of component data.
     ///
     /// # Panics
     ///
     /// This method performs runtime borrow checking. It will panic if
     /// any other code is concurrently accessing the data slice.
-    pub fn data_mut<T: EntityData>(&self) -> Option<BorrowedMutSlice<'a, T>> {
+    pub fn components_mut<T: Component>(&self) -> Option<BorrowedMutSlice<'a, T>> {
         if !V::writes::<T>() {
             panic!("data type not writable via this query");
         }
-        self.chunk.entity_data_mut()
+        self.chunk.components_mut()
     }
 }
