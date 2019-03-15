@@ -107,7 +107,7 @@ fn query_read_entity_data() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -141,7 +141,7 @@ fn query_read_entity_data_par() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -176,7 +176,7 @@ fn query_read_entity_data_par_foreach() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -208,7 +208,7 @@ fn query_read_entity_data_tuple() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -243,7 +243,7 @@ fn query_write_entity_data() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -279,7 +279,7 @@ fn query_write_entity_data_tuple() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -317,7 +317,7 @@ fn query_mixed_entity_data_tuple() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -354,7 +354,7 @@ fn query_partial_match() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -388,7 +388,7 @@ fn query_read_shared_data() {
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
     ];
 
-    world.insert_from(shared, components.clone());
+    world.insert_from(shared.as_tags(), components.clone());
 
     let query = Tagged::<Static>::query();
 
@@ -415,7 +415,7 @@ fn query_on_changed_first() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -449,7 +449,7 @@ fn query_on_changed_no_changes() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {
@@ -491,7 +491,7 @@ fn query_on_changed_self_changes() {
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
     for (i, e) in world
-        .insert_from(shared, components.clone())
+        .insert_from(shared.as_tags(), components.clone())
         .iter()
         .enumerate()
     {

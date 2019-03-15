@@ -3,24 +3,22 @@ use downcast_rs::{impl_downcast, Downcast};
 use fnv::{FnvHashMap, FnvHashSet};
 use std::any::TypeId;
 use std::cell::UnsafeCell;
-use std::fmt::Debug;
 use std::mem::size_of;
 use std::sync::atomic::AtomicIsize;
 use std::sync::Arc;
 
 impl_downcast!(ComponentStorage);
-trait ComponentStorage: Downcast + Debug {
+trait ComponentStorage: Downcast {
     fn remove(&mut self, id: ComponentIndex);
     fn len(&self) -> usize;
 }
 
-#[derive(Debug)]
 struct StorageVec<T> {
     version: UnsafeCell<Wrapping<usize>>,
     data: UnsafeCell<Vec<T>>,
 }
 
-impl<T: Debug> StorageVec<T> {
+impl<T> StorageVec<T> {
     fn with_capacity(capacity: usize) -> Self {
         StorageVec {
             version: UnsafeCell::new(Wrapping(0)),
@@ -42,7 +40,7 @@ impl<T: Debug> StorageVec<T> {
     }
 }
 
-impl<T: Debug + 'static> ComponentStorage for StorageVec<T> {
+impl<T: 'static> ComponentStorage for StorageVec<T> {
     fn remove(&mut self, id: ComponentIndex) {
         unsafe {
             self.data_mut().swap_remove(id as usize);
@@ -54,26 +52,20 @@ impl<T: Debug + 'static> ComponentStorage for StorageVec<T> {
     }
 }
 
-impl_downcast!(TagStorage);
-trait TagStorage: Downcast + Debug {}
-
-#[derive(Debug)]
-struct TagStore<T>(UnsafeCell<T>);
-
-impl<T: Tag> TagStorage for TagStore<T> {}
+impl_downcast!(TagValue);
+pub trait TagValue: Downcast {}
 
 /// Raw unsafe storage for components associated with entities.
 ///
 /// All entities contained within a chunk have the same shared data values and entity data types.
 ///
 /// Data slices obtained from a chunk when indexed with a given index all refer to the same entity.
-#[derive(Debug)]
 pub struct Chunk {
     id: ChunkId,
     capacity: usize,
     entities: StorageVec<Entity>,
     components: FnvHashMap<TypeId, Box<dyn ComponentStorage>>,
-    tags: FnvHashMap<TypeId, Arc<dyn TagStorage>>,
+    tags: FnvHashMap<TypeId, Arc<dyn TagValue>>,
     borrows: FnvHashMap<TypeId, AtomicIsize>,
 }
 
@@ -196,12 +188,9 @@ impl Chunk {
     ///
     /// Returns `None` if the chunk does not contain the requested data type.
     pub fn tag<T: Tag>(&self) -> Option<&T> {
-        unsafe {
-            self.tags
-                .get(&TypeId::of::<T>())
-                .and_then(|s| s.downcast_ref::<TagStore<T>>())
-                .map(|s| &*s.0.get())
-        }
+        self.tags
+            .get(&TypeId::of::<T>())
+            .and_then(|s| s.downcast_ref::<T>())
     }
 
     /// Removes an entity from the chunk.
@@ -261,7 +250,7 @@ pub struct ChunkBuilder {
         usize,
         Box<dyn FnMut(usize) -> Box<dyn ComponentStorage>>,
     )>,
-    tags: FnvHashMap<TypeId, Arc<dyn TagStorage>>,
+    tags: FnvHashMap<TypeId, Arc<dyn TagValue>>,
 }
 
 impl ChunkBuilder {
@@ -285,11 +274,9 @@ impl ChunkBuilder {
     }
 
     /// Registers a tag type.
-    pub fn register_tag<T: Tag>(&mut self, data: T) {
-        self.tags.insert(
-            TypeId::of::<T>(),
-            Arc::new(TagStore(UnsafeCell::new(data))) as Arc<dyn TagStorage>,
-        );
+    pub fn register_tag<T: Tag>(&mut self, data: Arc<T>) {
+        self.tags
+            .insert(TypeId::of::<T>(), data as Arc<dyn TagValue>);
     }
 
     /// Builds a new `Chunk`.
@@ -321,7 +308,6 @@ impl ChunkBuilder {
 }
 
 /// Stores all chunks with a given data layout.
-#[derive(Debug)]
 pub struct Archetype {
     id: ArchetypeId,
     logger: slog::Logger,

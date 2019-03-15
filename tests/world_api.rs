@@ -22,7 +22,7 @@ fn insert() {
 
     let shared = (1usize, 2f32, 3u16);
     let components = vec![(4f32, 5u64, 6u16), (4f32, 5u64, 6u16)];
-    let entities = world.insert_from(shared, components);
+    let entities = world.insert_from(shared.as_tags(), components);
 
     assert_eq!(2, entities.len());
 }
@@ -39,7 +39,7 @@ fn get_component() {
     ];
 
     let mut entities: Vec<Entity> = Vec::new();
-    for e in world.insert_from(shared, components.clone()) {
+    for e in world.insert_from(shared.as_tags(), components.clone()) {
         entities.push(*e);
     }
 
@@ -77,7 +77,7 @@ fn get_shared() {
     ];
 
     let mut entities: Vec<Entity> = Vec::new();
-    for e in world.insert_from(shared, components.clone()) {
+    for e in world.insert_from(shared.as_tags(), components.clone()) {
         entities.push(*e);
     }
 
@@ -92,7 +92,10 @@ fn get_shared_wrong_type() {
     let universe = Universe::new(None);
     let mut world = universe.create_world();
 
-    let entity = *world.insert_from((Static,), vec![(0f64,)]).get(0).unwrap();
+    let entity = *world
+        .insert_from((Static,).as_tags(), vec![(0f64,)])
+        .get(0)
+        .unwrap();
 
     assert_eq!(None, world.tag::<Model>(entity));
 }
@@ -109,7 +112,7 @@ fn delete() {
     ];
 
     let mut entities: Vec<Entity> = Vec::new();
-    for e in world.insert_from(shared, components.clone()) {
+    for e in world.insert_from(shared.as_tags(), components.clone()) {
         entities.push(*e);
     }
 
@@ -135,7 +138,7 @@ fn delete_last() {
     ];
 
     let mut entities: Vec<Entity> = Vec::new();
-    for e in world.insert_from(shared, components.clone()) {
+    for e in world.insert_from(shared.as_tags(), components.clone()) {
         entities.push(*e);
     }
 
@@ -168,7 +171,7 @@ fn delete_first() {
     ];
 
     let mut entities: Vec<Entity> = Vec::new();
-    for e in world.insert_from(shared, components.clone()) {
+    for e in world.insert_from(shared.as_tags(), components.clone()) {
         entities.push(*e);
     }
 
@@ -203,12 +206,12 @@ fn merge() {
     ];
 
     let mut world_1_entities: Vec<Entity> = Vec::new();
-    for e in world_1.insert_from(shared, components.clone()) {
+    for e in world_1.insert_from(shared.as_tags(), components.clone()) {
         world_1_entities.push(*e);
     }
 
     let mut world_2_entities: Vec<Entity> = Vec::new();
-    for e in world_2.insert_from(shared, components.clone()) {
+    for e in world_2.insert_from(shared.as_tags(), components.clone()) {
         world_2_entities.push(*e);
     }
 

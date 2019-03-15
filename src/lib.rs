@@ -41,7 +41,7 @@
 //! // Create entities with `Position` data and a tagged with `Model` data and as `Static`
 //! // Tags are shared across many entities, and enable further batch processing and filtering use cases
 //! world.insert_from(
-//!     (Model(5), Static),
+//!     (Model(5), Static).as_tags(),
 //!     (0..999).map(|_| (Position { x: 0.0, y: 0.0 },))
 //! );
 //!
@@ -230,13 +230,13 @@ pub mod query;
 pub mod storage;
 
 use crate::borrows::*;
+use crate::storage::TagValue;
 use crate::storage::*;
 
 use fnv::FnvHashSet;
 use parking_lot::Mutex;
 use slog::{debug, info, o, trace, Drain};
 use std::any::TypeId;
-use std::fmt::Debug;
 use std::fmt::Display;
 use std::iter::Peekable;
 use std::num::Wrapping;
@@ -245,7 +245,7 @@ use std::sync::Arc;
 
 pub mod prelude {
     pub use crate::query::{filter::*, IntoQuery, Query, Read, Tagged, Write};
-    pub use crate::{Entity, Universe, World};
+    pub use crate::{Entity, IntoTagSet, Universe, World};
 }
 
 /// Unique world ID.
@@ -589,7 +589,6 @@ impl Drop for EntityAllocator {
 }
 
 /// Contains queryable collections of data associated with `Entity`s.
-#[derive(Debug)]
 pub struct World {
     id: WorldId,
     logger: slog::Logger,
@@ -669,7 +668,7 @@ impl World {
     /// # let mut world = universe.create_world();
     /// # let model = 0u8;
     /// # let color = 0u16;
-    /// let tags = (model, color);
+    /// let tags = (model, color).as_tags();
     /// let data = vec![
     ///     (Position(0.0), Rotation(0.0)),
     ///     (Position(1.0), Rotation(1.0)),
@@ -807,7 +806,7 @@ impl World {
         )
     }
 
-    /// Borrows shared data for the given entity.
+    /// Borrows tag data for the given entity.
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
@@ -929,9 +928,25 @@ impl TagSet for () {
     }
 }
 
+pub trait IntoTagSet<T: TagSet> {
+    fn as_tags(self) -> T;
+}
+
 macro_rules! impl_shared_data_set {
     ( $arity: expr; $( $ty: ident ),* ) => {
-        impl<$( $ty ),*> TagSet for ($( $ty, )*)
+        impl<$( $ty ),*> IntoTagSet<($( Arc<$ty>, )*)> for ($( $ty, )*)
+        where $( $ty: Tag ),*
+        {
+            fn as_tags(self) -> ($( Arc<$ty>, )*) {
+                #![allow(non_snake_case)]
+                let ($($ty,)*) = self;
+                (
+                    $( Arc::new($ty), )*
+                )
+            }
+        }
+
+        impl<$( $ty ),*> TagSet for ($( Arc<$ty>, )*)
         where $( $ty: Tag ),*
         {
             fn is_archetype_match(&self, archetype: &Archetype) -> bool {
@@ -943,7 +958,7 @@ macro_rules! impl_shared_data_set {
                 #![allow(non_snake_case)]
                 let ($($ty,)*) = self;
                 $(
-                    (*chunk.tag::<$ty>().unwrap() == *$ty)
+                    (chunk.tag::<$ty>().unwrap() == $ty.as_ref())
                 )&&*
             }
 
@@ -1042,13 +1057,14 @@ impl_component_source!(4; A => a, B => b, C => c, D => d);
 impl_component_source!(5; A => a, B => b, C => c, D => d, E => e);
 
 /// Components that are stored once per entity.
-pub trait Component: Send + Sync + Sized + Debug + 'static {}
+pub trait Component: Send + Sync + Sized + 'static {}
 
 /// Components that are shared across multiple entities.
-pub trait Tag: Send + Sync + Sized + PartialEq + Clone + Debug + 'static {}
+pub trait Tag: Send + Sync + Sized + PartialEq + TagValue + 'static {}
 
-impl<T: Send + Sync + Sized + Debug + 'static> Component for T {}
-impl<T: Send + Sized + PartialEq + Clone + Sync + Debug + 'static> Tag for T {}
+impl<T: Send + Sync + Sized + 'static> Component for T {}
+impl<T: Send + Sized + PartialEq + Sync + 'static> TagValue for T {}
+impl<T: Send + Sized + PartialEq + Sync + TagValue + 'static> Tag for T {}
 
 #[cfg(test)]
 mod tests {

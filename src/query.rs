@@ -1075,7 +1075,6 @@ impl<'data, V: View<'data>> Iterator for ZipEntities<'data, V> {
 }
 
 /// A type-safe view of a `Chunk`.
-#[derive(Debug)]
 pub struct ChunkView<'a, V: View<'a>> {
     chunk: &'a Chunk,
     view: PhantomData<V>,
