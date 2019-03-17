@@ -219,13 +219,47 @@ impl_view_tuple!(A, B, C);
 impl_view_tuple!(A, B, C, D);
 impl_view_tuple!(A, B, C, D, E);
 
+trait FilterResult {
+    fn coalesce_and(self, other: Self) -> Self;
+    fn coalesce_or(self, other: Self) -> Self;
+    fn is_pass(&self) -> bool;
+}
+
+impl FilterResult for Option<bool> {
+    #[inline]
+    fn coalesce_and(self, other: Self) -> Self {
+        print!("and({:?},{:?})", self, other);
+        let result = match self {
+            Some(x) => other.map(|y| x && y).or(Some(x)),
+            None => other,
+        };
+        println!("={:?}", result);
+        result
+    }
+
+    fn coalesce_or(self, other: Self) -> Self {
+        print!("or({:?},{:?})", self, other);
+        let result = match self {
+            Some(x) => other.map(|y| x || y).or(Some(x)),
+            None => other,
+        };
+        println!("={:?}", result);
+        result
+    }
+
+    #[inline]
+    fn is_pass(&self) -> bool {
+        self.unwrap_or(true)
+    }
+}
+
 /// Filters chunks to determine which are to be included in a `Query`.
-pub trait Filter: Sync + Sized {
+pub trait Filter: Sync + Sized + Debug {
     /// Determines if an archetype matches the filter's conditions.
-    fn filter_archetype(&self, archetype: &Archetype) -> bool;
+    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool>;
 
     /// Determines if a chunk matches the filter's conditions.
-    fn filter_chunk(&self, chunk: &Chunk) -> bool;
+    fn filter_chunk(&self, chunk: &Chunk) -> Option<bool>;
 }
 
 pub mod filter {
@@ -263,13 +297,13 @@ pub struct Passthrough;
 
 impl Filter for Passthrough {
     #[inline]
-    fn filter_archetype(&self, _: &Archetype) -> bool {
-        true
+    fn filter_archetype(&self, _: &Archetype) -> Option<bool> {
+        None
     }
 
     #[inline]
-    fn filter_chunk(&self, _: &Chunk) -> bool {
-        true
+    fn filter_chunk(&self, _: &Chunk) -> Option<bool> {
+        None
     }
 }
 
@@ -309,13 +343,13 @@ pub struct Not<F> {
 
 impl<F: Filter> Filter for Not<F> {
     #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> bool {
-        !self.filter.filter_archetype(archetype)
+    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
+        self.filter.filter_archetype(archetype).map(|x| !x)
     }
 
     #[inline]
-    fn filter_chunk(&self, chunk: &Chunk) -> bool {
-        !self.filter.filter_chunk(chunk)
+    fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
+        self.filter.filter_chunk(chunk).map(|x| !x)
     }
 }
 
@@ -357,17 +391,23 @@ macro_rules! impl_and_filter {
     ( $( $ty: ident ),* ) => {
         impl<$( $ty: Filter ),*> Filter for And<($( $ty, )*)> {
             #[inline]
-            fn filter_archetype(&self, archetype: &Archetype) -> bool {
+            fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
                 #![allow(non_snake_case)]
+                println!("{:?}.filter_archetype", self);
                 let ($( $ty, )*) = &self.filters;
-                $( $ty.filter_archetype(archetype) )&&*
+                let mut result: Option<bool> = None;
+                $( result = result.coalesce_and($ty.filter_archetype(archetype)); )*
+                result
             }
 
             #[inline]
-            fn filter_chunk(&self, chunk: &Chunk) -> bool {
+            fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
                 #![allow(non_snake_case)]
+                println!("{:?}.filter_chunk", self);
                 let ($( $ty, )*) = &self.filters;
-                $( $ty.filter_chunk(chunk) )&&*
+                let mut result: Option<bool> = None;
+                $( result = result.coalesce_and($ty.filter_chunk(chunk)); )*
+                result
             }
         }
 
@@ -420,17 +460,21 @@ macro_rules! impl_or_filter {
     ( $( $ty: ident ),* ) => {
         impl<$( $ty: Filter ),*> Filter for Or<($( $ty, )*)> {
             #[inline]
-            fn filter_archetype(&self, archetype: &Archetype) -> bool {
+            fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                $( $ty.filter_archetype(archetype) )||*
+                let mut result: Option<bool> = None;
+                $( result = result.coalesce_or($ty.filter_archetype(archetype)); )*
+                result
             }
 
             #[inline]
-            fn filter_chunk(&self, chunk: &Chunk) -> bool {
+            fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                $( $ty.filter_chunk(chunk) )||*
+                let mut result: Option<bool> = None;
+                $( result = result.coalesce_or($ty.filter_chunk(chunk)); )*
+                result
             }
         }
 
@@ -485,13 +529,13 @@ impl<T: Component> ComponentFilter<T> {
 
 impl<T: Component> Filter for ComponentFilter<T> {
     #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> bool {
-        archetype.has_component::<T>()
+    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
+        Some(archetype.has_component::<T>())
     }
 
     #[inline]
-    fn filter_chunk(&self, _: &Chunk) -> bool {
-        true
+    fn filter_chunk(&self, _: &Chunk) -> Option<bool> {
+        None
     }
 }
 
@@ -535,13 +579,13 @@ impl<T: Tag> TagFilter<T> {
 
 impl<T: Tag> Filter for TagFilter<T> {
     #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> bool {
-        archetype.has_tag::<T>()
+    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
+        Some(archetype.has_tag::<T>())
     }
 
     #[inline]
-    fn filter_chunk(&self, _: &Chunk) -> bool {
-        true
+    fn filter_chunk(&self, _: &Chunk) -> Option<bool> {
+        None
     }
 }
 
@@ -587,13 +631,13 @@ impl<'a, T: Tag> TagValueFilter<'a, T> {
 
 impl<'a, T: Tag> Filter for TagValueFilter<'a, T> {
     #[inline]
-    fn filter_archetype(&self, _: &Archetype) -> bool {
-        true
+    fn filter_archetype(&self, _: &Archetype) -> Option<bool> {
+        None
     }
 
     #[inline]
-    fn filter_chunk(&self, chunk: &Chunk) -> bool {
-        chunk.tag::<T>().map_or(false, |s| s == self.value)
+    fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
+        Some(chunk.tag::<T>().map_or(false, |s| s == self.value))
     }
 }
 
@@ -627,6 +671,7 @@ impl<'a, Rhs: Filter, T: Tag> std::ops::BitOr<Rhs> for TagValueFilter<'a, T> {
 
 /// A filter which requires that entity data of type `T` has changed within the
 /// chunk since the last time the filter was executed.
+#[derive(Debug)]
 pub struct ComponentChangedFilter<T: Component> {
     versions: Mutex<FnvHashMap<ChunkId, usize>>,
     phantom: PhantomData<T>,
@@ -651,11 +696,11 @@ impl<T: Component> std::ops::Not for ComponentChangedFilter<T> {
 
 impl<T: Component> Filter for ComponentChangedFilter<T> {
     #[inline]
-    fn filter_archetype(&self, _: &Archetype) -> bool {
-        true
+    fn filter_archetype(&self, _: &Archetype) -> Option<bool> {
+        None
     }
 
-    fn filter_chunk(&self, chunk: &Chunk) -> bool {
+    fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
         use std::collections::hash_map::Entry;
         if let Some(version) = chunk.component_version::<T>() {
             let mut versions = self.versions.lock();
@@ -664,15 +709,18 @@ impl<T: Component> Filter for ComponentChangedFilter<T> {
                     let existing = entry.get_mut();
                     let changed = *existing != version;
                     *existing = version;
-                    changed
+                    println!("changed: {}", changed);
+                    Some(changed)
                 }
                 Entry::Vacant(entry) => {
                     entry.insert(version);
-                    true
+                    println!("was vacant");
+                    Some(true)
                 }
             }
         } else {
-            false
+            println!("no version info");
+            Some(false)
         }
     }
 }
@@ -717,7 +765,7 @@ where
         loop {
             if let Some(ref mut inner) = self.frontier {
                 for x in inner {
-                    if self.filter.filter_chunk(x) {
+                    if self.filter.filter_chunk(x).is_pass() {
                         return Some(ChunkView {
                             chunk: x,
                             view: PhantomData,
@@ -728,7 +776,7 @@ where
             loop {
                 match self.archetypes.next() {
                     Some(archetype) => {
-                        if self.filter.filter_archetype(archetype) {
+                        if self.filter.filter_archetype(archetype).is_pass() {
                             self.frontier = Some(archetype.chunks().iter());
                             break;
                         }
@@ -1035,9 +1083,9 @@ impl<V: for<'a> View<'a>, F: Filter> QueryDef<V, F> {
         let archetypes = &world.archetypes;
         archetypes
             .par_iter()
-            .filter(move |a| filter.filter_archetype(a))
+            .filter(move |a| filter.filter_archetype(a).is_pass())
             .flat_map(|a| a.chunks())
-            .filter(move |c| filter.filter_chunk(c))
+            .filter(move |c| filter.filter_chunk(c).is_pass())
             .map(|c| ChunkView {
                 chunk: c,
                 view: PhantomData,

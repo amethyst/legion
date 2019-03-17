@@ -256,6 +256,34 @@ fn mutate_add_component() {
 }
 
 #[test]
+fn mutate_remove_component() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5)).as_tags();
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let entities = world.insert_from(shared, components).to_vec();
+
+    let query_without_rot = Read::<Pos>::query().filter(!component::<Rot>());
+    let query_with_rot = <(Read<Pos>, Read<Rot>)>::query();
+
+    assert_eq!(0, query_without_rot.iter(&world).count());
+    assert_eq!(3, query_with_rot.iter(&world).count());
+
+    world.mutate_entity(*entities.get(1).unwrap(), |_, components| {
+        components.remove_component::<Rot>();
+    });
+
+    assert_eq!(1, query_without_rot.iter(&world).count());
+    assert_eq!(2, query_with_rot.iter(&world).count());
+}
+
+#[test]
 fn mutate_add_tag() {
     let universe = Universe::new(None);
     let mut world = universe.create_world();
@@ -281,6 +309,34 @@ fn mutate_add_tag() {
 
     assert_eq!(3, query_without_static.iter(&world).count());
     assert_eq!(1, query_with_static.iter(&world).count());
+}
+
+#[test]
+fn mutate_remove_tag() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Model(5), Static).as_tags();
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let entities = world.insert_from(shared, components).to_vec();
+
+    let query_without_static = <(Read<Pos>, Read<Rot>)>::query().filter(!tag::<Static>());
+    let query_with_static = <(Read<Pos>, Read<Rot>, Tagged<Static>)>::query();
+
+    assert_eq!(0, query_without_static.iter(&world).count());
+    assert_eq!(3, query_with_static.iter(&world).count());
+
+    world.mutate_entity(*entities.get(1).unwrap(), |tags, _| {
+        tags.remove_tag::<Static>();
+    });
+
+    assert_eq!(1, query_without_static.iter(&world).count());
+    assert_eq!(2, query_with_static.iter(&world).count());
 }
 
 #[test]
