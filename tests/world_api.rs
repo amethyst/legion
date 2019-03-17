@@ -1,4 +1,5 @@
-use legion::*;
+use legion::prelude::*;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Pos(f32, f32, f32);
@@ -224,4 +225,88 @@ fn merge() {
         assert_eq!(pos, &world_1.component(*e).unwrap() as &Pos);
         assert_eq!(rot, &world_1.component(*e).unwrap() as &Rot);
     }
+}
+
+#[test]
+fn mutate_add_component() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5)).as_tags();
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let entities = world.insert_from(shared, components).to_vec();
+
+    let query_without_scale = <(Read<Pos>, Read<Rot>)>::query();
+    let query_with_scale = <(Read<Pos>, Read<Rot>, Read<Scale>)>::query();
+
+    assert_eq!(3, query_without_scale.iter(&world).count());
+    assert_eq!(0, query_with_scale.iter(&world).count());
+
+    world.mutate_entity(*entities.get(1).unwrap(), |_, components| {
+        components.add_component(Scale(0.5, 0.5, 0.5))
+    });
+
+    assert_eq!(3, query_without_scale.iter(&world).count());
+    assert_eq!(1, query_with_scale.iter(&world).count());
+}
+
+#[test]
+fn mutate_add_tag() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Model(5),).as_tags();
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let entities = world.insert_from(shared, components).to_vec();
+
+    let query_without_static = <(Read<Pos>, Read<Rot>)>::query();
+    let query_with_static = <(Read<Pos>, Read<Rot>, Tagged<Static>)>::query();
+
+    assert_eq!(3, query_without_static.iter(&world).count());
+    assert_eq!(0, query_with_static.iter(&world).count());
+
+    world.mutate_entity(*entities.get(1).unwrap(), |tags, _| {
+        tags.set_tag(Arc::new(Static));
+    });
+
+    assert_eq!(3, query_without_static.iter(&world).count());
+    assert_eq!(1, query_with_static.iter(&world).count());
+}
+
+#[test]
+fn mutate_change_tag() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Model(5),).as_tags();
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let entities = world.insert_from(shared, components).to_vec();
+
+    let query_model_3 = <(Read<Pos>, Read<Rot>)>::query().filter(tag_value(&Model(3)));
+    let query_model_5 = <(Read<Pos>, Read<Rot>)>::query().filter(tag_value(&Model(5)));
+
+    assert_eq!(3, query_model_5.iter(&world).count());
+    assert_eq!(0, query_model_3.iter(&world).count());
+
+    world.mutate_entity(*entities.get(1).unwrap(), |tags, _| {
+        tags.set_tag(Arc::new(Model(3)));
+    });
+
+    assert_eq!(2, query_model_5.iter(&world).count());
+    assert_eq!(1, query_model_3.iter(&world).count());
 }

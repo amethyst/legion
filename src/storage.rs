@@ -3,22 +3,28 @@ use downcast_rs::{impl_downcast, Downcast};
 use fnv::{FnvHashMap, FnvHashSet};
 use std::any::TypeId;
 use std::cell::UnsafeCell;
+use std::fmt::Debug;
 use std::mem::size_of;
 use std::sync::atomic::AtomicIsize;
 use std::sync::Arc;
 
 impl_downcast!(ComponentStorage);
-trait ComponentStorage: Downcast {
+trait ComponentStorage: Downcast + Debug {
     fn remove(&mut self, id: ComponentIndex);
+    fn fetch_remove(
+        &mut self,
+        id: ComponentIndex,
+    ) -> (TypeId, Box<dyn Fn(&mut ChunkBuilder)>, Box<dyn ChunkInit>);
     fn len(&self) -> usize;
 }
 
-struct StorageVec<T> {
+#[derive(Debug)]
+struct StorageVec<T: Component> {
     version: UnsafeCell<Wrapping<usize>>,
     data: UnsafeCell<Vec<T>>,
 }
 
-impl<T> StorageVec<T> {
+impl<T: Component> StorageVec<T> {
     fn with_capacity(capacity: usize) -> Self {
         StorageVec {
             version: UnsafeCell::new(Wrapping(0)),
@@ -40,11 +46,19 @@ impl<T> StorageVec<T> {
     }
 }
 
-impl<T: 'static> ComponentStorage for StorageVec<T> {
+impl<T: Component> ComponentStorage for StorageVec<T> {
     fn remove(&mut self, id: ComponentIndex) {
         unsafe {
             self.data_mut().swap_remove(id as usize);
         }
+    }
+
+    fn fetch_remove(
+        &mut self,
+        id: ComponentIndex,
+    ) -> (TypeId, Box<dyn Fn(&mut ChunkBuilder)>, Box<dyn ChunkInit>) {
+        let component = unsafe { self.data_mut().swap_remove(id as usize) };
+        DynamicSingleEntitySource::component_tuple(component)
     }
 
     fn len(&self) -> usize {
@@ -53,13 +67,16 @@ impl<T: 'static> ComponentStorage for StorageVec<T> {
 }
 
 impl_downcast!(TagValue);
-pub trait TagValue: Downcast {}
+pub trait TagValue: Downcast + Sync + Send + Debug + 'static {
+    fn downcast_equals(&self, _: &TagValue) -> bool;
+}
 
 /// Raw unsafe storage for components associated with entities.
 ///
 /// All entities contained within a chunk have the same shared data values and entity data types.
 ///
 /// Data slices obtained from a chunk when indexed with a given index all refer to the same entity.
+#[derive(Debug)]
 pub struct Chunk {
     id: ChunkId,
     capacity: usize,
@@ -213,15 +230,46 @@ impl Chunk {
         }
     }
 
+    /// Removes and entity from the chunk and returns a dynamic tag set and entity source
+    /// which can be used to re-insert the removed entity into a world.
+    ///
+    /// Returns the ID of any entity which was swapped into the location of the
+    /// removed entity.
+    pub fn fetch_remove(
+        &mut self,
+        id: ComponentIndex,
+    ) -> (Option<Entity>, DynamicTagSet, DynamicSingleEntitySource) {
+        unsafe {
+            let index = id as usize;
+            let entity = self.entities.data_mut().swap_remove(index);
+            let components = self.components.values_mut().map(|s| s.fetch_remove(id));
+
+            let tags = DynamicTagSet {
+                tags: self.tags.clone(),
+            };
+
+            let components = DynamicSingleEntitySource {
+                entity,
+                components: components.collect(),
+            };
+
+            let moved = if self.entities.len() > index {
+                Some(*self.entities.data().get(index).unwrap())
+            } else {
+                None
+            };
+
+            (moved, tags, components)
+        }
+    }
+
     /// Validates that the chunk contains a balanced number of components and entities.
     pub fn validate(&self) {
         let valid = self
             .components
             .values()
             .fold(true, |total, s| total && s.len() == self.entities.len());
-        if !valid {
-            panic!("imbalanced chunk components");
-        }
+        assert!(valid, "imbalanced chunk components");
     }
 
     fn borrow<'a, T: Component>(&'a self) -> Borrow<'a> {
@@ -279,6 +327,13 @@ impl ChunkBuilder {
             .insert(TypeId::of::<T>(), data as Arc<dyn TagValue>);
     }
 
+    pub fn register_tags<I>(&mut self, tags: I)
+    where
+        I: IntoIterator<Item = (TypeId, Arc<dyn TagValue>)>,
+    {
+        self.tags.extend(tags);
+    }
+
     /// Builds a new `Chunk`.
     pub fn build(self, id: ChunkId) -> Chunk {
         let size_bytes = *self
@@ -303,6 +358,136 @@ impl ChunkBuilder {
                 .map(|(id, _, mut con)| (id, con(capacity)))
                 .collect(),
             tags: self.tags,
+        }
+    }
+}
+
+pub struct DynamicTagSet {
+    tags: FnvHashMap<TypeId, Arc<dyn TagValue>>,
+}
+
+impl DynamicTagSet {
+    pub fn set_tag<T: Tag>(&mut self, tag: Arc<T>) {
+        self.tags.insert(TypeId::of::<T>(), tag);
+    }
+
+    pub fn remove_tag<T: Tag>(&mut self) -> bool {
+        self.tags.remove(&TypeId::of::<T>()).is_some()
+    }
+}
+
+impl TagSet for DynamicTagSet {
+    fn is_archetype_match(&self, archetype: &Archetype) -> bool {
+        archetype.tags.len() == self.tags.len()
+            && self.tags.keys().all(|k| archetype.tags.contains(k))
+    }
+
+    fn is_chunk_match(&self, chunk: &Chunk) -> bool {
+        self.tags
+            .iter()
+            .all(|(k, v)| chunk.tags.get(k).unwrap().downcast_equals(v.as_ref()))
+    }
+
+    fn configure_chunk(&self, chunk: &mut ChunkBuilder) {
+        chunk.register_tags(self.tags.iter().map(|(k, v)| (*k, v.clone())));
+    }
+
+    fn types(&self) -> FnvHashSet<TypeId> {
+        self.tags.keys().map(|id| *id).collect()
+    }
+}
+
+trait ChunkInit: Send {
+    fn call(self: Box<Self>, chunk: &mut Chunk);
+}
+
+impl<'a, F: FnOnce(&mut Chunk) + Send> ChunkInit for F {
+    fn call(self: Box<Self>, chunk: &mut Chunk) {
+        (*self)(chunk);
+    }
+}
+
+pub struct DynamicSingleEntitySource {
+    entity: Entity,
+    components: Vec<(TypeId, Box<dyn Fn(&mut ChunkBuilder)>, Box<dyn ChunkInit>)>,
+}
+
+impl DynamicSingleEntitySource {
+    fn component_tuple<T: Component>(
+        component: T,
+    ) -> (TypeId, Box<dyn Fn(&mut ChunkBuilder)>, Box<dyn ChunkInit>) {
+        let chunk_setup = |chunk: &mut ChunkBuilder| chunk.register_component::<T>();
+
+        let data_initializer = |chunk: &mut Chunk| unsafe {
+            chunk.components_mut_unchecked().unwrap().push(component)
+        };
+
+        (
+            TypeId::of::<T>(),
+            Box::new(chunk_setup),
+            Box::new(data_initializer),
+        )
+    }
+
+    pub fn add_component<T: Component>(&mut self, component: T) {
+        self.remove_component::<T>();
+        self.components.push(Self::component_tuple(component));
+    }
+
+    pub fn remove_component<T: Component>(&mut self) -> bool {
+        let type_id = TypeId::of::<T>();
+        if let Some(i) = self
+            .components
+            .iter()
+            .enumerate()
+            .filter(|(_, (id, _, _))| id == &type_id)
+            .map(|(i, _)| i)
+            .next()
+        {
+            self.components.remove(i);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl EntitySource for DynamicSingleEntitySource {
+    fn is_archetype_match(&self, archetype: &Archetype) -> bool {
+        archetype.components.len() == self.components.len()
+            && self
+                .components
+                .iter()
+                .all(|(id, _, _)| archetype.components.contains(&id))
+    }
+
+    fn configure_chunk(&self, chunk: &mut ChunkBuilder) {
+        for (_, f, _) in self.components.iter() {
+            f(chunk);
+        }
+    }
+
+    fn types(&self) -> FnvHashSet<TypeId> {
+        self.components.iter().map(|(id, _, _)| *id).collect()
+    }
+
+    fn is_empty(&mut self) -> bool {
+        self.components.len() == 0
+    }
+
+    fn write<'a>(&mut self, chunk: &'a mut Chunk, _: &mut EntityAllocator) -> usize {
+        if !chunk.is_full() {
+            unsafe {
+                chunk.entities_unchecked().push(self.entity);
+
+                for (_, _, f) in self.components.drain(..) {
+                    f.call(chunk);
+                }
+            }
+
+            1
+        } else {
+            0
         }
     }
 }
@@ -336,6 +521,11 @@ impl Archetype {
             tags,
             chunks: Vec::new(),
         }
+    }
+
+    /// Gets the archetype ID
+    pub fn id(&self) -> ArchetypeId {
+        self.id
     }
 
     /// Gets a chunk reference.

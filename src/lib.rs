@@ -232,6 +232,7 @@ pub mod storage;
 use crate::borrows::*;
 use crate::storage::TagValue;
 use crate::storage::*;
+use std::fmt::Debug;
 
 use fnv::FnvHashSet;
 use parking_lot::Mutex;
@@ -712,6 +713,7 @@ impl World {
 
             // insert as many components as we can into the chunk
             let allocated = components.write(chunk, &mut self.allocator);
+            chunk.validate();
 
             // record new entity locations
             let start = unsafe { chunk.entities().len() - allocated };
@@ -766,6 +768,72 @@ impl World {
         }
 
         deleted
+    }
+
+    /// Mutates the composition of an entity in-place. This allows components and tags to be added
+    /// or removed from an entity.
+    ///
+    /// # Performance
+    ///
+    /// Mutating an entity is *significantly slower* than inserting a new entity. Always prefer to
+    /// create entities with the desired layout in the first place, and avoid adding or removing
+    /// components or tags from existing entities.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use legion::prelude::*;
+    /// # use std::sync::Arc;
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Static;
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Position(f32);
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Rotation(f32);
+    /// # let universe = Universe::new(None);
+    /// # let mut world = universe.create_world();
+    /// # let model = 0u8;
+    /// # let color = 0u16;
+    /// # let tags = (model, color).as_tags();
+    /// # let data = vec![
+    /// #     (Position(0.0), Rotation(0.0)),
+    /// #     (Position(1.0), Rotation(1.0)),
+    /// #     (Position(2.0), Rotation(2.0)),
+    /// # ];
+    /// # let entity = *world.insert_from(tags, data).get(0).unwrap();
+    /// world.mutate_entity(entity, |tags, components| {
+    ///     tags.set_tag(Arc::new(Static));
+    ///     components.add_component(Position(4.0));
+    ///     components.remove_component::<Rotation>();
+    /// });
+    /// ```
+    pub fn mutate_entity<F: FnOnce(&mut DynamicTagSet, &mut DynamicSingleEntitySource)>(
+        &mut self,
+        entity: Entity,
+        f: F,
+    ) {
+        assert!(self.is_alive(&entity));
+
+        if let Some((arch_id, chunk_id, comp_id)) = self.allocator.get_location(&entity.index) {
+            if let Some((swapped, mut tags, mut components)) = self
+                .archetypes
+                .get_mut(arch_id as usize)
+                .and_then(|a| a.chunk_mut(chunk_id))
+                .map(|c| c.fetch_remove(comp_id))
+            {
+                // mutate the entity
+                f(&mut tags, &mut components);
+
+                // record swapped entity's new location
+                if let Some(swapped) = swapped {
+                    self.allocator
+                        .set_location(&swapped.index, (arch_id, chunk_id, comp_id));
+                }
+
+                // re-insert the entity
+                self.insert(tags, components);
+            }
+        }
     }
 
     /// Borrows entity data for the given entity.
@@ -1043,7 +1111,6 @@ macro_rules! impl_component_source {
                     }
                 }
 
-                chunk.validate();
                 count
             }
         }
@@ -1057,14 +1124,24 @@ impl_component_source!(4; A => a, B => b, C => c, D => d);
 impl_component_source!(5; A => a, B => b, C => c, D => d, E => e);
 
 /// Components that are stored once per entity.
-pub trait Component: Send + Sync + Sized + 'static {}
+pub trait Component: Send + Sync + Sized + Debug + 'static {}
 
 /// Components that are shared across multiple entities.
-pub trait Tag: Send + Sync + Sized + PartialEq + TagValue + 'static {}
+pub trait Tag: Send + Sync + Sized + PartialEq + TagValue + Debug + 'static {}
 
-impl<T: Send + Sync + Sized + 'static> Component for T {}
-impl<T: Send + Sized + PartialEq + Sync + 'static> TagValue for T {}
-impl<T: Send + Sized + PartialEq + Sync + TagValue + 'static> Tag for T {}
+impl<T: Send + Sync + Sized + Debug + 'static> Component for T {}
+
+impl<T: Send + Sized + PartialEq + Sync + TagValue + Debug + 'static> Tag for T {}
+
+impl<T: Send + Sized + PartialEq + Sync + Debug + 'static> TagValue for T {
+    fn downcast_equals(&self, other: &TagValue) -> bool {
+        if let Some(other) = other.downcast_ref::<Self>() {
+            other == self
+        } else {
+            false
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

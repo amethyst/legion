@@ -716,7 +716,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some(ref mut inner) = self.frontier {
-                for x in &mut inner.next() {
+                for x in inner {
                     if self.filter.filter_chunk(x) {
                         return Some(ChunkView {
                             chunk: x,
