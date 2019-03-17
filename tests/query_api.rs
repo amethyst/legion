@@ -116,7 +116,7 @@ fn query_read_entity_data() {
         }
     }
 
-    let query = Read::<Pos>::query();
+    let mut query = Read::<Pos>::query();
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {
@@ -151,7 +151,7 @@ fn query_read_entity_data_par() {
     }
 
     let count = AtomicUsize::new(0);
-    let query = Read::<Pos>::query();
+    let mut query = Read::<Pos>::query();
     query.par_iter_chunks(&world).for_each(|mut chunk| {
         for (entity, pos) in chunk.iter_entities() {
             assert_eq!(&expected.get(&entity).unwrap().0, pos);
@@ -186,7 +186,7 @@ fn query_read_entity_data_par_foreach() {
     }
 
     let count = AtomicUsize::new(0);
-    let query = Read::<Pos>::query();
+    let mut query = Read::<Pos>::query();
     query.par_for_each(&world, |_pos| {
         count.fetch_add(1, Ordering::SeqCst);
     });
@@ -217,7 +217,7 @@ fn query_read_entity_data_tuple() {
         }
     }
 
-    let query = <(Read<Pos>, Read<Rot>)>::query();
+    let mut query = <(Read<Pos>, Read<Rot>)>::query();
 
     let mut count = 0;
     for (entity, (pos, rot)) in query.iter_entities(&world) {
@@ -252,7 +252,7 @@ fn query_write_entity_data() {
         }
     }
 
-    let query = Write::<Pos>::query();
+    let mut query = Write::<Pos>::query();
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {
@@ -288,7 +288,7 @@ fn query_write_entity_data_tuple() {
         }
     }
 
-    let query = <(Write<Pos>, Write<Rot>)>::query();
+    let mut query = <(Write<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
     for (entity, (pos, rot)) in query.iter_entities(&world) {
@@ -326,7 +326,7 @@ fn query_mixed_entity_data_tuple() {
         }
     }
 
-    let query = <(Read<Pos>, Write<Rot>)>::query();
+    let mut query = <(Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
     for (entity, (pos, rot)) in query.iter_entities(&world) {
@@ -363,7 +363,7 @@ fn query_partial_match() {
         }
     }
 
-    let query = <(Read<Pos>, Write<Rot>)>::query();
+    let mut query = <(Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
     for (entity, (pos, rot)) in query.iter_entities(&world) {
@@ -390,7 +390,7 @@ fn query_read_shared_data() {
 
     world.insert_from(shared.as_tags(), components.clone());
 
-    let query = Tagged::<Static>::query();
+    let mut query = Tagged::<Static>::query();
 
     let mut count = 0;
     for marker in query.iter(&world) {
@@ -424,7 +424,7 @@ fn query_on_changed_first() {
         }
     }
 
-    let query = Read::<Pos>::query().filter(changed::<Pos>() | changed::<Rot>());
+    let mut query = Read::<Pos>::query().filter(changed::<Pos>() | changed::<Rot>());
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {
@@ -458,7 +458,7 @@ fn query_on_changed_no_changes() {
         }
     }
 
-    let query = Read::<Pos>::query().filter(changed::<Pos>());
+    let mut query = Read::<Pos>::query().filter(changed::<Pos>());
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {
@@ -500,7 +500,7 @@ fn query_on_changed_self_changes() {
         }
     }
 
-    let query = Write::<Pos>::query().filter(changed::<Pos>());
+    let mut query = Write::<Pos>::query().filter(changed::<Pos>());
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {

@@ -228,23 +228,17 @@ trait FilterResult {
 impl FilterResult for Option<bool> {
     #[inline]
     fn coalesce_and(self, other: Self) -> Self {
-        print!("and({:?},{:?})", self, other);
-        let result = match self {
+        match self {
             Some(x) => other.map(|y| x && y).or(Some(x)),
             None => other,
-        };
-        println!("={:?}", result);
-        result
+        }
     }
 
     fn coalesce_or(self, other: Self) -> Self {
-        print!("or({:?},{:?})", self, other);
-        let result = match self {
+        match self {
             Some(x) => other.map(|y| x || y).or(Some(x)),
             None => other,
-        };
-        println!("={:?}", result);
-        result
+        }
     }
 
     #[inline]
@@ -254,12 +248,12 @@ impl FilterResult for Option<bool> {
 }
 
 /// Filters chunks to determine which are to be included in a `Query`.
-pub trait Filter: Sync + Sized + Debug {
+pub trait Filter: Send + Sync + Sized + Debug {
     /// Determines if an archetype matches the filter's conditions.
-    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool>;
+    fn filter_archetype(&mut self, archetype: &Archetype) -> Option<bool>;
 
     /// Determines if a chunk matches the filter's conditions.
-    fn filter_chunk(&self, chunk: &Chunk) -> Option<bool>;
+    fn filter_chunk(&mut self, chunk: &Chunk) -> Option<bool>;
 }
 
 pub mod filter {
@@ -297,12 +291,12 @@ pub struct Passthrough;
 
 impl Filter for Passthrough {
     #[inline]
-    fn filter_archetype(&self, _: &Archetype) -> Option<bool> {
+    fn filter_archetype(&mut self, _: &Archetype) -> Option<bool> {
         None
     }
 
     #[inline]
-    fn filter_chunk(&self, _: &Chunk) -> Option<bool> {
+    fn filter_chunk(&mut self, _: &Chunk) -> Option<bool> {
         None
     }
 }
@@ -343,12 +337,12 @@ pub struct Not<F> {
 
 impl<F: Filter> Filter for Not<F> {
     #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
+    fn filter_archetype(&mut self, archetype: &Archetype) -> Option<bool> {
         self.filter.filter_archetype(archetype).map(|x| !x)
     }
 
     #[inline]
-    fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
+    fn filter_chunk(&mut self, chunk: &Chunk) -> Option<bool> {
         self.filter.filter_chunk(chunk).map(|x| !x)
     }
 }
@@ -391,20 +385,18 @@ macro_rules! impl_and_filter {
     ( $( $ty: ident ),* ) => {
         impl<$( $ty: Filter ),*> Filter for And<($( $ty, )*)> {
             #[inline]
-            fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
+            fn filter_archetype(&mut self, archetype: &Archetype) -> Option<bool> {
                 #![allow(non_snake_case)]
-                println!("{:?}.filter_archetype", self);
-                let ($( $ty, )*) = &self.filters;
+                let ($( $ty, )*) = &mut self.filters;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_and($ty.filter_archetype(archetype)); )*
                 result
             }
 
             #[inline]
-            fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
+            fn filter_chunk(&mut self, chunk: &Chunk) -> Option<bool> {
                 #![allow(non_snake_case)]
-                println!("{:?}.filter_chunk", self);
-                let ($( $ty, )*) = &self.filters;
+                let ($( $ty, )*) = &mut self.filters;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_and($ty.filter_chunk(chunk)); )*
                 result
@@ -460,18 +452,18 @@ macro_rules! impl_or_filter {
     ( $( $ty: ident ),* ) => {
         impl<$( $ty: Filter ),*> Filter for Or<($( $ty, )*)> {
             #[inline]
-            fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
+            fn filter_archetype(&mut self, archetype: &Archetype) -> Option<bool> {
                 #![allow(non_snake_case)]
-                let ($( $ty, )*) = &self.filters;
+                let ($( $ty, )*) = &mut self.filters;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_or($ty.filter_archetype(archetype)); )*
                 result
             }
 
             #[inline]
-            fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
+            fn filter_chunk(&mut self, chunk: &Chunk) -> Option<bool> {
                 #![allow(non_snake_case)]
-                let ($( $ty, )*) = &self.filters;
+                let ($( $ty, )*) = &mut self.filters;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_or($ty.filter_chunk(chunk)); )*
                 result
@@ -529,12 +521,12 @@ impl<T: Component> ComponentFilter<T> {
 
 impl<T: Component> Filter for ComponentFilter<T> {
     #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
+    fn filter_archetype(&mut self, archetype: &Archetype) -> Option<bool> {
         Some(archetype.has_component::<T>())
     }
 
     #[inline]
-    fn filter_chunk(&self, _: &Chunk) -> Option<bool> {
+    fn filter_chunk(&mut self, _: &Chunk) -> Option<bool> {
         None
     }
 }
@@ -579,12 +571,12 @@ impl<T: Tag> TagFilter<T> {
 
 impl<T: Tag> Filter for TagFilter<T> {
     #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
+    fn filter_archetype(&mut self, archetype: &Archetype) -> Option<bool> {
         Some(archetype.has_tag::<T>())
     }
 
     #[inline]
-    fn filter_chunk(&self, _: &Chunk) -> Option<bool> {
+    fn filter_chunk(&mut self, _: &Chunk) -> Option<bool> {
         None
     }
 }
@@ -631,12 +623,12 @@ impl<'a, T: Tag> TagValueFilter<'a, T> {
 
 impl<'a, T: Tag> Filter for TagValueFilter<'a, T> {
     #[inline]
-    fn filter_archetype(&self, _: &Archetype) -> Option<bool> {
+    fn filter_archetype(&mut self, _: &Archetype) -> Option<bool> {
         None
     }
 
     #[inline]
-    fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
+    fn filter_chunk(&mut self, chunk: &Chunk) -> Option<bool> {
         Some(chunk.tag::<T>().map_or(false, |s| s == self.value))
     }
 }
@@ -673,14 +665,14 @@ impl<'a, Rhs: Filter, T: Tag> std::ops::BitOr<Rhs> for TagValueFilter<'a, T> {
 /// chunk since the last time the filter was executed.
 #[derive(Debug)]
 pub struct ComponentChangedFilter<T: Component> {
-    versions: Mutex<FnvHashMap<ChunkId, usize>>,
+    versions: FnvHashMap<ChunkId, usize>,
     phantom: PhantomData<T>,
 }
 
 impl<T: Component> ComponentChangedFilter<T> {
     fn new() -> ComponentChangedFilter<T> {
         ComponentChangedFilter {
-            versions: Mutex::new(FnvHashMap::default()),
+            versions: FnvHashMap::default(),
             phantom: PhantomData,
         }
     }
@@ -696,15 +688,14 @@ impl<T: Component> std::ops::Not for ComponentChangedFilter<T> {
 
 impl<T: Component> Filter for ComponentChangedFilter<T> {
     #[inline]
-    fn filter_archetype(&self, _: &Archetype) -> Option<bool> {
+    fn filter_archetype(&mut self, _: &Archetype) -> Option<bool> {
         None
     }
 
-    fn filter_chunk(&self, chunk: &Chunk) -> Option<bool> {
+    fn filter_chunk(&mut self, chunk: &Chunk) -> Option<bool> {
         use std::collections::hash_map::Entry;
         if let Some(version) = chunk.component_version::<T>() {
-            let mut versions = self.versions.lock();
-            match versions.entry(chunk.id()) {
+            match self.versions.entry(chunk.id()) {
                 Entry::Occupied(mut entry) => {
                     let existing = entry.get_mut();
                     let changed = *existing != version;
@@ -748,7 +739,7 @@ impl<Rhs: Filter, T: Component> std::ops::BitOr<Rhs> for ComponentChangedFilter<
 /// An iterator which filters chunks by filter `F` and yields `ChunkView`s.
 pub struct ChunkViewIter<'data, 'filter, V: View<'data>, F: Filter> {
     archetypes: Iter<'data, Archetype>,
-    filter: &'filter F,
+    filter: &'filter mut F,
     frontier: Option<Iter<'data, Chunk>>,
     view: PhantomData<V>,
 }
@@ -855,10 +846,10 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Model;
 /// // A query which matches any entity with a `Position` component
-/// let query = Read::<Position>::query();
+/// let mut query = Read::<Position>::query();
 ///
 /// // A query which matches any entity with both a `Position` and a `Velocity` component
-/// let query = <(Read<Position>, Read<Velocity>)>::query();
+/// let mut query = <(Read<Position>, Read<Velocity>)>::query();
 /// ```
 ///
 /// The view determines what data is accessed, and whether it is accessed mutably or not.
@@ -873,7 +864,7 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// # struct Model;
 /// // A query which writes `Position`, reads `Velocity` and reads `Model`
 /// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
-/// let query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
+/// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 /// ```
 ///
 /// By default, a query will filter its results to include only entities with the data
@@ -891,7 +882,7 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// struct Static;
 ///
 /// // A query which also requires that entities have the `Static` tag
-/// let query = <(Read<Position>, Tagged<Model>)>::query().filter(tag::<Static>());
+/// let mut query = <(Read<Position>, Tagged<Model>)>::query().filter(tag::<Static>());
 /// ```
 ///
 /// Filters can be combined with bitwise operators:
@@ -909,7 +900,7 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 ///
 /// // This query matches entities with positions and a model
 /// // But it also requires that the entity is not static, or has moved (even if static)
-/// let query = <(Read<Position>, Tagged<Model>)>::query()
+/// let mut query = <(Read<Position>, Tagged<Model>)>::query()
 ///     .filter(!tag::<Static>() | changed::<Position>());
 /// ```
 ///
@@ -927,7 +918,7 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// # let world = universe.create_world();
 /// // A query which writes `Position`, reads `Velocity` and reads `Model`
 /// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
-/// let query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
+/// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
 /// for (pos, vel, model) in query.iter(&world) {
 ///     // `.iter` yields tuples of references to a single entity's data:
@@ -950,7 +941,7 @@ impl<'data, 'query, V: View<'data>, F: Filter> Iterator for ChunkEntityIter<'dat
 /// # struct Model;
 /// # let universe = Universe::new(None);
 /// # let world = universe.create_world();
-/// let query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
+/// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
 /// for chunk in query.iter_chunks(&world) {
 ///     let model = chunk.tag::<Model>();
@@ -974,24 +965,24 @@ pub trait Query {
 
     /// Gets an iterator which iterates through all chunks that match the query.
     fn iter_chunks<'a, 'data>(
-        &'a self,
+        &'a mut self,
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, Self::View, Self::Filter>;
 
     /// Gets an iterator which iterates through all entity data that matches the query.
     fn iter<'a, 'data>(
-        &'a self,
+        &'a mut self,
         world: &'data World,
     ) -> ChunkDataIter<'data, 'a, Self::View, Self::Filter>;
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     fn iter_entities<'a, 'data>(
-        &'a self,
+        &'a mut self,
         world: &'data World,
     ) -> ChunkEntityIter<'data, 'a, Self::View, Self::Filter>;
 
     /// Iterates through all entity data that matches the query.
-    fn for_each<'a, 'data, T>(&'a self, world: &'data World, mut f: T)
+    fn for_each<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
     where
         T: Fn(<<Self::View as View<'data>>::Iter as Iterator>::Item),
     {
@@ -1000,7 +991,7 @@ pub trait Query {
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    fn par_for_each<'a, T>(&'a self, world: &'a World, f: T)
+    fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
     where
         T: Fn(<<Self::View as View<'a>>::Iter as Iterator>::Item) + Send + Sync;
 }
@@ -1026,19 +1017,19 @@ impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
     }
 
     fn iter_chunks<'a, 'data>(
-        &'a self,
+        &'a mut self,
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, Self::View, Self::Filter> {
         ChunkViewIter {
             archetypes: world.archetypes.iter(),
-            filter: &self.filter,
+            filter: &mut self.filter,
             frontier: None,
             view: PhantomData,
         }
     }
 
     fn iter<'a, 'data>(
-        &'a self,
+        &'a mut self,
         world: &'data World,
     ) -> ChunkDataIter<'data, 'a, Self::View, Self::Filter> {
         ChunkDataIter {
@@ -1049,7 +1040,7 @@ impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
     }
 
     fn iter_entities<'a, 'data>(
-        &'a self,
+        &'a mut self,
         world: &'data World,
     ) -> ChunkEntityIter<'data, 'a, Self::View, Self::Filter> {
         ChunkEntityIter {
@@ -1060,7 +1051,7 @@ impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
     }
 
     #[cfg(feature = "par-iter")]
-    fn par_for_each<'a, T>(&'a self, world: &'a World, f: T)
+    fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
     {
@@ -1076,20 +1067,10 @@ impl<V: for<'a> View<'a>, F: Filter> QueryDef<V, F> {
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
     pub fn par_iter_chunks<'a>(
-        &'a self,
+        &'a mut self,
         world: &'a World,
     ) -> impl ParallelIterator<Item = ChunkView<'a, V>> {
-        let filter = &self.filter;
-        let archetypes = &world.archetypes;
-        archetypes
-            .par_iter()
-            .filter(move |a| filter.filter_archetype(a).is_pass())
-            .flat_map(|a| a.chunks())
-            .filter(move |c| filter.filter_chunk(c).is_pass())
-            .map(|c| ChunkView {
-                chunk: c,
-                view: PhantomData,
-            })
+        self.iter_chunks(world).par_bridge()
     }
 }
 

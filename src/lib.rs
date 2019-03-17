@@ -46,7 +46,7 @@
 //! );
 //!
 //! // Create a query which finds all `Position` and `Velocity` components
-//! let query = <(Write<Position>, Read<Velocity>)>::query();
+//! let mut query = <(Write<Position>, Read<Velocity>)>::query();
 //!
 //! // Iterate through all entities that match the query in the world
 //! for (pos, vel) in query.iter(&world) {
@@ -84,7 +84,7 @@
 //! # let universe = Universe::new(None);
 //! # let mut world = universe.create_world();
 //! // It is possible to specify that entities must contain data beyond that being fetched
-//! let query = Read::<Position>::query()
+//! let mut query = Read::<Position>::query()
 //!     .filter(component::<Velocity>());
 //! for position in query.iter(&world) {
 //!     // these entities also have `Velocity`
@@ -112,7 +112,7 @@
 //! # let universe = Universe::new(None);
 //! # let mut world = universe.create_world();
 //! // Filters can be combined with boolean operators
-//! let query = Read::<Position>::query()
+//! let mut query = Read::<Position>::query()
 //!     .filter(tag::<Static>() | !component::<Velocity>());
 //! for position in query.iter(&world) {
 //!     // these entities are also either marked as `Static`, or do *not* have a `Velocity`
@@ -140,7 +140,7 @@
 //! # let universe = Universe::new(None);
 //! # let mut world = universe.create_world();
 //! // Filters can filter by specific tag values
-//! let query = Read::<Position>::query()
+//! let mut query = Read::<Position>::query()
 //!     .filter(tag_value(&Model(3)));
 //! for position in query.iter(&world) {
 //!     // these entities all have tag value `Model(3)`
@@ -169,7 +169,7 @@
 //! # let mut world = universe.create_world();
 //! // Queries can perform coarse-grained change detection, rejecting entities who's data
 //! // has not changed since the last time the query was iterated.
-//! let query = <(Read<Position>, Tagged<Model>)>::query()
+//! let mut query = <(Read<Position>, Tagged<Model>)>::query()
 //!     .filter(changed::<Position>());
 //! for (pos, model) in query.iter(&world) {
 //!     // entities who have changed position
@@ -210,7 +210,7 @@
 //!     // issue instanced draw call with model data and transforms
 //! }
 //!
-//! let query = Read::<Transform>::query()
+//! let mut query = Read::<Transform>::query()
 //!     .filter(tag::<Model>());
 //!
 //! for chunk in query.iter_chunks(&world) {
