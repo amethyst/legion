@@ -497,6 +497,7 @@ pub struct Archetype {
     id: ArchetypeId,
     logger: slog::Logger,
     next_chunk_id: u16,
+    version: u16,
     /// The entity data component types that all chunks contain.
     pub components: FnvHashSet<TypeId>,
     /// The tag types that all chunks contains.
@@ -517,15 +518,21 @@ impl Archetype {
             id,
             logger,
             next_chunk_id: 0,
+            version: 0,
             components,
             tags,
             chunks: Vec::new(),
         }
     }
 
-    /// Gets the archetype ID
+    /// Gets the archetype ID.
     pub fn id(&self) -> ArchetypeId {
         self.id
+    }
+
+    /// Gets the archetype version.
+    pub fn version(&self) -> u16 {
+        self.version
     }
 
     /// Gets a chunk reference.
@@ -577,6 +584,7 @@ impl Archetype {
                 let chunk_index = self.chunks.len() as ChunkIndex;
                 self.next_chunk_id += 1;
                 self.chunks.push(builder.build(chunk_id));
+                self.version += 1;
 
                 let chunk = self.chunks.last_mut().unwrap();
 
