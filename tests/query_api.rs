@@ -128,6 +128,40 @@ fn query_read_entity_data() {
 }
 
 #[test]
+fn query_cached_read_entity_data() {
+    let universe = Universe::new(None);
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5));
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
+
+    for (i, e) in world
+        .insert_from(shared.as_tags(), components.clone())
+        .iter()
+        .enumerate()
+    {
+        if let Some((pos, rot)) = components.get(i) {
+            expected.insert(*e, (*pos, *rot));
+        }
+    }
+
+    let mut query = Read::<Pos>::query().cached();
+
+    let mut count = 0;
+    for (entity, pos) in query.iter_entities(&world) {
+        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        count += 1;
+    }
+
+    assert_eq!(components.len(), count);
+}
+
+#[test]
 fn query_read_entity_data_par() {
     let universe = Universe::new(None);
     let mut world = universe.create_world();

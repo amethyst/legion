@@ -247,8 +247,8 @@ fn mutate_add_component() {
     assert_eq!(3, query_without_scale.iter(&world).count());
     assert_eq!(0, query_with_scale.iter(&world).count());
 
-    world.mutate_entity(*entities.get(1).unwrap(), |_, components| {
-        components.add_component(Scale(0.5, 0.5, 0.5))
+    world.mutate_entity(*entities.get(1).unwrap(), |e| {
+        e.add_component(Scale(0.5, 0.5, 0.5))
     });
 
     assert_eq!(3, query_without_scale.iter(&world).count());
@@ -275,8 +275,8 @@ fn mutate_remove_component() {
     assert_eq!(0, query_without_rot.iter(&world).count());
     assert_eq!(3, query_with_rot.iter(&world).count());
 
-    world.mutate_entity(*entities.get(1).unwrap(), |_, components| {
-        components.remove_component::<Rot>();
+    world.mutate_entity(*entities.get(1).unwrap(), |e| {
+        e.remove_component::<Rot>();
     });
 
     assert_eq!(1, query_without_rot.iter(&world).count());
@@ -303,8 +303,8 @@ fn mutate_add_tag() {
     assert_eq!(3, query_without_static.iter(&world).count());
     assert_eq!(0, query_with_static.iter(&world).count());
 
-    world.mutate_entity(*entities.get(1).unwrap(), |tags, _| {
-        tags.set_tag(Arc::new(Static));
+    world.mutate_entity(*entities.get(1).unwrap(), |e| {
+        e.set_tag(Arc::new(Static));
     });
 
     assert_eq!(3, query_without_static.iter(&world).count());
@@ -331,8 +331,8 @@ fn mutate_remove_tag() {
     assert_eq!(0, query_without_static.iter(&world).count());
     assert_eq!(3, query_with_static.iter(&world).count());
 
-    world.mutate_entity(*entities.get(1).unwrap(), |tags, _| {
-        tags.remove_tag::<Static>();
+    world.mutate_entity(*entities.get(1).unwrap(), |e| {
+        e.remove_tag::<Static>();
     });
 
     assert_eq!(1, query_without_static.iter(&world).count());
@@ -359,8 +359,8 @@ fn mutate_change_tag() {
     assert_eq!(3, query_model_5.iter(&world).count());
     assert_eq!(0, query_model_3.iter(&world).count());
 
-    world.mutate_entity(*entities.get(1).unwrap(), |tags, _| {
-        tags.set_tag(Arc::new(Model(3)));
+    world.mutate_entity(*entities.get(1).unwrap(), |e| {
+        e.set_tag(Arc::new(Model(3)));
     });
 
     assert_eq!(2, query_model_5.iter(&world).count());

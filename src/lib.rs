@@ -233,6 +233,7 @@ use crate::borrows::*;
 use crate::storage::TagValue;
 use crate::storage::*;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 
 use fnv::FnvHashSet;
 use parking_lot::Mutex;
@@ -245,7 +246,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 pub mod prelude {
-    pub use crate::query::{filter::*, IntoQuery, Query, Read, Tagged, Write};
+    pub use crate::query::{filter::*, IntoQuery, Query, CachedQuery, Read, Tagged, Write};
     pub use crate::{Entity, IntoTagSet, Universe, World};
 }
 
@@ -801,17 +802,13 @@ impl World {
     /// #     (Position(2.0), Rotation(2.0)),
     /// # ];
     /// # let entity = *world.insert_from(tags, data).get(0).unwrap();
-    /// world.mutate_entity(entity, |tags, components| {
-    ///     tags.set_tag(Arc::new(Static));
-    ///     components.add_component(Position(4.0));
-    ///     components.remove_component::<Rotation>();
+    /// world.mutate_entity(entity, |e| {
+    ///     e.set_tag(Arc::new(Static));
+    ///     e.add_component(Position(4.0));
+    ///     e.remove_component::<Rotation>();
     /// });
     /// ```
-    pub fn mutate_entity<F: FnOnce(&mut DynamicTagSet, &mut DynamicSingleEntitySource)>(
-        &mut self,
-        entity: Entity,
-        f: F,
-    ) {
+    pub fn mutate_entity<'env, F: FnOnce(&mut MutEntity<'env>)>(&mut self, entity: Entity, f: F) {
         assert!(self.is_alive(&entity));
 
         if let Some((arch_id, chunk_id, comp_id)) = self.allocator.get_location(&entity.index) {
@@ -821,8 +818,14 @@ impl World {
                 .and_then(|a| a.chunk_mut(chunk_id))
                 .map(|c| c.fetch_remove(comp_id))
             {
+                let mut mut_handle = MutEntity::<'env> {
+                    tags,
+                    components,
+                    _phantom: PhantomData,
+                };
+
                 // mutate the entity
-                f(&mut tags, &mut components);
+                f(&mut mut_handle);
 
                 // record swapped entity's new location
                 if let Some(swapped) = swapped {
@@ -831,7 +834,7 @@ impl World {
                 }
 
                 // re-insert the entity
-                self.insert(tags, components);
+                self.insert(mut_handle.tags, mut_handle.components);
             }
         }
     }
@@ -928,6 +931,34 @@ impl World {
                 )
             }
         }
+    }
+}
+
+pub struct MutEntity<'env> {
+    tags: DynamicTagSet,
+    components: DynamicSingleEntitySource,
+    _phantom: PhantomData<&'env mut &'env ()>,
+}
+
+impl<'env> MutEntity<'env> {
+    pub fn deconstruct(&mut self) -> (&mut DynamicTagSet, &mut DynamicSingleEntitySource) {
+        (&mut self.tags, &mut self.components)
+    }
+
+    pub fn set_tag<T: Tag>(&mut self, tag: Arc<T>) {
+        self.tags.set_tag(tag);
+    }
+
+    pub fn remove_tag<T: Tag>(&mut self) -> bool {
+        self.tags.remove_tag::<T>()
+    }
+
+    pub fn add_component<T: Component>(&mut self, component: T) {
+        self.components.add_component(component);
+    }
+
+    pub fn remove_component<T: Component>(&mut self) -> bool {
+        self.components.remove_component::<T>()
     }
 }
 
