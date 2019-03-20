@@ -246,7 +246,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 pub mod prelude {
-    pub use crate::query::{filter::*, IntoQuery, Query, CachedQuery, Read, Tagged, Write};
+    pub use crate::query::{filter::*, IntoQuery, Query, Read, Tagged, Write};
     pub use crate::{Entity, IntoTagSet, Universe, World};
 }
 
@@ -812,7 +812,7 @@ impl World {
         assert!(self.is_alive(&entity));
 
         if let Some((arch_id, chunk_id, comp_id)) = self.allocator.get_location(&entity.index) {
-            if let Some((swapped, mut tags, mut components)) = self
+            if let Some((swapped, tags, components)) = self
                 .archetypes
                 .get_mut(arch_id as usize)
                 .and_then(|a| a.chunk_mut(chunk_id))

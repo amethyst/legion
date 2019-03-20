@@ -105,421 +105,89 @@ fn bench_create_delete(c: &mut Criterion) {
 }
 
 fn bench_iter_simple(c: &mut Criterion) {
-    c.bench(
-        "iter-simple",
-        ParameterizedBenchmark::new(
-            "query",
-            |b, count| {
-                let mut world = setup(*count);
-                add_background_entities(&mut world, 10000);
+    c.bench_function("iter-simple", |b| {
+        let mut world = setup(2000);
+        add_background_entities(&mut world, 10000);
 
-                let mut query = <(Read<Position>, Write<Rotation>)>::query();
+        let mut query = <(Read<Position>, Write<Rotation>)>::query();
 
-                b.iter(|| {
-                    for (pos, rot) in query.iter(&world) {
-                        rot.0 = pos.0;
-                    }
-                });
-            },
-            (0..11).map(|i| i * 1000),
-        )
-        .with_function("cachedquery-on", |b, count| {
-            let mut world = setup(*count);
-            add_background_entities(&mut world, 10000);
-
-            let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching();
-            query.set_caching_enabled(false);
-
-            b.iter(|| {
-                for (pos, rot) in query.iter(&world) {
-                    rot.0 = pos.0;
-                }
-            });
-        })
-        .with_function("cachedquery-off", |b, count| {
-            let mut world = setup(*count);
-            add_background_entities(&mut world, 10000);
-
-            let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching();
-            query.set_caching_enabled(false);
-
-            b.iter(|| {
-                for (pos, rot) in query.iter(&world) {
-                    rot.0 = pos.0;
-                }
-            });
-        })
-        .with_function("cachedquery-on-singleuse", |b, count| {
-            let mut world = setup(*count);
-            add_background_entities(&mut world, 10000);
-
-            b.iter(|| {
-                let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching();
-                query.set_caching_enabled(false);
-
-                for (pos, rot) in query.iter(&world) {
-                    rot.0 = pos.0;
-                }
-            });
-        })
-        .with_function("cachedquery-off-singleuse", |b, count| {
-            let mut world = setup(*count);
-            add_background_entities(&mut world, 10000);
-
-            b.iter(|| {
-                let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching();
-                query.set_caching_enabled(false);
-
-                for (pos, rot) in query.iter(&world) {
-                    rot.0 = pos.0;
-                }
-            });
-        }),
-    );
+        b.iter(|| {
+            for (pos, rot) in query.iter(&world) {
+                rot.0 = pos.0;
+            }
+        });
+    });
 }
 
 fn bench_iter_complex(c: &mut Criterion) {
-    c.bench(
-        "iter-complex",
-        ParameterizedBenchmark::new(
-            "query",
-            |b, count| {
-                let mut world = setup(0);
-                add_background_entities(&mut world, 10000);
+    c.bench_function("iter-complex", |b| {
+        let mut world = setup(0);
+        add_background_entities(&mut world, 10000);
 
-                for i in 0..200 {
-                    world.insert_from(
-                        (Tag(i as f32),).as_tags(),
-                        (0..*count).map(|_| (Position(0.), Rotation(0.))),
-                    );
-                }
+        for i in 0..200 {
+            world.insert_from(
+                (Tag(i as f32),).as_tags(),
+                (0..2000).map(|_| (Position(0.), Rotation(0.))),
+            );
+        }
 
-                let mut query = <(Read<Position>, Write<Rotation>)>::query()
-                    .filter(!component::<A>() & tag_value(&Tag(2.0)));
+        let mut query = <(Read<Position>, Write<Rotation>)>::query()
+            .filter(!component::<A>() & tag_value(&Tag(2.0)));
 
-                b.iter(|| {
-                    for (pos, rot) in query.iter(&world) {
-                        rot.0 = pos.0;
-                    }
-                });
-            },
-            (0..11).map(|i| i * 1000),
-        )
-        .with_function("cachedquery-on", |b, count| {
-            let mut world = setup(0);
-            add_background_entities(&mut world, 10000);
-
-            for i in 0..200 {
-                world.insert_from(
-                    (Tag(i as f32),).as_tags(),
-                    (0..*count).map(|_| (Position(0.), Rotation(0.))),
-                );
+        b.iter(|| {
+            for (pos, rot) in query.iter(&world) {
+                rot.0 = pos.0;
             }
-
-            let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching()
-                .filter(!component::<A>() & tag_value(&Tag(2.0)));
-            query.set_caching_enabled(false);
-
-            b.iter(|| {
-                for (pos, rot) in query.iter(&world) {
-                    rot.0 = pos.0;
-                }
-            });
-        })
-        .with_function("cachedquery-off", |b, count| {
-            let mut world = setup(0);
-            add_background_entities(&mut world, 10000);
-
-            for i in 0..200 {
-                world.insert_from(
-                    (Tag(i as f32),).as_tags(),
-                    (0..*count).map(|_| (Position(0.), Rotation(0.))),
-                );
-            }
-
-            let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching()
-                .filter(!component::<A>() & tag_value(&Tag(2.0)));
-            query.set_caching_enabled(false);
-
-            b.iter(|| {
-                for (pos, rot) in query.iter(&world) {
-                    rot.0 = pos.0;
-                }
-            });
-        })
-        .with_function("cachedquery-on-singleuse", |b, count| {
-            let mut world = setup(0);
-            add_background_entities(&mut world, 10000);
-
-            for i in 0..200 {
-                world.insert_from(
-                    (Tag(i as f32),).as_tags(),
-                    (0..*count).map(|_| (Position(0.), Rotation(0.))),
-                );
-            }
-
-            b.iter(|| {
-                let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching()
-                    .filter(!component::<A>() & tag_value(&Tag(2.0)));
-                query.set_caching_enabled(false);
-
-                for (pos, rot) in query.iter(&world) {
-                    rot.0 = pos.0;
-                }
-            });
-        })
-        .with_function("cachedquery-off-singleuse", |b, count| {
-            let mut world = setup(0);
-            add_background_entities(&mut world, 10000);
-
-            for i in 0..200 {
-                world.insert_from(
-                    (Tag(i as f32),).as_tags(),
-                    (0..*count).map(|_| (Position(0.), Rotation(0.))),
-                );
-            }
-
-            b.iter(|| {
-                let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching()
-                    .filter(!component::<A>() & tag_value(&Tag(2.0)));
-                query.set_caching_enabled(false);
-
-                for (pos, rot) in query.iter(&world) {
-                    rot.0 = pos.0;
-                }
-            });
-        }),
-    );
+        });
+    });
 }
 
 fn bench_iter_chunks_simple(c: &mut Criterion) {
-    c.bench(
-        "iter-chunks-simple",
-        Benchmark::new("query", |b| {
-            let mut world = setup(10000);
-            add_background_entities(&mut world, 10000);
+    c.bench_function("iter-chunks-simple", |b| {
+        let mut world = setup(10000);
+        add_background_entities(&mut world, 10000);
 
-            let mut query = <(Read<Position>, Write<Rotation>)>::query();
+        let mut query = <(Read<Position>, Write<Rotation>)>::query();
 
-            b.iter(|| {
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        })
-        .with_function("cachedquery-on", |b| {
-            let mut world = setup(10000);
-            add_background_entities(&mut world, 10000);
-
-            let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching();
-            query.set_caching_enabled(false);
-
-            b.iter(|| {
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        })
-        .with_function("cachedquery-off", |b| {
-            let mut world = setup(10000);
-            add_background_entities(&mut world, 10000);
-
-            let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching();
-            query.set_caching_enabled(false);
-
-            b.iter(|| {
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        })
-        .with_function("cachedquery-on-singleuse", |b| {
-            let mut world = setup(10000);
-            add_background_entities(&mut world, 10000);
-
-            b.iter(|| {
-                let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching();
-                query.set_caching_enabled(false);
-
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        })
-        .with_function("cachedquery-off-singleuse", |b| {
-            let mut world = setup(10000);
-            add_background_entities(&mut world, 10000);
-
-            b.iter(|| {
-                let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching();
-                query.set_caching_enabled(false);
-
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        }),
-    );
+        b.iter(|| {
+            for c in query.iter_chunks(&world) {
+                unsafe {
+                    c.components_mut::<Position>()
+                        .unwrap()
+                        .get_unchecked_mut(0)
+                        .0 = 0.0
+                };
+            }
+        });
+    });
 }
 
 fn bench_iter_chunks_complex(c: &mut Criterion) {
-    c.bench(
-        "iter-chunks-complex",
-        Benchmark::new("query", |b| {
-            let mut world = setup(0);
-            add_background_entities(&mut world, 10000);
+    c.bench_function("iter-chunks-complex", |b| {
+        let mut world = setup(0);
+        add_background_entities(&mut world, 10000);
 
-            for i in 0..200 {
-                world.insert_from(
-                    (Tag(i as f32),).as_tags(),
-                    (0..10000).map(|_| (Position(0.), Rotation(0.))),
-                );
+        for i in 0..200 {
+            world.insert_from(
+                (Tag(i as f32),).as_tags(),
+                (0..10000).map(|_| (Position(0.), Rotation(0.))),
+            );
+        }
+
+        let mut query = <(Read<Position>, Write<Rotation>)>::query()
+            .filter(!component::<A>() & tag_value(&Tag(2.0)));
+
+        b.iter(|| {
+            for c in query.iter_chunks(&world) {
+                unsafe {
+                    c.components_mut::<Position>()
+                        .unwrap()
+                        .get_unchecked_mut(0)
+                        .0 = 0.0
+                };
             }
-
-            let mut query = <(Read<Position>, Write<Rotation>)>::query()
-                .filter(!component::<A>() & tag_value(&Tag(2.0)));
-
-            b.iter(|| {
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        })
-        .with_function("cachedquery-on", |b| {
-            let mut world = setup(0);
-            add_background_entities(&mut world, 10000);
-
-            for i in 0..200 {
-                world.insert_from(
-                    (Tag(i as f32),).as_tags(),
-                    (0..10000).map(|_| (Position(0.), Rotation(0.))),
-                );
-            }
-
-            let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching()
-                .filter(!component::<A>() & tag_value(&Tag(2.0)));
-            query.set_caching_enabled(false);
-
-            b.iter(|| {
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        })
-        .with_function("cachedquery-off", |b| {
-            let mut world = setup(0);
-            add_background_entities(&mut world, 10000);
-
-            for i in 0..200 {
-                world.insert_from(
-                    (Tag(i as f32),).as_tags(),
-                    (0..10000).map(|_| (Position(0.), Rotation(0.))),
-                );
-            }
-
-            let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching()
-                .filter(!component::<A>() & tag_value(&Tag(2.0)));
-            query.set_caching_enabled(false);
-
-            b.iter(|| {
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        })
-        .with_function("cachedquery-on-singleuse", |b| {
-            let mut world = setup(0);
-            add_background_entities(&mut world, 10000);
-
-            for i in 0..200 {
-                world.insert_from(
-                    (Tag(i as f32),).as_tags(),
-                    (0..10000).map(|_| (Position(0.), Rotation(0.))),
-                );
-            }
-
-            b.iter(|| {
-                let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching()
-                    .filter(!component::<A>() & tag_value(&Tag(2.0)));
-                query.set_caching_enabled(false);
-
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        })
-        .with_function("cachedquery-off-singleuse", |b| {
-            let mut world = setup(0);
-            add_background_entities(&mut world, 10000);
-
-            for i in 0..200 {
-                world.insert_from(
-                    (Tag(i as f32),).as_tags(),
-                    (0..10000).map(|_| (Position(0.), Rotation(0.))),
-                );
-            }
-
-            b.iter(|| {
-                let mut query = <(Read<Position>, Write<Rotation>)>::query_with_caching()
-                    .filter(!component::<A>() & tag_value(&Tag(2.0)));
-                query.set_caching_enabled(false);
-
-                for c in query.iter_chunks(&world) {
-                    unsafe {
-                        c.components_mut::<Position>()
-                            .unwrap()
-                            .get_unchecked_mut(0)
-                            .0 = 0.0
-                    };
-                }
-            });
-        }),
-    );
+        });
+    });
 }
 
 criterion_group!(

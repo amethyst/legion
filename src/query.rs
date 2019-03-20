@@ -1,10 +1,7 @@
 use fnv::FnvHashMap;
 use itertools::multizip;
-use smallbitvec::SmallBitVec;
-use std::iter::Chain;
 use std::iter::Repeat;
 use std::iter::Take;
-use std::iter::Zip;
 use std::marker::PhantomData;
 use std::slice::Iter;
 use std::slice::IterMut;
@@ -51,12 +48,6 @@ pub trait ViewElement {
 pub trait IntoQuery: DefaultFilter + for<'a> View<'a> {
     /// Converts the `View` type into a `Query`.
     fn query() -> QueryDef<Self, <Self as DefaultFilter>::Filter>;
-
-    // /// Converts the `View` type into a `Query`.
-    // fn query() -> CachedQueryDef<Self, <Self as DefaultFilter>::Filter>;
-
-    /// Converts the `View` type into a `Query`.
-    fn query_with_caching() -> CachedQueryDef<Self, <Self as DefaultFilter>::Filter>;
 }
 
 impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
@@ -66,30 +57,6 @@ impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
         }
 
         QueryDef {
-            view: PhantomData,
-            filter: Self::filter(),
-        }
-    }
-
-    // fn query() -> CachedQueryDef<Self, <Self as DefaultFilter>::Filter> {
-    //     if !Self::validate() {
-    //         panic!("invalid view, please ensure the view contains no duplicate component types");
-    //     }
-
-    //     CachedQueryDef {
-    //         cache: CacheMode::Disabled,
-    //         view: PhantomData,
-    //         filter: Self::filter(),
-    //     }
-    // }
-
-    fn query_with_caching() -> CachedQueryDef<Self, <Self as DefaultFilter>::Filter> {
-        if !Self::validate() {
-            panic!("invalid view, please ensure the view contains no duplicate component types");
-        }
-
-        CachedQueryDef {
-            cache: CacheMode::Uninitialized,
             view: PhantomData,
             filter: Self::filter(),
         }
@@ -885,184 +852,6 @@ where
     }
 }
 
-#[derive(Debug)]
-enum CacheResult<T> {
-    Some(T),
-    None,
-    Unknown,
-}
-
-enum ChunkCacheResult {
-    Pass,
-    Fail,
-    Unknown,
-}
-
-struct ChunkCacheIter<I>
-where
-    I: Iterator<Item = bool>,
-{
-    source: Option<I>,
-}
-
-impl<I> ChunkCacheIter<I>
-where
-    I: Iterator<Item = bool>,
-{
-    fn new(iter: I) -> Self {
-        ChunkCacheIter { source: Some(iter) }
-    }
-
-    fn empty() -> Self {
-        ChunkCacheIter { source: None }
-    }
-}
-
-impl<I> Iterator for ChunkCacheIter<I>
-where
-    I: Iterator<Item = bool>,
-{
-    type Item = ChunkCacheResult;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(ref mut source) = self.source {
-            match source.next() {
-                Some(true) => Some(ChunkCacheResult::Pass),
-                Some(false) => Some(ChunkCacheResult::Fail),
-                None => Some(ChunkCacheResult::Unknown),
-            }
-        } else {
-            Some(ChunkCacheResult::Unknown)
-        }
-    }
-}
-
-#[derive(Debug)]
-struct FilterCache {
-    world_id: Option<WorldId>,
-    cache: Vec<CacheResult<SmallBitVec>>,
-}
-
-impl FilterCache {
-    pub fn new() -> Self {
-        FilterCache {
-            world_id: None,
-            cache: Vec::new(),
-        }
-    }
-
-    pub fn update<F: Filter>(&mut self, world: &World, filter: &F) {
-        if let Some(previous_world) = self.world_id {
-            if previous_world != world.id {
-                self.cache.clear();
-            }
-        }
-
-        self.world_id = Some(world.id);
-
-        // find any new archetypes
-        for archetype in world.archetypes.iter().skip(self.cache.len()) {
-            let entry = match filter.filter_archetype(archetype).is_pass() {
-                true => CacheResult::Some(SmallBitVec::new()),
-                false => CacheResult::None,
-            };
-            self.cache.push(entry);
-        }
-
-        // find any new chunks
-        for (cache, archetype) in self.cache.iter_mut().zip(world.archetypes.iter()) {
-            if let CacheResult::Some(cache) = cache {
-                for chunk in archetype.chunks().iter().skip(cache.len()) {
-                    let passes = filter.filter_chunk_immutable(chunk).is_pass();
-                    cache.push(passes);
-                }
-            }
-        }
-    }
-}
-
-pub struct CachedChunkViewIter<'data, 'filter, V: View<'data>, F: Filter> {
-    archetypes: Zip<
-        Iter<'data, Archetype>,
-        Chain<Iter<'filter, CacheResult<SmallBitVec>>, Repeat<&'filter CacheResult<SmallBitVec>>>,
-    >,
-    filter: &'filter mut F,
-    frontier: Option<Zip<Iter<'data, Chunk>, ChunkCacheIter<smallbitvec::Iter<'filter>>>>,
-    view: PhantomData<V>,
-}
-
-impl<'filter, 'data, F, V> Iterator for CachedChunkViewIter<'data, 'filter, V, F>
-where
-    F: Filter,
-    V: View<'data>,
-{
-    type Item = ChunkView<'data, V>;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            // yield out chunks if we are searching through an archetype
-            if let Some(ref mut chunks) = self.frontier {
-                for (chunk, pass) in chunks {
-                    match pass {
-                        ChunkCacheResult::Pass => {
-                            // filter only against non-cacheable filter conditions
-                            if self.filter.filter_chunk_variable(chunk).is_pass() {
-                                return Some(ChunkView {
-                                    chunk: chunk,
-                                    view: PhantomData,
-                                });
-                            }
-                        }
-                        ChunkCacheResult::Unknown => {
-                            // filter against full filter conditions
-                            if self.filter.filter_chunk(chunk).is_pass() {
-                                return Some(ChunkView {
-                                    chunk: chunk,
-                                    view: PhantomData,
-                                });
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            // else find the next archetype
-            loop {
-                match self.archetypes.next() {
-                    // inspect next archetype
-                    Some((archetype, cache)) => match cache {
-                        CacheResult::Some(cache) => {
-                            // check chunk against the cache bitfield
-                            self.frontier = Some(
-                                archetype
-                                    .chunks()
-                                    .iter()
-                                    .zip(ChunkCacheIter::new(cache.iter())),
-                            );
-                            break;
-                        }
-                        CacheResult::Unknown => {
-                            // filter against filter conditions
-                            if self.filter.filter_archetype(archetype).is_pass() {
-                                // use no cache bitfield (yield all Unknown)
-                                let chunks = archetype.chunks().iter().zip(ChunkCacheIter::empty());
-                                self.frontier = Some(chunks);
-                                break;
-                            }
-                        }
-                        _ => {}
-                    },
-                    // ran out of archetypes; we are done
-                    None => return None,
-                }
-            }
-        }
-    }
-}
-
 /// An iterator which iterates through all entity data in all chunks.
 pub struct ChunkDataIter<'data, V, I>
 where
@@ -1263,8 +1052,6 @@ pub trait Query {
     /// Adds an additional filter to the query.
     fn filter<T: Filter>(self, filter: T) -> QueryDef<Self::View, And<(Self::Filter, T)>>;
 
-    fn cached(self) -> CachedQueryDef<Self::View, Self::Filter>;
-
     /// Gets an iterator which iterates through all chunks that match the query.
     fn iter_chunks<'a, 'data>(
         &'a mut self,
@@ -1318,14 +1105,6 @@ impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
         }
     }
 
-    fn cached(self) -> CachedQueryDef<Self::View, Self::Filter> {
-        CachedQueryDef {
-            cache: CacheMode::Uninitialized,
-            view: self.view,
-            filter: self.filter,
-        }
-    }
-
     fn iter_chunks<'a, 'data>(
         &'a mut self,
         world: &'data World,
@@ -1375,169 +1154,6 @@ impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
 }
 
 impl<V: for<'a> View<'a>, F: Filter> QueryDef<V, F> {
-    /// Gets a parallel iterator of chunks that match the query.
-    #[cfg(feature = "par-iter")]
-    pub fn par_iter_chunks<'a>(
-        &'a mut self,
-        world: &'a World,
-    ) -> impl ParallelIterator<Item = ChunkView<'a, V>> {
-        self.iter_chunks(world).par_bridge()
-    }
-}
-
-pub trait CachedQuery {
-    /// The chunk filter used to determine which chunks to include in the output.
-    type Filter: Filter;
-
-    /// The view used to determine which components are accessed.
-    type View: for<'data> View<'data>;
-
-    /// Adds an additional filter to the query.
-    fn filter<T: Filter>(self, filter: T) -> CachedQueryDef<Self::View, And<(Self::Filter, T)>>;
-
-    /// Enable or disable query caching.
-    fn set_caching_enabled(&mut self, enable_cache: bool);
-
-    /// Gets an iterator which iterates through all chunks that match the query.
-    fn iter_chunks<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> CachedChunkViewIter<'data, 'a, Self::View, Self::Filter>;
-
-    /// Gets an iterator which iterates through all entity data that matches the query.
-    fn iter<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> ChunkDataIter<'data, Self::View, CachedChunkViewIter<'data, 'a, Self::View, Self::Filter>>;
-
-    /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
-    fn iter_entities<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> ChunkEntityIter<'data, Self::View, CachedChunkViewIter<'data, 'a, Self::View, Self::Filter>>;
-
-    /// Iterates through all entity data that matches the query.
-    fn for_each<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
-    where
-        T: Fn(<<Self::View as View<'data>>::Iter as Iterator>::Item),
-    {
-        self.iter(world).for_each(&mut f);
-    }
-
-    /// Iterates through all entity data that matches the query in parallel.
-    #[cfg(feature = "par-iter")]
-    fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
-    where
-        T: Fn(<<Self::View as View<'a>>::Iter as Iterator>::Item) + Send + Sync;
-}
-
-#[derive(Debug)]
-enum CacheMode {
-    Initialized(FilterCache),
-    Uninitialized,
-    Disabled,
-}
-
-/// Queries for entities within a `World`.
-#[derive(Debug)]
-pub struct CachedQueryDef<V: for<'a> View<'a>, F: Filter> {
-    cache: CacheMode,
-    view: PhantomData<V>,
-    filter: F,
-}
-
-impl<V: for<'a> View<'a>, F: Filter> CachedQuery for CachedQueryDef<V, F> {
-    type View = V;
-    type Filter = F;
-
-    fn filter<T: Filter>(self, filter: T) -> CachedQueryDef<Self::View, And<(Self::Filter, T)>> {
-        CachedQueryDef {
-            cache: match self.cache {
-                CacheMode::Disabled => CacheMode::Disabled,
-                _ => CacheMode::Uninitialized,
-            },
-            view: self.view,
-            filter: And {
-                filters: (self.filter, filter),
-            },
-        }
-    }
-
-    fn set_caching_enabled(&mut self, enable_cache: bool) {
-        if enable_cache {
-            if let CacheMode::Disabled = self.cache {
-                self.cache = CacheMode::Uninitialized
-            }
-        } else {
-            self.cache = CacheMode::Disabled;
-        }
-    }
-
-    fn iter_chunks<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> CachedChunkViewIter<'data, 'a, Self::View, Self::Filter> {
-        if let CacheMode::Uninitialized = self.cache {
-            self.cache = CacheMode::Initialized(FilterCache::new());
-        }
-
-        let cache = match self.cache {
-            CacheMode::Initialized(ref mut cache) => {
-                cache.update(world, &self.filter);
-                cache
-                    .cache
-                    .iter()
-                    .chain(std::iter::repeat(&CacheResult::Unknown))
-            }
-            _ => [].iter().chain(std::iter::repeat(&CacheResult::Unknown)),
-        };
-
-        CachedChunkViewIter {
-            archetypes: world.archetypes.iter().zip(cache),
-            filter: &mut self.filter,
-            frontier: None,
-            view: PhantomData,
-        }
-    }
-
-    fn iter<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> ChunkDataIter<'data, Self::View, CachedChunkViewIter<'data, 'a, Self::View, Self::Filter>>
-    {
-        ChunkDataIter {
-            iter: self.iter_chunks(world),
-            frontier: None,
-            view: PhantomData,
-        }
-    }
-
-    fn iter_entities<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> ChunkEntityIter<'data, Self::View, CachedChunkViewIter<'data, 'a, Self::View, Self::Filter>>
-    {
-        ChunkEntityIter {
-            iter: self.iter_chunks(world),
-            frontier: None,
-            view: PhantomData,
-        }
-    }
-
-    #[cfg(feature = "par-iter")]
-    fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
-    where
-        T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
-    {
-        self.par_iter_chunks(world).for_each(|mut chunk| {
-            for data in chunk.iter() {
-                f(data);
-            }
-        });
-    }
-}
-
-impl<V: for<'a> View<'a>, F: Filter> CachedQueryDef<V, F> {
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
     pub fn par_iter_chunks<'a>(
