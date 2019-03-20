@@ -150,7 +150,7 @@ fn query_cached_read_entity_data() {
         }
     }
 
-    let mut query = Read::<Pos>::query().cached();
+    let mut query = Read::<Pos>::query(); //.cached();
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {
