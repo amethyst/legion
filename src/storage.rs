@@ -588,7 +588,7 @@ impl Archetype {
 
                 let chunk = self.chunks.last_mut().unwrap();
 
-                debug!(self.logger, "allocated chunk"; "chunk_id" => chunk_id.2);
+                debug!(self.logger, "allocated chunk"; "chunk_id" => chunk_id.id);
 
                 (chunk_index, chunk)
             }

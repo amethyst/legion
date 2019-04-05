@@ -223,11 +223,11 @@
 //!     // give the model and transform slice to our renderer
 //!     render_instanced(model, &transforms);
 //! }
-//! ```
 
 pub mod borrows;
 pub mod query;
 pub mod storage;
+pub mod storage_new;
 
 use crate::borrows::*;
 use crate::storage::TagValue;
@@ -252,27 +252,49 @@ pub mod prelude {
 
 /// Unique world ID.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct WorldId(u16);
+pub struct WorldId {
+    id: u16
+}
 
 impl WorldId {
+    fn new(id: u16) -> Self {
+        WorldId {
+            id
+        }
+    }
+
     fn archetype(&self, id: u16) -> ArchetypeId {
-        ArchetypeId(self.0, id)
+        ArchetypeId {
+            world: self.id,
+            id: id
+        }
     }
 }
 
 /// Unique Archetype ID.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ArchetypeId(u16, u16);
+pub struct ArchetypeId {
+    world: u16,
+    id: u16
+}
 
 impl ArchetypeId {
     fn chunk(&self, id: u16) -> ChunkId {
-        ChunkId(self.0, self.1, id)
+        ChunkId {
+            world: self.world,
+            archetype: self.id,
+            id: id
+        }
     }
 }
 
 /// Unique Chunk ID.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ChunkId(u16, u16, u16);
+pub struct ChunkId {
+    world: u16,
+    archetype: u16,
+    id: u16
+}
 
 pub(crate) type EntityIndex = u32;
 pub(crate) type EntityVersion = Wrapping<u32>;
@@ -356,7 +378,7 @@ impl Universe {
     /// Worlds belonging to the same universe can be safely merged via `World.merge`.
     pub fn create_world(&self) -> World {
         World::new(
-            WorldId(self.next_id.fetch_add(1, Ordering::SeqCst) as u16),
+            WorldId::new(self.next_id.fetch_add(1, Ordering::SeqCst) as u16),
             self.logger.clone(),
             EntityAllocator::new(self.allocator.clone()),
         )
@@ -601,7 +623,7 @@ pub struct World {
 
 impl World {
     fn new(id: WorldId, logger: slog::Logger, allocator: EntityAllocator) -> Self {
-        let logger = logger.new(o!("world_id" => id.0));
+        let logger = logger.new(o!("world_id" => id.id));
 
         info!(logger, "starting world");
         World {
@@ -912,7 +934,7 @@ impl World {
             }),
             None => {
                 let archetype_id = id.archetype(*next_arch_id);
-                let logger = logger.new(o!("archetype_id" => archetype_id.1));
+                let logger = logger.new(o!("archetype_id" => archetype_id.id));
                 *next_arch_id += 1;
 
                 let archetype = Archetype::new(
