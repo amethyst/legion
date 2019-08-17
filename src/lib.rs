@@ -229,6 +229,8 @@ pub mod borrows;
 pub mod query;
 pub mod storage;
 
+pub mod experimental;
+
 use crate::borrows::*;
 use crate::storage::TagValue;
 use crate::storage::*;
