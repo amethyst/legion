@@ -8,6 +8,7 @@ use crate::experimental::entity::EntityLocation;
 use crate::experimental::filter::ArchetypeFilterData;
 use crate::experimental::filter::ChunkFilterData;
 use crate::experimental::filter::Filter;
+use crate::experimental::filter::FilterResult;
 use crate::experimental::storage::ArchetypeDescription;
 use crate::experimental::storage::Component;
 use crate::experimental::storage::ComponentStorage;
@@ -205,7 +206,7 @@ impl World {
             if let Some(i) = tag_matches
                 .zip(component_matches)
                 .enumerate()
-                .filter(|(_, (t, c))| *t && *c)
+                .filter(|(_, (t, c))| t.is_pass() && c.is_pass())
                 .map(|(i, _)| i)
                 .next()
             {
@@ -243,7 +244,7 @@ impl World {
                 .map(|x| <T as Filter<'_, ChunkFilterData<'_>>>::is_match(tags, x))
                 .zip(archetype_data.iter_component_chunks())
                 .enumerate()
-                .filter(|(_, (matches, components))| *matches && !components.is_full())
+                .filter(|(_, (matches, components))| matches.is_pass() && !components.is_full())
                 .map(|(i, _)| i)
                 .next();
 
@@ -391,9 +392,9 @@ mod tuple_impls {
                     source.component_types.iter()
                 }
 
-                fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> bool {
+                fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
                     let types = &[$( ComponentTypeId::of::<$ty>() ),*];
-                    types.len() == item.len() && types.iter().all(|t| item.contains(t))
+                    Some(types.len() == item.len() && types.iter().all(|t| item.contains(t)))
                 }
             }
         };
@@ -436,9 +437,9 @@ mod tuple_impls {
                     source.tag_types.iter()
                 }
 
-                fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> bool {
+                fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
                     let types = &[$( TagTypeId::of::<$ty>() ),*];
-                    types.len() == item.len() && types.iter().all(|t| item.contains(t))
+                    Some(types.len() == item.len() && types.iter().all(|t| item.contains(t)))
                 }
             }
         };
@@ -465,10 +466,10 @@ mod tuple_impls {
                     itertools::multizip(iters)
                 }
 
-                fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> bool {
+                fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
                     #![allow(non_snake_case)]
                     let ($( $ty, )*) = self;
-                    ($( &*$ty, )*) == item
+                    Some(($( &*$ty, )*) == item)
                 }
             }
         };
@@ -480,8 +481,8 @@ mod tuple_impls {
                     std::iter::repeat(()).take(source.archetype_data.len())
                 }
 
-                fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> bool {
-                    true
+                fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> {
+                    Some(true)
                 }
             }
         };

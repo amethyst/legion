@@ -41,11 +41,19 @@ impl ComponentTypes {
     pub fn iter(&self) -> SliceVecIter<ComponentTypeId> {
         self.0.iter()
     }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 impl TagTypes {
     pub fn iter(&self) -> SliceVecIter<TagTypeId> {
         self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 }
 
@@ -60,6 +68,10 @@ impl<T> SliceVec<T> {
             data: Vec::new(),
             counts: Vec::new(),
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.counts.len()
     }
 
     pub fn push<I: IntoIterator<Item = T>>(&mut self, items: I) {
@@ -125,7 +137,10 @@ impl Storage {
             .0
             .push(desc.tags.iter().map(|(type_id, _)| *type_id));
         self.chunks
-            .push(Arc::new(AtomicRefCell::new(ArchetypeData::new(desc))));
+            .push(Arc::new(AtomicRefCell::new(ArchetypeData::new(
+                ArchetypeId(self.chunks.len()),
+                desc,
+            ))));
 
         let index = self.chunks.len() - 1;
         (index, unsafe {
@@ -225,14 +240,18 @@ impl ArchetypeDescription {
 const MAX_CHUNK_SIZE: usize = 16 * 1024;
 const COMPONENT_STORAGE_ALIGNMENT: usize = 64;
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct ArchetypeId(usize);
+
 pub struct ArchetypeData {
+    id: ArchetypeId,
     tags: HashMap<TagTypeId, TagStorage>,
     component_layout: ComponentStorageLayout,
     component_chunks: Vec<ComponentStorage>,
 }
 
 impl ArchetypeData {
-    pub fn new(desc: &ArchetypeDescription) -> Self {
+    pub fn new(id: ArchetypeId, desc: &ArchetypeDescription) -> Self {
         let tags = desc
             .tags
             .iter()
@@ -264,6 +283,7 @@ impl ArchetypeData {
                 .expect("invalid component data size/alignment");
 
         ArchetypeData {
+            id,
             tags: tags,
             component_layout: ComponentStorageLayout {
                 capacity: entity_capacity,
@@ -281,7 +301,9 @@ impl ArchetypeData {
         &mut HashMap<TagTypeId, TagStorage>,
         &mut ComponentStorage,
     ) {
-        let chunk = self.component_layout.alloc_storage();
+        let chunk = self
+            .component_layout
+            .alloc_storage(ChunkId(self.id, self.component_chunks.len()));
         self.component_chunks.push(chunk);
         (
             self.component_chunks.len() - 1,
@@ -322,7 +344,7 @@ pub struct ComponentStorageLayout {
 }
 
 impl ComponentStorageLayout {
-    fn alloc_storage(&self) -> ComponentStorage {
+    fn alloc_storage(&self, id: ChunkId) -> ComponentStorage {
         unsafe {
             let data_storage = std::alloc::alloc(self.alloc_layout);
             let storage_info: HashMap<_, _> = self
@@ -346,6 +368,7 @@ impl ComponentStorageLayout {
                 .collect();
 
             ComponentStorage {
+                id,
                 capacity: self.capacity,
                 entities: Vec::with_capacity(self.capacity),
                 component_layout: self.alloc_layout,
@@ -356,7 +379,11 @@ impl ComponentStorageLayout {
     }
 }
 
+#[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub struct ChunkId(ArchetypeId, usize);
+
 pub struct ComponentStorage {
+    id: ChunkId,
     capacity: usize,
     entities: Vec<Entity>,
     component_layout: std::alloc::Layout,
@@ -365,6 +392,10 @@ pub struct ComponentStorage {
 }
 
 impl ComponentStorage {
+    pub fn id(&self) -> ChunkId {
+        self.id
+    }
+
     pub fn len(&self) -> usize {
         self.entities.len()
     }
