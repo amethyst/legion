@@ -326,14 +326,17 @@ impl Universe {
     /// let drain = Mutex::new(slog_term::FullFormat::new(decorator).build()).fuse();
     /// let log = slog::Logger::root(drain, o!());
     ///
-    /// // Create world with logger
-    /// let universe = Universe::new(log);
+    /// // Create universe with logger and random name
+    /// let universe = Universe::new(log, None);
     ///
-    /// // Create world without logger
-    /// let universe = Universe::new(None);
+    /// // Create universe without logger and predefined name
+    /// let universe = Universe::new(None, Some("my universe"));
     /// ```
-    pub fn new<L: Into<Option<slog::Logger>>>(logger: L) -> Self {
-        let name = names::Generator::default().next().unwrap();
+    pub fn new<L: Into<Option<slog::Logger>>>(logger: L, name: Option<&str>) -> Self {
+        let name = name
+            .map(|s| s.to_owned())
+            .unwrap_or_else(|| names::Generator::default().next().unwrap());
+
         let logger = logger
             .into()
             .unwrap_or(slog::Logger::root(slog_stdlog::StdLog.fuse(), o!()))
