@@ -61,9 +61,7 @@ pub struct Borrow<'a> {
 }
 
 impl<'a> Drop for Borrow<'a> {
-    fn drop(&mut self) {
-        self.state.fetch_sub(1, Ordering::SeqCst);
-    }
+    fn drop(&mut self) { self.state.fetch_sub(1, Ordering::SeqCst); }
 }
 
 #[derive(Debug)]
@@ -72,9 +70,7 @@ pub struct BorrowMut<'a> {
 }
 
 impl<'a> Drop for BorrowMut<'a> {
-    fn drop(&mut self) {
-        self.state.store(0, Ordering::SeqCst);
-    }
+    fn drop(&mut self) { self.state.store(0, Ordering::SeqCst); }
 }
 
 #[derive(Debug)]
@@ -86,9 +82,7 @@ pub struct Ref<'a, T: 'a> {
 }
 
 impl<'a, T: 'a> Ref<'a, T> {
-    pub fn new(borrow: Borrow<'a>, value: &'a T) -> Self {
-        Self { borrow, value }
-    }
+    pub fn new(borrow: Borrow<'a>, value: &'a T) -> Self { Self { borrow, value } }
 
     pub fn map_into<K: 'a, F: FnMut(&T) -> K>(self, mut f: F) -> RefMap<'a, K> {
         RefMap {
@@ -97,29 +91,21 @@ impl<'a, T: 'a> Ref<'a, T> {
         }
     }
 
-    pub unsafe fn deconstruct(self) -> (Borrow<'a>, &'a T) {
-        (self.borrow, self.value)
-    }
+    pub unsafe fn deconstruct(self) -> (Borrow<'a>, &'a T) { (self.borrow, self.value) }
 }
 
 impl<'a, T: 'a> Deref for Ref<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        self.value
-    }
+    fn deref(&self) -> &Self::Target { self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for Ref<'a, T> {
-    fn as_ref(&self) -> &T {
-        self.value
-    }
+    fn as_ref(&self) -> &T { self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for Ref<'a, T> {
-    fn borrow(&self) -> &T {
-        self.value
-    }
+    fn borrow(&self) -> &T { self.value }
 }
 
 #[derive(Debug)]
@@ -131,9 +117,7 @@ pub struct RefMut<'a, T: 'a> {
 }
 
 impl<'a, T: 'a> RefMut<'a, T> {
-    pub fn new(borrow: BorrowMut<'a>, value: &'a mut T) -> Self {
-        Self { borrow, value }
-    }
+    pub fn new(borrow: BorrowMut<'a>, value: &'a mut T) -> Self { Self { borrow, value } }
 
     pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapMut<'a, K> {
         RefMapMut {
@@ -142,35 +126,25 @@ impl<'a, T: 'a> RefMut<'a, T> {
         }
     }
 
-    pub unsafe fn deconstruct(self) -> (BorrowMut<'a>, &'a mut T) {
-        (self.borrow, self.value)
-    }
+    pub unsafe fn deconstruct(self) -> (BorrowMut<'a>, &'a mut T) { (self.borrow, self.value) }
 }
 
 impl<'a, T: 'a> Deref for RefMut<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        self.value
-    }
+    fn deref(&self) -> &Self::Target { self.value }
 }
 
 impl<'a, T: 'a> DerefMut for RefMut<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.value
-    }
+    fn deref_mut(&mut self) -> &mut Self::Target { self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for RefMut<'a, T> {
-    fn as_ref(&self) -> &T {
-        self.value
-    }
+    fn as_ref(&self) -> &T { self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for RefMut<'a, T> {
-    fn borrow(&self) -> &T {
-        self.value
-    }
+    fn borrow(&self) -> &T { self.value }
 }
 
 #[derive(Debug)]
@@ -189,29 +163,21 @@ impl<'a, T: 'a> RefMap<'a, T> {
         }
     }
 
-    pub unsafe fn deconstruct(self) -> (Borrow<'a>, T) {
-        (self.borrow, self.value)
-    }
+    pub unsafe fn deconstruct(self) -> (Borrow<'a>, T) { (self.borrow, self.value) }
 }
 
 impl<'a, T: 'a> Deref for RefMap<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
+    fn deref(&self) -> &Self::Target { &self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for RefMap<'a, T> {
-    fn as_ref(&self) -> &T {
-        &self.value
-    }
+    fn as_ref(&self) -> &T { &self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for RefMap<'a, T> {
-    fn borrow(&self) -> &T {
-        &self.value
-    }
+    fn borrow(&self) -> &T { &self.value }
 }
 
 #[derive(Debug)]
@@ -230,35 +196,25 @@ impl<'a, T: 'a> RefMapMut<'a, T> {
         }
     }
 
-    pub unsafe fn deconstruct(self) -> (BorrowMut<'a>, T) {
-        (self.borrow, self.value)
-    }
+    pub unsafe fn deconstruct(self) -> (BorrowMut<'a>, T) { (self.borrow, self.value) }
 }
 
 impl<'a, T: 'a> Deref for RefMapMut<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
+    fn deref(&self) -> &Self::Target { &self.value }
 }
 
 impl<'a, T: 'a> DerefMut for RefMapMut<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
-    }
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for RefMapMut<'a, T> {
-    fn as_ref(&self) -> &T {
-        &self.value
-    }
+    fn as_ref(&self) -> &T { &self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for RefMapMut<'a, T> {
-    fn borrow(&self) -> &T {
-        &self.value
-    }
+    fn borrow(&self) -> &T { &self.value }
 }
 
 #[derive(Debug)]
@@ -285,21 +241,15 @@ impl<'a, 'b: 'a, T: 'b> ComponentRef<'a, 'b, T> {
 impl<'a, 'b: 'a, T: 'b> Deref for ComponentRef<'a, 'b, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        self.value
-    }
+    fn deref(&self) -> &Self::Target { self.value }
 }
 
 impl<'a, 'b: 'a, T: 'b> AsRef<T> for ComponentRef<'a, 'b, T> {
-    fn as_ref(&self) -> &T {
-        self.value
-    }
+    fn as_ref(&self) -> &T { self.value }
 }
 
 impl<'a, 'b: 'a, T: 'b> std::borrow::Borrow<T> for ComponentRef<'a, 'b, T> {
-    fn borrow(&self) -> &T {
-        self.value
-    }
+    fn borrow(&self) -> &T { self.value }
 }
 
 #[derive(Debug)]
@@ -326,25 +276,17 @@ impl<'a, 'b: 'a, T: 'b> ComponentRefMut<'a, 'b, T> {
 impl<'a, 'b: 'a, T: 'b> Deref for ComponentRefMut<'a, 'b, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        self.value
-    }
+    fn deref(&self) -> &Self::Target { self.value }
 }
 
 impl<'a, 'b: 'a, T: 'b> DerefMut for ComponentRefMut<'a, 'b, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.value
-    }
+    fn deref_mut(&mut self) -> &mut Self::Target { self.value }
 }
 
 impl<'a, 'b: 'a, T: 'b> AsRef<T> for ComponentRefMut<'a, 'b, T> {
-    fn as_ref(&self) -> &T {
-        self.value
-    }
+    fn as_ref(&self) -> &T { self.value }
 }
 
 impl<'a, 'b: 'a, T: 'b> std::borrow::Borrow<T> for ComponentRefMut<'a, 'b, T> {
-    fn borrow(&self) -> &T {
-        self.value
-    }
+    fn borrow(&self) -> &T { self.value }
 }

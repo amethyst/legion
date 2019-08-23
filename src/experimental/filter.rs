@@ -20,27 +20,19 @@ pub mod filter {
 
     /// Creates an entity data filter which includes chunks that contain
     /// entity data components of type `T`.
-    pub fn component<T: Component>() -> ComponentFilter<T> {
-        ComponentFilter::new()
-    }
+    pub fn component<T: Component>() -> ComponentFilter<T> { ComponentFilter::new() }
 
     /// Creates a shared data filter which includes chunks that contain
     /// shared data components of type `T`.
-    pub fn tag<T: Tag>() -> TagFilter<T> {
-        TagFilter::new()
-    }
+    pub fn tag<T: Tag>() -> TagFilter<T> { TagFilter::new() }
 
     /// Creates a shared data filter which includes chunks that contain
     /// specific shared data values.
-    pub fn tag_value<'a, T: Tag>(data: &'a T) -> TagValueFilter<'a, T> {
-        TagValueFilter::new(data)
-    }
+    pub fn tag_value<T: Tag>(data: &T) -> TagValueFilter<T> { TagValueFilter::new(data) }
 
     /// Creates a filter which includes chunks for which entity data components
     /// of type `T` have changed since the filter was last executed.
-    pub fn changed<T: Component>() -> ComponentChangedFilter<T> {
-        ComponentChangedFilter::new()
-    }
+    pub fn changed<T: Component>() -> ComponentChangedFilter<T> { ComponentChangedFilter::new() }
 }
 
 pub trait FilterResult {
@@ -67,9 +59,7 @@ impl FilterResult for Option<bool> {
     }
 
     #[inline]
-    fn is_pass(&self) -> bool {
-        self.unwrap_or(true)
-    }
+    fn is_pass(&self) -> bool { self.unwrap_or(true) }
 }
 
 pub trait Filter<'a, T> {
@@ -108,9 +98,7 @@ impl<'a> Filter<'a, ArchetypeFilterData<'a>> for Passthrough {
         std::iter::repeat(()).take(source.component_types.len())
     }
 
-    fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> {
-        None
-    }
+    fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<'a> Filter<'a, ChunkFilterData<'a>> for Passthrough {
@@ -120,18 +108,14 @@ impl<'a> Filter<'a, ChunkFilterData<'a>> for Passthrough {
         std::iter::repeat(()).take(source.archetype_data.len())
     }
 
-    fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> {
-        None
-    }
+    fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl std::ops::Not for Passthrough {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, Rhs: EntityFilter> std::ops::BitAnd<Rhs> for Passthrough {
@@ -163,9 +147,7 @@ pub struct Not<F> {
 impl<'a, T, F: Filter<'a, T>> Filter<'a, T> for Not<F> {
     type Iter = F::Iter;
 
-    fn collect(&self, source: &'a T) -> Self::Iter {
-        self.filter.collect(source)
-    }
+    fn collect(&self, source: &'a T) -> Self::Iter { self.filter.collect(source) }
 
     fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
         self.filter.is_match(item).map(|x| !x)
@@ -335,9 +317,7 @@ impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
 pub struct ComponentFilter<T>(PhantomData<T>);
 
 impl<T: Component> ComponentFilter<T> {
-    fn new() -> Self {
-        ComponentFilter(PhantomData)
-    }
+    fn new() -> Self { ComponentFilter(PhantomData) }
 }
 
 impl<'a, T: Component> Filter<'a, ArchetypeFilterData<'a>> for ComponentFilter<T> {
@@ -359,18 +339,14 @@ impl<'a, T> Filter<'a, ChunkFilterData<'a>> for ComponentFilter<T> {
         std::iter::repeat(()).take(source.archetype_data.len())
     }
 
-    fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> {
-        None
-    }
+    fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<T> std::ops::Not for ComponentFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, T, Rhs: EntityFilter> std::ops::BitAnd<Rhs> for ComponentFilter<T> {
@@ -398,17 +374,13 @@ impl<'a, T, Rhs: EntityFilter> std::ops::BitOr<Rhs> for ComponentFilter<T> {
 pub struct TagFilter<T>(PhantomData<T>);
 
 impl<T: Tag> TagFilter<T> {
-    fn new() -> Self {
-        TagFilter(PhantomData)
-    }
+    fn new() -> Self { TagFilter(PhantomData) }
 }
 
 impl<'a, T: Tag> Filter<'a, ArchetypeFilterData<'a>> for TagFilter<T> {
     type Iter = SliceVecIter<'a, TagTypeId>;
 
-    fn collect(&self, source: &ArchetypeFilterData<'a>) -> Self::Iter {
-        source.tag_types.iter()
-    }
+    fn collect(&self, source: &ArchetypeFilterData<'a>) -> Self::Iter { source.tag_types.iter() }
 
     fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(item.contains(&TagTypeId::of::<T>()))
@@ -422,18 +394,14 @@ impl<'a, T> Filter<'a, ChunkFilterData<'a>> for TagFilter<T> {
         std::iter::repeat(()).take(source.archetype_data.len())
     }
 
-    fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> {
-        None
-    }
+    fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<T> std::ops::Not for TagFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, T, Rhs: EntityFilter> std::ops::BitAnd<Rhs> for TagFilter<T> {
@@ -463,17 +431,13 @@ pub struct TagValueFilter<'a, T> {
 }
 
 impl<'a, T: Tag> TagValueFilter<'a, T> {
-    fn new(value: &'a T) -> Self {
-        TagValueFilter { value }
-    }
+    fn new(value: &'a T) -> Self { TagValueFilter { value } }
 }
 
 impl<'a, T: Tag> Filter<'a, ArchetypeFilterData<'a>> for TagValueFilter<'a, T> {
     type Iter = SliceVecIter<'a, TagTypeId>;
 
-    fn collect(&self, source: &ArchetypeFilterData<'a>) -> Self::Iter {
-        source.tag_types.iter()
-    }
+    fn collect(&self, source: &ArchetypeFilterData<'a>) -> Self::Iter { source.tag_types.iter() }
 
     fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(item.contains(&TagTypeId::of::<T>()))
@@ -487,7 +451,7 @@ impl<'a, T: Tag> Filter<'a, ChunkFilterData<'a>> for TagValueFilter<'a, T> {
         unsafe {
             source
                 .archetype_data
-                .tags(&TagTypeId::of::<T>())
+                .tags(TagTypeId::of::<T>())
                 .unwrap()
                 .data_slice::<T>()
                 .iter()
@@ -503,9 +467,7 @@ impl<'a, T> std::ops::Not for TagValueFilter<'a, T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, T, Rhs: EntityFilter> std::ops::BitAnd<Rhs> for TagValueFilter<'a, T> {
@@ -565,7 +527,7 @@ impl<'a, T: Component> Filter<'a, ChunkFilterData<'a>> for ComponentChangedFilte
 
     fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
         use std::collections::hash_map::Entry;
-        let components = item.components(&ComponentTypeId::of::<T>()).unwrap();
+        let components = item.components(ComponentTypeId::of::<T>()).unwrap();
         let version = components.version();
         match self.versions.entry(item.id()) {
             Entry::Occupied(mut entry) => Some(entry.insert(version) != version),
@@ -581,9 +543,7 @@ impl<'a, T: Component> std::ops::Not for ComponentChangedFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, T: Component, Rhs: EntityFilter> std::ops::BitAnd<Rhs> for ComponentChangedFilter<T> {
