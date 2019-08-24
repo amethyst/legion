@@ -118,12 +118,12 @@ fn delete() {
     }
 
     for e in entities.iter() {
-        assert_eq!(true, world.is_alive(e));
+        assert_eq!(true, world.is_alive(*e));
     }
 
     for e in entities.iter() {
         world.delete(*e);
-        assert_eq!(false, world.is_alive(e));
+        assert_eq!(false, world.is_alive(*e));
     }
 }
 
@@ -145,10 +145,10 @@ fn delete_last() {
 
     let last = *entities.last().unwrap();
     world.delete(last);
-    assert_eq!(false, world.is_alive(&last));
+    assert_eq!(false, world.is_alive(last));
 
     for (i, e) in entities.iter().take(entities.len() - 1).enumerate() {
-        assert_eq!(true, world.is_alive(e));
+        assert_eq!(true, world.is_alive(*e));
         match world.component(*e) {
             Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
             None => assert_eq!(components.get(i).map(|(x, _)| x), None),
@@ -179,10 +179,10 @@ fn delete_first() {
     let first = *entities.first().unwrap();
 
     world.delete(first);
-    assert_eq!(false, world.is_alive(&first));
+    assert_eq!(false, world.is_alive(first));
 
     for (i, e) in entities.iter().skip(1).enumerate() {
-        assert_eq!(true, world.is_alive(e));
+        assert_eq!(true, world.is_alive(*e));
         match world.component(*e) {
             Some(x) => assert_eq!(components.get(i + 1).map(|(x, _)| x), Some(&x as &Pos)),
             None => assert_eq!(components.get(i + 1).map(|(x, _)| x), None),
@@ -219,7 +219,7 @@ fn merge() {
     world_1.merge(world_2);
 
     for (i, e) in world_2_entities.iter().enumerate() {
-        assert!(world_1.is_alive(e));
+        assert!(world_1.is_alive(*e));
 
         let (pos, rot) = components.get(i).unwrap();
         assert_eq!(pos, &world_1.component(*e).unwrap() as &Pos);

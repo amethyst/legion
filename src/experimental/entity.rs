@@ -15,15 +15,10 @@ pub struct Entity {
 
 impl Entity {
     pub(crate) fn new(index: EntityIndex, version: EntityVersion) -> Entity {
-        Entity {
-            index: index,
-            version: version,
-        }
+        Entity { index, version }
     }
 
-    pub(crate) fn index(&self) -> EntityIndex {
-        self.index
-    }
+    pub(crate) fn index(self) -> EntityIndex { self.index }
 }
 
 impl Display for Entity {
@@ -48,17 +43,11 @@ impl EntityLocation {
         }
     }
 
-    pub(crate) fn archetype(&self) -> usize {
-        self.archetype_index
-    }
+    pub(crate) fn archetype(&self) -> usize { self.archetype_index }
 
-    pub(crate) fn chunk(&self) -> usize {
-        self.chunk_index
-    }
+    pub(crate) fn chunk(&self) -> usize { self.chunk_index }
 
-    pub(crate) fn component(&self) -> usize {
-        self.component_index
-    }
+    pub(crate) fn component(&self) -> usize { self.component_index }
 }
 
 #[derive(Debug)]
@@ -87,9 +76,7 @@ impl BlockAllocator {
         }
     }
 
-    pub fn free(&mut self, block: EntityBlock) {
-        self.free.push(block);
-    }
+    pub fn free(&mut self, block: EntityBlock) { self.free.push(block); }
 }
 
 #[derive(Debug)]
@@ -104,8 +91,8 @@ pub(crate) struct EntityBlock {
 impl EntityBlock {
     pub fn new(start: EntityIndex, len: usize) -> EntityBlock {
         EntityBlock {
-            start: start,
-            len: len,
+            start,
+            len,
             versions: Vec::with_capacity(len),
             free: Vec::new(),
             locations: std::iter::repeat(EntityLocation::new(0, 0, 0))
@@ -114,15 +101,13 @@ impl EntityBlock {
         }
     }
 
-    fn index(&self, index: EntityIndex) -> usize {
-        (index - self.start) as usize
-    }
+    fn index(&self, index: EntityIndex) -> usize { (index - self.start) as usize }
 
     pub fn in_range(&self, index: EntityIndex) -> bool {
         index >= self.start && index < (self.start + self.len as u32)
     }
 
-    pub fn is_alive(&self, entity: &Entity) -> Option<bool> {
+    pub fn is_alive(&self, entity: Entity) -> Option<bool> {
         if entity.index >= self.start {
             let i = self.index(entity.index);
             self.versions.get(i).map(|v| *v == entity.version)
@@ -145,7 +130,7 @@ impl EntityBlock {
     }
 
     pub fn free(&mut self, entity: Entity) -> Option<bool> {
-        if let Some(alive) = self.is_alive(&entity) {
+        if let Some(alive) = self.is_alive(entity) {
             let i = self.index(entity.index);
             self.versions[i] += Wrapping(1);
             self.free.push(entity.index);
@@ -155,19 +140,19 @@ impl EntityBlock {
         }
     }
 
-    pub fn set_location(&mut self, entity: &EntityIndex, location: EntityLocation) {
-        assert!(*entity >= self.start);
+    pub fn set_location(&mut self, entity: EntityIndex, location: EntityLocation) {
+        assert!(entity >= self.start);
         let index = (entity - self.start) as usize;
         *self.locations.get_mut(index).unwrap() = location;
     }
 
-    pub fn get_location(&self, entity: &EntityIndex) -> Option<&EntityLocation> {
-        if *entity < self.start {
+    pub fn get_location(&self, entity: EntityIndex) -> Option<EntityLocation> {
+        if entity < self.start {
             return None;
         }
 
         let index = (entity - self.start) as usize;
-        self.locations.get(index)
+        self.locations.get(index).copied()
     }
 }
 
@@ -182,14 +167,14 @@ pub struct EntityAllocator {
 impl EntityAllocator {
     pub(crate) fn new(allocator: Arc<Mutex<BlockAllocator>>) -> Self {
         EntityAllocator {
-            allocator: allocator,
+            allocator,
             blocks: Vec::new(),
             entity_buffer: Vec::new(),
         }
     }
 
     /// Determines if the given `Entity` is considered alive.
-    pub fn is_alive(&self, entity: &Entity) -> bool {
+    pub fn is_alive(&self, entity: Entity) -> bool {
         self.blocks
             .iter()
             .filter_map(|b| b.is_alive(entity))
@@ -221,36 +206,29 @@ impl EntityAllocator {
     pub(crate) fn delete_entity(&mut self, entity: Entity) -> bool {
         self.blocks
             .iter_mut()
-            .filter_map(|b| b.free(entity))
-            .nth(0)
+            .find_map(|b| b.free(entity))
             .unwrap_or(false)
     }
 
-    pub(crate) fn set_location(&mut self, entity: &EntityIndex, location: EntityLocation) {
+    pub(crate) fn set_location(&mut self, entity: EntityIndex, location: EntityLocation) {
         self.blocks
             .iter_mut()
             .rev()
-            .filter(|b| b.in_range(*entity))
-            .next()
+            .find(|b| b.in_range(entity))
             .unwrap()
             .set_location(entity, location);
     }
 
-    pub(crate) fn get_location(&self, entity: &EntityIndex) -> Option<&EntityLocation> {
+    pub(crate) fn get_location(&self, entity: EntityIndex) -> Option<EntityLocation> {
         self.blocks
             .iter()
-            .filter(|b| b.in_range(*entity))
-            .next()
+            .find(|b| b.in_range(entity))
             .and_then(|b| b.get_location(entity))
     }
 
-    pub(crate) fn allocation_buffer(&self) -> &[Entity] {
-        self.entity_buffer.as_slice()
-    }
+    pub(crate) fn allocation_buffer(&self) -> &[Entity] { self.entity_buffer.as_slice() }
 
-    pub(crate) fn clear_allocation_buffer(&mut self) {
-        self.entity_buffer.clear();
-    }
+    pub(crate) fn clear_allocation_buffer(&mut self) { self.entity_buffer.clear(); }
 
     pub(crate) fn merge(&mut self, mut other: EntityAllocator) {
         assert!(Arc::ptr_eq(&self.allocator, &other.allocator));
@@ -312,7 +290,7 @@ mod tests {
         let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = allocator.create_entity();
 
-        assert_eq!(true, allocator.is_alive(&entity));
+        assert_eq!(true, allocator.is_alive(entity));
     }
 
     #[test]
@@ -320,7 +298,7 @@ mod tests {
         let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = Entity::new(10 as EntityIndex, Wrapping(10));
 
-        assert_eq!(false, allocator.is_alive(&entity));
+        assert_eq!(false, allocator.is_alive(entity));
     }
 
     #[test]
@@ -329,7 +307,7 @@ mod tests {
         let entity = allocator.create_entity();
         allocator.delete_entity(entity);
 
-        assert_eq!(false, allocator.is_alive(&entity));
+        assert_eq!(false, allocator.is_alive(entity));
     }
 
     #[test]
@@ -374,13 +352,13 @@ mod tests {
         assert_eq!(true, entities_a.is_disjoint(&entities_b));
 
         for e in entities_a {
-            assert_eq!(true, allocator_a.is_alive(&e));
-            assert_eq!(false, allocator_b.is_alive(&e));
+            assert_eq!(true, allocator_a.is_alive(e));
+            assert_eq!(false, allocator_b.is_alive(e));
         }
 
         for e in entities_b {
-            assert_eq!(false, allocator_a.is_alive(&e));
-            assert_eq!(true, allocator_b.is_alive(&e));
+            assert_eq!(false, allocator_a.is_alive(e));
+            assert_eq!(true, allocator_b.is_alive(e));
         }
     }
 }

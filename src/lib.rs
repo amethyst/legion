@@ -225,6 +225,7 @@
 //! }
 //! ```
 
+#![allow(clippy::module_inception)]
 pub mod borrows;
 pub mod query;
 pub mod storage;
@@ -257,9 +258,7 @@ pub mod prelude {
 pub struct WorldId(u16);
 
 impl WorldId {
-    fn archetype(&self, id: u16) -> ArchetypeId {
-        ArchetypeId(self.0, id)
-    }
+    fn archetype(self, id: u16) -> ArchetypeId { ArchetypeId(self.0, id) }
 }
 
 /// Unique Archetype ID.
@@ -267,9 +266,7 @@ impl WorldId {
 pub struct ArchetypeId(u16, u16);
 
 impl ArchetypeId {
-    fn chunk(&self, id: u16) -> ChunkId {
-        ChunkId(self.0, self.1, id)
-    }
+    fn chunk(self, id: u16) -> ChunkId { ChunkId(self.0, self.1, id) }
 }
 
 /// Unique Chunk ID.
@@ -288,10 +285,7 @@ pub struct Entity {
 
 impl Entity {
     pub(crate) fn new(index: EntityIndex, version: EntityVersion) -> Entity {
-        Entity {
-            index: index,
-            version: version,
-        }
+        Entity { index, version }
     }
 }
 
@@ -338,14 +332,14 @@ impl Universe {
         let name = names::Generator::default().next().unwrap();
         let logger = logger
             .into()
-            .unwrap_or(slog::Logger::root(slog_stdlog::StdLog.fuse(), o!()))
+            .unwrap_or_else(|| slog::Logger::root(slog_stdlog::StdLog.fuse(), o!()))
             .new(o!("universe" => name.clone()));
 
         info!(logger, "starting universe");
         Universe {
             name,
             logger,
-            allocator: Arc::from(Mutex::new(BlockAllocator::new())),
+            allocator: Arc::from(Mutex::new(BlockAllocator::default())),
             next_id: AtomicUsize::new(0),
         }
     }
@@ -378,13 +372,6 @@ struct BlockAllocator {
 impl BlockAllocator {
     const BLOCK_SIZE: usize = 1024;
 
-    pub fn new() -> Self {
-        BlockAllocator {
-            allocated: 0,
-            free: Vec::new(),
-        }
-    }
-
     pub fn allocate(&mut self) -> EntityBlock {
         if let Some(block) = self.free.pop() {
             block
@@ -395,8 +382,14 @@ impl BlockAllocator {
         }
     }
 
-    pub fn free(&mut self, block: EntityBlock) {
-        self.free.push(block);
+    pub fn free(&mut self, block: EntityBlock) { self.free.push(block); }
+}
+impl Default for BlockAllocator {
+    fn default() -> Self {
+        BlockAllocator {
+            allocated: 0,
+            free: Vec::new(),
+        }
     }
 }
 
@@ -412,8 +405,8 @@ struct EntityBlock {
 impl EntityBlock {
     pub fn new(start: EntityIndex, len: usize) -> EntityBlock {
         EntityBlock {
-            start: start,
-            len: len,
+            start,
+            len,
             versions: Vec::with_capacity(len),
             free: Vec::new(),
             locations: std::iter::repeat((
@@ -426,15 +419,13 @@ impl EntityBlock {
         }
     }
 
-    fn index(&self, index: EntityIndex) -> usize {
-        (index - self.start) as usize
-    }
+    fn index(&self, index: EntityIndex) -> usize { (index - self.start) as usize }
 
     pub fn in_range(&self, index: EntityIndex) -> bool {
         index >= self.start && index < (self.start + self.len as u32)
     }
 
-    pub fn is_alive(&self, entity: &Entity) -> Option<bool> {
+    pub fn is_alive(&self, entity: Entity) -> Option<bool> {
         if entity.index >= self.start {
             let i = self.index(entity.index);
             self.versions.get(i).map(|v| *v == entity.version)
@@ -457,7 +448,7 @@ impl EntityBlock {
     }
 
     pub fn free(&mut self, entity: Entity) -> Option<bool> {
-        if let Some(alive) = self.is_alive(&entity) {
+        if let Some(alive) = self.is_alive(entity) {
             let i = self.index(entity.index);
             self.versions[i] += Wrapping(1);
             self.free.push(entity.index);
@@ -469,24 +460,24 @@ impl EntityBlock {
 
     pub fn set_location(
         &mut self,
-        entity: &EntityIndex,
+        entity: EntityIndex,
         location: (ArchetypeIndex, ChunkIndex, ComponentIndex),
     ) {
-        assert!(*entity >= self.start);
+        assert!(entity >= self.start);
         let index = (entity - self.start) as usize;
         *self.locations.get_mut(index).unwrap() = location;
     }
 
     pub fn get_location(
         &self,
-        entity: &EntityIndex,
+        entity: EntityIndex,
     ) -> Option<(ArchetypeIndex, ChunkIndex, ComponentIndex)> {
-        if *entity < self.start {
+        if entity < self.start {
             return None;
         }
 
         let index = (entity - self.start) as usize;
-        self.locations.get(index).map(|x| *x)
+        self.locations.get(index).copied()
     }
 }
 
@@ -501,14 +492,14 @@ pub struct EntityAllocator {
 impl EntityAllocator {
     fn new(allocator: Arc<Mutex<BlockAllocator>>) -> Self {
         EntityAllocator {
-            allocator: allocator,
+            allocator,
             blocks: Vec::new(),
             entity_buffer: Vec::new(),
         }
     }
 
     /// Determines if the given `Entity` is considered alive.
-    pub fn is_alive(&self, entity: &Entity) -> bool {
+    pub fn is_alive(&self, entity: Entity) -> bool {
         self.blocks
             .iter()
             .filter_map(|b| b.is_alive(entity))
@@ -540,43 +531,36 @@ impl EntityAllocator {
     pub(crate) fn delete_entity(&mut self, entity: Entity) -> bool {
         self.blocks
             .iter_mut()
-            .filter_map(|b| b.free(entity))
-            .nth(0)
+            .find_map(|b| b.free(entity))
             .unwrap_or(false)
     }
 
     pub(crate) fn set_location(
         &mut self,
-        entity: &EntityIndex,
+        entity: EntityIndex,
         location: (ArchetypeIndex, ChunkIndex, ComponentIndex),
     ) {
         self.blocks
             .iter_mut()
             .rev()
-            .filter(|b| b.in_range(*entity))
-            .next()
+            .find(|b| b.in_range(entity))
             .unwrap()
             .set_location(entity, location);
     }
 
     pub(crate) fn get_location(
         &self,
-        entity: &EntityIndex,
+        entity: EntityIndex,
     ) -> Option<(ArchetypeIndex, ChunkIndex, ComponentIndex)> {
         self.blocks
             .iter()
-            .filter(|b| b.in_range(*entity))
-            .next()
+            .find(|b| b.in_range(entity))
             .and_then(|b| b.get_location(entity))
     }
 
-    pub(crate) fn allocation_buffer(&self) -> &[Entity] {
-        self.entity_buffer.as_slice()
-    }
+    pub(crate) fn allocation_buffer(&self) -> &[Entity] { self.entity_buffer.as_slice() }
 
-    pub(crate) fn clear_allocation_buffer(&mut self) {
-        self.entity_buffer.clear();
-    }
+    pub(crate) fn clear_allocation_buffer(&mut self) { self.entity_buffer.clear(); }
 
     pub(crate) fn merge(&mut self, mut other: EntityAllocator) {
         assert!(Arc::ptr_eq(&self.allocator, &other.allocator));
@@ -609,7 +593,7 @@ impl World {
         World {
             id,
             logger,
-            allocator: allocator,
+            allocator,
             archetypes: Vec::new(),
             next_arch_id: 0,
         }
@@ -639,7 +623,7 @@ impl World {
             for (chunk_index, chunk) in archetype.chunks().iter().enumerate() {
                 for (entity_index, entity) in unsafe { chunk.entities().iter().enumerate() } {
                     self.allocator.set_location(
-                        &entity.index,
+                        entity.index,
                         (
                             archetype_index as ArchetypeIndex,
                             chunk_index as ChunkIndex,
@@ -652,9 +636,7 @@ impl World {
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
-    pub fn is_alive(&self, entity: &Entity) -> bool {
-        self.allocator.is_alive(entity)
-    }
+    pub fn is_alive(&self, entity: Entity) -> bool { self.allocator.is_alive(entity) }
 
     /// Inserts entities from an iterator of component tuples.
     ///
@@ -699,10 +681,10 @@ impl World {
     {
         // find or create archetype
         let (arch_index, archetype) = World::prep_archetype(
-            &self.id,
+            self.id,
             &mut self.archetypes,
             &mut self.next_arch_id,
-            &mut self.logger,
+            &self.logger,
             &tags,
             &components,
         );
@@ -724,7 +706,7 @@ impl World {
             for (i, e) in added {
                 let comp_id = i as ComponentIndex;
                 self.allocator
-                    .set_location(&e.index, (arch_index, chunk_index, comp_id));
+                    .set_location(e.index, (arch_index, chunk_index, comp_id));
             }
 
             trace!(
@@ -754,7 +736,7 @@ impl World {
 
         if deleted {
             // lookup entity location
-            let ids = self.allocator.get_location(&entity.index);
+            let ids = self.allocator.get_location(entity.index);
 
             // swap remove with last entity in chunk
             let swapped = ids.and_then(|(archetype_id, chunk_id, component_id)| {
@@ -766,7 +748,7 @@ impl World {
 
             // record swapped entity's new location
             if let Some(swapped) = swapped {
-                self.allocator.set_location(&swapped.index, ids.unwrap());
+                self.allocator.set_location(swapped.index, ids.unwrap());
             }
         }
 
@@ -811,9 +793,9 @@ impl World {
     /// });
     /// ```
     pub fn mutate_entity<'env, F: FnOnce(&mut MutEntity<'env>)>(&mut self, entity: Entity, f: F) {
-        assert!(self.is_alive(&entity));
+        assert!(self.is_alive(entity));
 
-        if let Some((arch_id, chunk_id, comp_id)) = self.allocator.get_location(&entity.index) {
+        if let Some((arch_id, chunk_id, comp_id)) = self.allocator.get_location(entity.index) {
             if let Some((swapped, tags, components)) = self
                 .archetypes
                 .get_mut(arch_id as usize)
@@ -832,7 +814,7 @@ impl World {
                 // record swapped entity's new location
                 if let Some(swapped) = swapped {
                     self.allocator
-                        .set_location(&swapped.index, (arch_id, chunk_id, comp_id));
+                        .set_location(swapped.index, (arch_id, chunk_id, comp_id));
                 }
 
                 // re-insert the entity
@@ -850,8 +832,8 @@ impl World {
     ///
     /// This function borrows all components of type `T` in the world. It may panic if
     /// any other code is currently borrowing `T` mutably (such as in a query).
-    pub fn component<'a, T: Component>(&'a self, entity: Entity) -> Option<Borrowed<'a, T>> {
-        self.allocator.get_location(&entity.index).and_then(
+    pub fn component<T: Component>(&self, entity: Entity) -> Option<Borrowed<T>> {
+        self.allocator.get_location(entity.index).and_then(
             |(archetype_id, chunk_id, component_id)| {
                 self.archetypes
                     .get(archetype_id as usize)
@@ -868,7 +850,7 @@ impl World {
     /// Otherwise `None` is returned.
     pub fn component_mut<T: Component>(&mut self, entity: Entity) -> Option<&mut T> {
         let archetypes = &self.archetypes;
-        self.allocator.get_location(&entity.index).and_then(
+        self.allocator.get_location(entity.index).and_then(
             |(archetype_id, chunk_id, component_id)| {
                 archetypes
                     .get(archetype_id as usize)
@@ -885,7 +867,7 @@ impl World {
     /// Otherwise `None` is returned.
     pub fn tag<T: Tag>(&self, entity: Entity) -> Option<&T> {
         self.allocator
-            .get_location(&entity.index)
+            .get_location(entity.index)
             .and_then(|(archetype_id, chunk_id, _)| {
                 self.archetypes
                     .get(archetype_id as usize)
@@ -895,7 +877,7 @@ impl World {
     }
 
     fn prep_archetype<'a, T: TagSet, C: EntitySource>(
-        id: &WorldId,
+        id: WorldId,
         archetypes: &'a mut Vec<Archetype>,
         next_arch_id: &mut u16,
         logger: &slog::Logger,
@@ -947,13 +929,9 @@ impl<'env> MutEntity<'env> {
         (&mut self.tags, &mut self.components)
     }
 
-    pub fn set_tag<T: Tag>(&mut self, tag: Arc<T>) {
-        self.tags.set_tag(tag);
-    }
+    pub fn set_tag<T: Tag>(&mut self, tag: Arc<T>) { self.tags.set_tag(tag); }
 
-    pub fn remove_tag<T: Tag>(&mut self) -> bool {
-        self.tags.remove_tag::<T>()
-    }
+    pub fn remove_tag<T: Tag>(&mut self) -> bool { self.tags.remove_tag::<T>() }
 
     pub fn add_component<T: Component>(&mut self, component: T) {
         self.components.add_component(component);
@@ -1014,19 +992,13 @@ pub trait EntitySource {
 }
 
 impl TagSet for () {
-    fn is_archetype_match(&self, archetype: &Archetype) -> bool {
-        archetype.tags.len() == 0
-    }
+    fn is_archetype_match(&self, archetype: &Archetype) -> bool { archetype.tags.is_empty() }
 
-    fn is_chunk_match(&self, _: &Chunk) -> bool {
-        true
-    }
+    fn is_chunk_match(&self, _: &Chunk) -> bool { true }
 
     fn configure_chunk(&self, _: &mut ChunkBuilder) {}
 
-    fn types(&self) -> FnvHashSet<TypeId> {
-        FnvHashSet::default()
-    }
+    fn types(&self) -> FnvHashSet<TypeId> { FnvHashSet::default() }
 }
 
 pub trait IntoTagSet<T: TagSet> {
@@ -1167,7 +1139,7 @@ impl<T: Send + Sync + Sized + Debug + 'static> Component for T {}
 impl<T: Send + Sized + PartialEq + Sync + TagValue + Debug + 'static> Tag for T {}
 
 impl<T: Send + Sized + PartialEq + Sync + Debug + 'static> TagValue for T {
-    fn downcast_equals(&self, other: &TagValue) -> bool {
+    fn downcast_equals(&self, other: &dyn TagValue) -> bool {
         if let Some(other) = other.downcast_ref::<Self>() {
             other == self
         } else {
@@ -1181,9 +1153,7 @@ mod tests {
     use crate::*;
 
     #[test]
-    fn create_universe() {
-        Universe::new(None);
-    }
+    fn create_universe() { Universe::new(None); }
 
     #[test]
     fn create_world() {
@@ -1193,13 +1163,13 @@ mod tests {
 
     #[test]
     fn create_entity() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
         allocator.create_entity();
     }
 
     #[test]
     fn create_entity_many() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
 
         for _ in 0..512 {
             allocator.create_entity();
@@ -1208,7 +1178,7 @@ mod tests {
 
     #[test]
     fn create_entity_many_blocks() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
 
         for _ in 0..3000 {
             allocator.create_entity();
@@ -1217,7 +1187,7 @@ mod tests {
 
     #[test]
     fn create_entity_recreate() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
 
         for _ in 0..3 {
             let entities: Vec<Entity> = (0..512).map(|_| allocator.create_entity()).collect();
@@ -1229,32 +1199,32 @@ mod tests {
 
     #[test]
     fn is_alive_allocated() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
         let entity = allocator.create_entity();
 
-        assert_eq!(true, allocator.is_alive(&entity));
+        assert_eq!(true, allocator.is_alive(entity));
     }
 
     #[test]
     fn is_alive_unallocated() {
-        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
         let entity = Entity::new(10 as EntityIndex, Wrapping(10));
 
-        assert_eq!(false, allocator.is_alive(&entity));
+        assert_eq!(false, allocator.is_alive(entity));
     }
 
     #[test]
     fn is_alive_killed() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
         let entity = allocator.create_entity();
         allocator.delete_entity(entity);
 
-        assert_eq!(false, allocator.is_alive(&entity));
+        assert_eq!(false, allocator.is_alive(entity));
     }
 
     #[test]
     fn delete_entity_was_alive() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
         let entity = allocator.create_entity();
 
         assert_eq!(true, allocator.delete_entity(entity));
@@ -1262,7 +1232,7 @@ mod tests {
 
     #[test]
     fn delete_entity_was_dead() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
         let entity = allocator.create_entity();
         allocator.delete_entity(entity);
 
@@ -1271,7 +1241,7 @@ mod tests {
 
     #[test]
     fn delete_entity_was_unallocated() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::default())));
         let entity = Entity::new(10 as EntityIndex, Wrapping(10));
 
         assert_eq!(false, allocator.delete_entity(entity));
@@ -1279,7 +1249,7 @@ mod tests {
 
     #[test]
     fn multiple_allocators_unique_ids() {
-        let blocks = Arc::from(Mutex::new(BlockAllocator::new()));
+        let blocks = Arc::from(Mutex::new(BlockAllocator::default()));
         let mut allocator_a = EntityAllocator::new(blocks.clone());
         let mut allocator_b = EntityAllocator::new(blocks.clone());
 
@@ -1294,13 +1264,13 @@ mod tests {
         assert_eq!(true, entities_a.is_disjoint(&entities_b));
 
         for e in entities_a {
-            assert_eq!(true, allocator_a.is_alive(&e));
-            assert_eq!(false, allocator_b.is_alive(&e));
+            assert_eq!(true, allocator_a.is_alive(e));
+            assert_eq!(false, allocator_b.is_alive(e));
         }
 
         for e in entities_b {
-            assert_eq!(false, allocator_a.is_alive(&e));
-            assert_eq!(true, allocator_b.is_alive(&e));
+            assert_eq!(false, allocator_a.is_alive(e));
+            assert_eq!(true, allocator_b.is_alive(e));
         }
     }
 

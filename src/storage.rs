@@ -32,14 +32,11 @@ impl<T: Component> StorageVec<T> {
         }
     }
 
-    fn version(&self) -> usize {
-        unsafe { (*self.version.get()).0 }
-    }
+    fn version(&self) -> usize { unsafe { (*self.version.get()).0 } }
 
-    unsafe fn data(&self) -> &Vec<T> {
-        &(*self.data.get())
-    }
+    unsafe fn data(&self) -> &Vec<T> { &(*self.data.get()) }
 
+    #[allow(clippy::mut_from_ref)]
     unsafe fn data_mut(&self) -> &mut Vec<T> {
         *self.version.get() += Wrapping(1);
         &mut (*self.data.get())
@@ -61,14 +58,12 @@ impl<T: Component> ComponentStorage for StorageVec<T> {
         DynamicSingleEntitySource::component_tuple(component)
     }
 
-    fn len(&self) -> usize {
-        unsafe { self.data().len() }
-    }
+    fn len(&self) -> usize { unsafe { self.data().len() } }
 }
 
 impl_downcast!(TagValue);
 pub trait TagValue: Downcast + Sync + Send + Debug + 'static {
-    fn downcast_equals(&self, _: &TagValue) -> bool;
+    fn downcast_equals(&self, _: &dyn TagValue) -> bool;
 }
 
 /// Raw unsafe storage for components associated with entities.
@@ -90,19 +85,16 @@ unsafe impl Sync for Chunk {}
 
 impl Chunk {
     /// Gets the ID of the chunk.
-    pub fn id(&self) -> ChunkId {
-        self.id
-    }
+    pub fn id(&self) -> ChunkId { self.id }
 
     /// Gets the number of entities stored within the chunk.
-    pub fn len(&self) -> usize {
-        self.entities.len()
-    }
+    pub fn len(&self) -> usize { self.entities.len() }
+
+    /// Returns true if the number of entities stored is zero.
+    pub fn is_empty(&self) -> bool { self.entities.len() < 1 }
 
     /// Determines if the chunk has reached capacity and can no longer accept more entities.
-    pub fn is_full(&self) -> bool {
-        self.len() == self.capacity
-    }
+    pub fn is_full(&self) -> bool { self.len() == self.capacity }
 
     /// Gets a slice of `Entity` IDs of entities contained within the chunk.
     ///
@@ -110,9 +102,7 @@ impl Chunk {
     ///
     /// This function bypasses any borrow checking. Ensure no other code is writing into
     /// the chunk's entities vector before calling this function.
-    pub unsafe fn entities(&self) -> &[Entity] {
-        self.entities.data()
-    }
+    pub unsafe fn entities(&self) -> &[Entity] { self.entities.data() }
 
     /// Gets a mutable vector of entity IDs contained within the chunk.
     ///
@@ -120,9 +110,8 @@ impl Chunk {
     ///
     /// This function bypasses any borrow checking. Ensure no other code is reading or writing
     /// the chunk's entities vector before calling this function.
-    pub unsafe fn entities_unchecked(&self) -> &mut Vec<Entity> {
-        self.entities.data_mut()
-    }
+    #[allow(clippy::mut_from_ref)]
+    pub unsafe fn entities_unchecked(&self) -> &mut Vec<Entity> { self.entities.data_mut() }
 
     /// Gets a vector of component data.
     ///
@@ -162,7 +151,7 @@ impl Chunk {
     ///
     /// This function performs runtime borrow checking. It will panic if other code is borrowing
     /// the same component type mutably.
-    pub fn components<'a, T: Component>(&'a self) -> Option<BorrowedSlice<'a, T>> {
+    pub fn components<T: Component>(&self) -> Option<BorrowedSlice<'_, T>> {
         match unsafe { self.components_unchecked() } {
             Some(data) => {
                 let borrow = self.borrow::<T>();
@@ -180,7 +169,7 @@ impl Chunk {
     ///
     /// This function performs runtime borrow checking. It will panic if other code is borrowing
     /// the same component type.
-    pub fn components_mut<'a, T: Component>(&'a self) -> Option<BorrowedMutSlice<'a, T>> {
+    pub fn components_mut<T: Component>(&self) -> Option<BorrowedMutSlice<'_, T>> {
         match unsafe { self.components_mut_unchecked() } {
             Some(data) => {
                 let borrow = self.borrow_mut::<T>();
@@ -268,11 +257,11 @@ impl Chunk {
         let valid = self
             .components
             .values()
-            .fold(true, |total, s| total && s.len() == self.entities.len());
+            .all(|s| s.len() == self.entities.len());
         assert!(valid, "imbalanced chunk components");
     }
 
-    fn borrow<'a, T: Component>(&'a self) -> Borrow<'a> {
+    fn borrow<T: Component>(&self) -> Borrow<'_> {
         let id = TypeId::of::<T>();
         let state = self
             .borrows
@@ -281,7 +270,7 @@ impl Chunk {
         Borrow::aquire_read(state).unwrap()
     }
 
-    fn borrow_mut<'a, T: Component>(&'a self) -> Borrow<'a> {
+    fn borrow_mut<T: Component>(&self) -> Borrow<'_> {
         let id = TypeId::of::<T>();
         let state = self
             .borrows
@@ -292,6 +281,7 @@ impl Chunk {
 }
 
 /// Constructs a new `Chunk`.
+#[derive(Default)]
 pub struct ChunkBuilder {
     components: Vec<(
         TypeId,
@@ -303,15 +293,6 @@ pub struct ChunkBuilder {
 
 impl ChunkBuilder {
     const MAX_SIZE: usize = 16 * 1024;
-
-    /// Constructs a new `ChunkBuilder`.
-    pub fn new() -> ChunkBuilder {
-        ChunkBuilder {
-            components: Vec::new(),
-            tags: FnvHashMap::default(),
-        }
-    }
-
     /// Registers an entity data component type.
     pub fn register_component<T: Component>(&mut self) {
         let constructor = |capacity| {
@@ -345,7 +326,7 @@ impl ChunkBuilder {
         let capacity = std::cmp::max(1, ChunkBuilder::MAX_SIZE / size_bytes);
         Chunk {
             id,
-            capacity: capacity,
+            capacity,
             borrows: self
                 .components
                 .iter()
@@ -367,13 +348,9 @@ pub struct DynamicTagSet {
 }
 
 impl DynamicTagSet {
-    pub fn set_tag<T: Tag>(&mut self, tag: Arc<T>) {
-        self.tags.insert(TypeId::of::<T>(), tag);
-    }
+    pub fn set_tag<T: Tag>(&mut self, tag: Arc<T>) { self.tags.insert(TypeId::of::<T>(), tag); }
 
-    pub fn remove_tag<T: Tag>(&mut self) -> bool {
-        self.tags.remove(&TypeId::of::<T>()).is_some()
-    }
+    pub fn remove_tag<T: Tag>(&mut self) -> bool { self.tags.remove(&TypeId::of::<T>()).is_some() }
 }
 
 impl TagSet for DynamicTagSet {
@@ -392,9 +369,7 @@ impl TagSet for DynamicTagSet {
         chunk.register_tags(self.tags.iter().map(|(k, v)| (*k, v.clone())));
     }
 
-    fn types(&self) -> FnvHashSet<TypeId> {
-        self.tags.keys().map(|id| *id).collect()
-    }
+    fn types(&self) -> FnvHashSet<TypeId> { self.tags.keys().copied().collect() }
 }
 
 trait ChunkInit: Send {
@@ -402,9 +377,7 @@ trait ChunkInit: Send {
 }
 
 impl<'a, F: FnOnce(&mut Chunk) + Send> ChunkInit for F {
-    fn call(self: Box<Self>, chunk: &mut Chunk) {
-        (*self)(chunk);
-    }
+    fn call(self: Box<Self>, chunk: &mut Chunk) { (*self)(chunk); }
 }
 
 pub struct DynamicSingleEntitySource {
@@ -434,6 +407,7 @@ impl DynamicSingleEntitySource {
         self.components.push(Self::component_tuple(component));
     }
 
+    #[allow(unused_must_use)]
     pub fn remove_component<T: Component>(&mut self) -> bool {
         let type_id = TypeId::of::<T>();
         if let Some(i) = self
@@ -467,13 +441,9 @@ impl EntitySource for DynamicSingleEntitySource {
         }
     }
 
-    fn types(&self) -> FnvHashSet<TypeId> {
-        self.components.iter().map(|(id, _, _)| *id).collect()
-    }
+    fn types(&self) -> FnvHashSet<TypeId> { self.components.iter().map(|(id, _, _)| *id).collect() }
 
-    fn is_empty(&mut self) -> bool {
-        self.components.len() == 0
-    }
+    fn is_empty(&mut self) -> bool { self.components.len() == 0 }
 
     fn write<'a>(&mut self, chunk: &'a mut Chunk, _: &mut EntityAllocator) -> usize {
         if !chunk.is_full() {
@@ -526,19 +496,13 @@ impl Archetype {
     }
 
     /// Gets the archetype ID.
-    pub fn id(&self) -> ArchetypeId {
-        self.id
-    }
+    pub fn id(&self) -> ArchetypeId { self.id }
 
     /// Gets the archetype version.
-    pub fn version(&self) -> u16 {
-        self.version
-    }
+    pub fn version(&self) -> u16 { self.version }
 
     /// Gets a chunk reference.
-    pub fn chunk(&self, id: ChunkIndex) -> Option<&Chunk> {
-        self.chunks.get(id as usize)
-    }
+    pub fn chunk(&self, id: ChunkIndex) -> Option<&Chunk> { self.chunks.get(id as usize) }
 
     /// Gets a mutable chunk reference.
     pub fn chunk_mut(&mut self, id: ChunkIndex) -> Option<&mut Chunk> {
@@ -551,14 +515,10 @@ impl Archetype {
     }
 
     /// Determines if the archetype's chunks contain the given tag type.
-    pub fn has_tag<T: Tag>(&self) -> bool {
-        self.tags.contains(&TypeId::of::<T>())
-    }
+    pub fn has_tag<T: Tag>(&self) -> bool { self.tags.contains(&TypeId::of::<T>()) }
 
     /// Gets a slice reference of chunks.
-    pub fn chunks(&self) -> &[Chunk] {
-        &self.chunks
-    }
+    pub fn chunks(&self) -> &[Chunk] { &self.chunks }
 
     /// Finds a chunk which is suitable for the given data sources, or constructs a new one.
     pub fn get_or_create_chunk<'a, 'b, 'c, S: TagSet, C: EntitySource>(
@@ -576,7 +536,7 @@ impl Archetype {
         {
             Some(i) => (i as ChunkIndex, unsafe { self.chunks.get_unchecked_mut(i) }),
             None => {
-                let mut builder = ChunkBuilder::new();
+                let mut builder = ChunkBuilder::default();
                 tags.configure_chunk(&mut builder);
                 components.configure_chunk(&mut builder);
 

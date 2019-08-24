@@ -1,5 +1,6 @@
 use crate::experimental::borrow::{AtomicRefCell, Ref, RefMap, RefMapMut, RefMut};
 use crate::experimental::entity::Entity;
+use derivative::Derivative;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
@@ -14,18 +15,14 @@ use std::sync::Arc;
 pub struct ComponentTypeId(TypeId);
 
 impl ComponentTypeId {
-    pub fn of<T: Component>() -> Self {
-        ComponentTypeId(TypeId::of::<T>())
-    }
+    pub fn of<T: Component>() -> Self { ComponentTypeId(TypeId::of::<T>()) }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TagTypeId(TypeId);
 
 impl TagTypeId {
-    pub fn of<T: Tag>() -> Self {
-        TagTypeId(TypeId::of::<T>())
-    }
+    pub fn of<T: Tag>() -> Self { TagTypeId(TypeId::of::<T>()) }
 }
 
 pub trait Component: Copy + 'static {}
@@ -34,45 +31,41 @@ pub trait Tag: Copy + PartialEq + 'static {}
 impl<T: Copy + 'static> Component for T {}
 impl<T: Copy + PartialEq + 'static> Tag for T {}
 
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 pub struct ComponentTypes(SliceVec<ComponentTypeId>);
+
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 pub struct TagTypes(SliceVec<TagTypeId>);
 
 impl ComponentTypes {
-    pub fn iter(&self) -> SliceVecIter<ComponentTypeId> {
-        self.0.iter()
-    }
+    pub fn iter(&self) -> SliceVecIter<ComponentTypeId> { self.0.iter() }
 
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
+    pub fn len(&self) -> usize { self.0.len() }
+
+    pub fn is_empty(&self) -> bool { self.len() < 1 }
 }
 
 impl TagTypes {
-    pub fn iter(&self) -> SliceVecIter<TagTypeId> {
-        self.0.iter()
-    }
+    pub fn iter(&self) -> SliceVecIter<TagTypeId> { self.0.iter() }
 
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
+    pub fn len(&self) -> usize { self.0.len() }
+
+    pub fn is_empty(&self) -> bool { self.len() < 1 }
 }
 
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
 pub struct SliceVec<T> {
     data: Vec<T>,
     counts: Vec<usize>,
 }
 
 impl<T> SliceVec<T> {
-    pub fn new() -> Self {
-        Self {
-            data: Vec::new(),
-            counts: Vec::new(),
-        }
-    }
+    pub fn len(&self) -> usize { self.counts.len() }
 
-    pub fn len(&self) -> usize {
-        self.counts.len()
-    }
+    pub fn is_empty(&self) -> bool { self.len() < 1 }
 
     pub fn push<I: IntoIterator<Item = T>>(&mut self, items: I) {
         let mut count = 0;
@@ -111,6 +104,7 @@ impl<'a, T> Iterator for SliceVecIter<'a, T> {
     }
 }
 
+#[derive(Default)]
 pub struct Storage {
     component_types: ComponentTypes,
     tag_types: TagTypes,
@@ -118,14 +112,6 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn new() -> Self {
-        Storage {
-            component_types: ComponentTypes(SliceVec::new()),
-            tag_types: TagTypes(SliceVec::new()),
-            chunks: Vec::new(),
-        }
-    }
-
     pub fn alloc_archetype(
         &mut self,
         desc: &ArchetypeDescription,
@@ -148,21 +134,15 @@ impl Storage {
         })
     }
 
-    pub fn component_types(&self) -> &ComponentTypes {
-        &self.component_types
-    }
+    pub fn component_types(&self) -> &ComponentTypes { &self.component_types }
 
-    pub fn tag_types(&self) -> &TagTypes {
-        &self.tag_types
-    }
+    pub fn tag_types(&self) -> &TagTypes { &self.tag_types }
 
     pub fn iter_component_types(&self) -> SliceVecIter<ComponentTypeId> {
         self.component_types.0.iter()
     }
 
-    pub fn iter_tag_types(&self) -> SliceVecIter<TagTypeId> {
-        self.tag_types.0.iter()
-    }
+    pub fn iter_tag_types(&self) -> SliceVecIter<TagTypeId> { self.tag_types.0.iter() }
 
     pub fn data(&self, archetype: usize) -> Option<&Arc<AtomicRefCell<ArchetypeData>>> {
         self.chunks.get(archetype)
@@ -188,19 +168,13 @@ pub struct ComponentMeta {
     drop_fn: Option<(fn(*mut u8))>,
 }
 
+#[derive(Default)]
 pub struct ArchetypeDescription {
     tags: Vec<(TagTypeId, TagMeta)>,
     components: Vec<(ComponentTypeId, ComponentMeta)>,
 }
 
 impl ArchetypeDescription {
-    pub fn new() -> Self {
-        ArchetypeDescription {
-            tags: Vec::new(),
-            components: Vec::new(),
-        }
-    }
-
     pub fn register_tag_raw(&mut self, type_id: TagTypeId, type_meta: TagMeta) {
         self.tags.push((type_id, type_meta));
     }
@@ -284,7 +258,7 @@ impl ArchetypeData {
 
         ArchetypeData {
             id,
-            tags: tags,
+            tags,
             component_layout: ComponentStorageLayout {
                 capacity: entity_capacity,
                 alloc_layout: data_alignment,
@@ -312,13 +286,11 @@ impl ArchetypeData {
         )
     }
 
-    pub fn len(&self) -> usize {
-        self.component_chunks.len()
-    }
+    pub fn len(&self) -> usize { self.component_chunks.len() }
 
-    pub fn tags(&self, tag_type: &TagTypeId) -> Option<&TagStorage> {
-        self.tags.get(tag_type)
-    }
+    pub fn is_empty(&self) -> bool { self.len() < 1 }
+
+    pub fn tags(&self, tag_type: TagTypeId) -> Option<&TagStorage> { self.tags.get(&tag_type) }
 
     pub fn iter_component_chunks(&self) -> std::slice::Iter<ComponentStorage> {
         self.component_chunks.iter()
@@ -333,9 +305,7 @@ impl ArchetypeData {
     }
 }
 
-fn align_up(addr: usize, align: usize) -> usize {
-    (addr + (align - 1)) & align.wrapping_neg()
-}
+fn align_up(addr: usize, align: usize) -> usize { (addr + (align - 1)) & align.wrapping_neg() }
 
 pub struct ComponentStorageLayout {
     capacity: usize,
@@ -355,12 +325,12 @@ impl ComponentStorageLayout {
                         *ty,
                         ComponentAccessor {
                             ptr: AtomicRefCell::new(NonNull::new_unchecked(
-                                data_storage.offset(*offset as isize),
+                                data_storage.add(*offset),
                             )),
                             capacity: self.capacity,
                             count: UnsafeCell::new(0),
                             element_size: meta.size,
-                            drop_fn: meta.drop_fn.clone(),
+                            drop_fn: meta.drop_fn,
                             version: UnsafeCell::new(Wrapping(0)),
                         },
                     )
@@ -392,28 +362,20 @@ pub struct ComponentStorage {
 }
 
 impl ComponentStorage {
-    pub fn id(&self) -> ChunkId {
-        self.id
-    }
+    pub fn id(&self) -> ChunkId { self.id }
 
-    pub fn len(&self) -> usize {
-        self.entities.len()
-    }
+    pub fn len(&self) -> usize { self.entities.len() }
 
-    pub fn capacity(&self) -> usize {
-        self.capacity
-    }
+    pub fn capacity(&self) -> usize { self.capacity }
 
-    pub fn is_full(&self) -> bool {
-        self.len() >= self.capacity
-    }
+    pub fn is_full(&self) -> bool { self.len() >= self.capacity }
 
-    pub fn entities(&self) -> &[Entity] {
-        self.entities.as_slice()
-    }
+    pub fn is_empty(&self) -> bool { self.entities.len() < 1 }
 
-    pub fn components(&self, component_type: &ComponentTypeId) -> Option<&ComponentAccessor> {
-        unsafe { &*self.component_info.get() }.get(component_type)
+    pub fn entities(&self) -> &[Entity] { self.entities.as_slice() }
+
+    pub fn components(&self, component_type: ComponentTypeId) -> Option<&ComponentAccessor> {
+        unsafe { &*self.component_info.get() }.get(&component_type)
     }
 
     pub fn swap_remove(&mut self, index: usize) -> Option<Entity> {
@@ -464,9 +426,7 @@ pub struct ComponentAccessor {
 }
 
 impl ComponentAccessor {
-    pub fn version(&self) -> usize {
-        unsafe { (*self.version.get()).0 }
-    }
+    pub fn version(&self) -> usize { unsafe { (*self.version.get()).0 } }
 
     pub unsafe fn data_raw<'a>(&'a self) -> (Ref<'a, NonNull<u8>>, usize, usize) {
         (
@@ -499,9 +459,7 @@ impl ComponentAccessor {
         ptr.map_into(|ptr| std::slice::from_raw_parts_mut(ptr.as_ptr() as *mut T, count))
     }
 
-    pub unsafe fn writer(&mut self) -> ComponentWriter {
-        ComponentWriter::new(self)
-    }
+    pub unsafe fn writer(&mut self) -> ComponentWriter { ComponentWriter::new(self) }
 }
 
 impl Debug for ComponentAccessor {
@@ -536,7 +494,7 @@ impl<'a> ComponentWriter<'a> {
             components.as_ptr(),
             self.ptr
                 .as_ptr()
-                .offset((*self.accessor.count.get() * self.accessor.element_size) as isize),
+                .add(*self.accessor.count.get() * self.accessor.element_size),
             count * self.accessor.element_size,
         );
         *self.accessor.count.get() += count;
@@ -554,12 +512,12 @@ impl<'a> ComponentWriter<'a> {
         unsafe {
             let size = self.accessor.element_size;
             let count = *self.accessor.count.get();
-            let to_remove = self.ptr.as_ptr().offset((size * index) as isize);
+            let to_remove = self.ptr.as_ptr().add(size * index);
             if let Some(drop_fn) = self.accessor.drop_fn {
                 drop_fn(to_remove);
             }
             if index < count - 1 {
-                let swap_target = self.ptr.as_ptr().offset((size * (count - 1)) as isize);
+                let swap_target = self.ptr.as_ptr().add(size * (count - 1));
                 std::ptr::copy_nonoverlapping(swap_target, to_remove, size);
             }
 
@@ -598,23 +556,18 @@ impl TagStorage {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.len
-    }
+    pub fn len(&self) -> usize { self.len }
 
-    pub fn push_raw(&mut self, ptr: *const u8) {
+    pub fn is_empty(&self) -> bool { self.len() < 1 }
+
+    pub unsafe fn push_raw(&mut self, ptr: *const u8) {
         if self.len == self.capacity {
             self.grow();
         }
 
         if self.element.size > 0 {
-            unsafe {
-                let dst = self
-                    .ptr
-                    .as_ptr()
-                    .offset((self.len * self.element.size) as isize);
-                std::ptr::copy_nonoverlapping(ptr, dst, self.element.size);
-            }
+            let dst = self.ptr.as_ptr().add(self.len * self.element.size);
+            std::ptr::copy_nonoverlapping(ptr, dst, self.element.size);
         }
 
         self.len += 1;
@@ -625,8 +578,11 @@ impl TagStorage {
             size_of::<T>() == self.element.size,
             "incompatible element data size"
         );
-        self.push_raw(&value as *const T as *const u8);
-        std::mem::forget(value);
+        unsafe {
+            self.push_raw(&value as *const T as *const u8);
+        }
+        // This doens't need to happen because the type is copy.
+        //std::mem::forget(value);
     }
 
     pub unsafe fn data_raw(&self) -> (NonNull<u8>, usize, usize) {
@@ -657,7 +613,7 @@ impl TagStorage {
                 (new_cap, ptr)
             };
 
-            if ptr == std::ptr::null_mut() {
+            if ptr.is_null() {
                 println!("out of memory");
                 std::process::abort()
             }
@@ -676,7 +632,7 @@ impl Drop for TagStorage {
             unsafe {
                 if let Some(drop_fn) = self.element.drop_fn {
                     for i in 0..self.len {
-                        drop_fn(ptr.offset((i * self.element.size) as isize));
+                        drop_fn(ptr.add(i * self.element.size));
                     }
                 }
                 let layout = std::alloc::Layout::from_size_align_unchecked(
@@ -708,9 +664,9 @@ mod test {
 
     #[test]
     pub fn create() {
-        let mut archetypes = Storage::new();
+        let mut archetypes = Storage::default();
 
-        let mut desc = ArchetypeDescription::new();
+        let mut desc = ArchetypeDescription::default();
         desc.register_tag::<usize>();
         desc.register_component::<isize>();
 
@@ -735,9 +691,9 @@ mod test {
 
     #[test]
     pub fn read_components() {
-        let mut archetypes = Storage::new();
+        let mut archetypes = Storage::default();
 
-        let mut desc = ArchetypeDescription::new();
+        let mut desc = ArchetypeDescription::default();
         desc.register_component::<isize>();
         desc.register_component::<usize>();
         desc.register_component::<ZeroSize>();
@@ -808,9 +764,9 @@ mod test {
 
     #[test]
     pub fn read_tags() {
-        let mut archetypes = Storage::new();
+        let mut archetypes = Storage::default();
 
-        let mut desc = ArchetypeDescription::new();
+        let mut desc = ArchetypeDescription::default();
         desc.register_tag::<isize>();
         desc.register_tag::<ZeroSize>();
 
@@ -828,7 +784,7 @@ mod test {
 
         unsafe {
             let tags1 = data
-                .tags(&TagTypeId::of::<isize>())
+                .tags(TagTypeId::of::<isize>())
                 .unwrap()
                 .data_slice::<isize>();
             assert_eq!(tags1.len(), tag_values.len());
@@ -837,7 +793,7 @@ mod test {
             }
 
             let tags2 = data
-                .tags(&TagTypeId::of::<ZeroSize>())
+                .tags(TagTypeId::of::<ZeroSize>())
                 .unwrap()
                 .data_slice::<ZeroSize>();
             assert_eq!(tags2.len(), tag_values.len());
@@ -849,9 +805,9 @@ mod test {
 
     #[test]
     pub fn create_zero_size_tags() {
-        let mut archetypes = Storage::new();
+        let mut archetypes = Storage::default();
 
-        let mut desc = ArchetypeDescription::new();
+        let mut desc = ArchetypeDescription::default();
         desc.register_tag::<ZeroSize>();
         desc.register_component::<isize>();
 
@@ -876,9 +832,9 @@ mod test {
 
     #[test]
     pub fn create_zero_size_components() {
-        let mut archetypes = Storage::new();
+        let mut archetypes = Storage::default();
 
-        let mut desc = ArchetypeDescription::new();
+        let mut desc = ArchetypeDescription::default();
         desc.register_tag::<usize>();
         desc.register_component::<ZeroSize>();
 

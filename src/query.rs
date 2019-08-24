@@ -70,29 +70,19 @@ pub struct Read<T: Component>(PhantomData<T>);
 impl<T: Component> DefaultFilter for Read<T> {
     type Filter = ComponentFilter<T>;
 
-    fn filter() -> Self::Filter {
-        ComponentFilter::new()
-    }
+    fn filter() -> Self::Filter { ComponentFilter::new() }
 }
 
 impl<'a, T: Component> View<'a> for Read<T> {
     type Iter = BorrowedIter<'a, Iter<'a, T>>;
 
-    fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        chunk.components().unwrap().into_iter()
-    }
+    fn fetch(chunk: &'a Chunk) -> Self::Iter { chunk.components().unwrap().into_iter() }
 
-    fn validate() -> bool {
-        true
-    }
+    fn validate() -> bool { true }
 
-    fn reads<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
-    fn writes<D: Component>() -> bool {
-        false
-    }
+    fn writes<D: Component>() -> bool { false }
 }
 
 impl<T: Component> ViewElement for Read<T> {
@@ -105,29 +95,19 @@ pub struct Write<T: Component>(PhantomData<T>);
 
 impl<T: Component> DefaultFilter for Write<T> {
     type Filter = ComponentFilter<T>;
-    fn filter() -> Self::Filter {
-        ComponentFilter::new()
-    }
+    fn filter() -> Self::Filter { ComponentFilter::new() }
 }
 
 impl<'a, T: Component> View<'a> for Write<T> {
     type Iter = BorrowedIter<'a, IterMut<'a, T>>;
 
-    fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        chunk.components_mut().unwrap().into_iter()
-    }
+    fn fetch(chunk: &'a Chunk) -> Self::Iter { chunk.components_mut().unwrap().into_iter() }
 
-    fn validate() -> bool {
-        true
-    }
+    fn validate() -> bool { true }
 
-    fn reads<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
-    fn writes<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 }
 
 impl<T: Component> ViewElement for Write<T> {
@@ -140,9 +120,7 @@ pub struct Tagged<T: Tag>(PhantomData<T>);
 
 impl<T: Tag> DefaultFilter for Tagged<T> {
     type Filter = TagFilter<T>;
-    fn filter() -> Self::Filter {
-        TagFilter::new()
-    }
+    fn filter() -> Self::Filter { TagFilter::new() }
 }
 
 impl<'a, T: Tag> View<'a> for Tagged<T> {
@@ -153,17 +131,11 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
         std::iter::repeat(data).take(chunk.len())
     }
 
-    fn validate() -> bool {
-        true
-    }
+    fn validate() -> bool { true }
 
-    fn reads<D: Component>() -> bool {
-        false
-    }
+    fn reads<D: Component>() -> bool { false }
 
-    fn writes<D: Component>() -> bool {
-        false
-    }
+    fn writes<D: Component>() -> bool { false }
 }
 
 impl<T: Tag> ViewElement for Tagged<T> {
@@ -243,17 +215,13 @@ impl FilterResult for Option<bool> {
     }
 
     #[inline]
-    fn is_pass(&self) -> bool {
-        self.unwrap_or(true)
-    }
+    fn is_pass(&self) -> bool { self.unwrap_or(true) }
 }
 
 /// Filters chunks to determine which are to be included in a `Query`.
 pub trait Filter: Send + Sync + Sized + Debug {
     /// Determines if an archetype matches the filter's conditions.
-    fn filter_archetype(&self, _: &Archetype) -> Option<bool> {
-        None
-    }
+    fn filter_archetype(&self, _: &Archetype) -> Option<bool> { None }
 
     /// Determines if a chunk matches immutable elements of the filter's conditions.
     /// This must always return the same result when given the same chunk.
@@ -276,27 +244,19 @@ pub mod filter {
 
     /// Creates an entity data filter which includes chunks that contain
     /// entity data components of type `T`.
-    pub fn component<T: Component>() -> ComponentFilter<T> {
-        ComponentFilter::new()
-    }
+    pub fn component<T: Component>() -> ComponentFilter<T> { ComponentFilter::new() }
 
     /// Creates a shared data filter which includes chunks that contain
     /// shared data components of type `T`.
-    pub fn tag<T: Tag>() -> TagFilter<T> {
-        TagFilter::new()
-    }
+    pub fn tag<T: Tag>() -> TagFilter<T> { TagFilter::new() }
 
     /// Creates a shared data filter which includes chunks that contain
     /// specific shared data values.
-    pub fn tag_value<'a, T: Tag>(data: &'a T) -> TagValueFilter<'a, T> {
-        TagValueFilter::new(data)
-    }
+    pub fn tag_value<T: Tag>(data: &T) -> TagValueFilter<'_, T> { TagValueFilter::new(data) }
 
     /// Creates a filter which includes chunks for which entity data components
     /// of type `T` have changed since the filter was last executed.
-    pub fn changed<T: Component>() -> ComponentChangedFilter<T> {
-        ComponentChangedFilter::new()
-    }
+    pub fn changed<T: Component>() -> ComponentChangedFilter<T> { ComponentChangedFilter::new() }
 }
 
 /// A passthrough filter which allows all chunks.
@@ -305,23 +265,17 @@ pub struct Passthrough;
 
 impl Filter for Passthrough {
     #[inline]
-    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> {
-        None
-    }
+    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> { None }
 
     #[inline]
-    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> {
-        None
-    }
+    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> { None }
 }
 
 impl std::ops::Not for Passthrough {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<Rhs: Filter> std::ops::BitAnd<Rhs> for Passthrough {
@@ -373,9 +327,7 @@ impl<T: Filter> std::ops::Not for Not<T> {
     type Output = T;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        self.filter
-    }
+    fn not(self) -> Self::Output { self.filter }
 }
 
 impl<F: Filter, Rhs: Filter> std::ops::BitAnd<Rhs> for Not<F> {
@@ -563,9 +515,7 @@ impl_or_filter!(A, B, C, D, E, F);
 pub struct ComponentFilter<T>(PhantomData<T>);
 
 impl<T: Component> ComponentFilter<T> {
-    fn new() -> Self {
-        ComponentFilter(PhantomData)
-    }
+    fn new() -> Self { ComponentFilter(PhantomData) }
 }
 
 impl<T: Component> Filter for ComponentFilter<T> {
@@ -575,23 +525,17 @@ impl<T: Component> Filter for ComponentFilter<T> {
     }
 
     #[inline]
-    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> {
-        None
-    }
+    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> { None }
 
     #[inline]
-    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> {
-        None
-    }
+    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> { None }
 }
 
 impl<T: Component> std::ops::Not for ComponentFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<Rhs: Filter, T: Component> std::ops::BitAnd<Rhs> for ComponentFilter<T> {
@@ -621,9 +565,7 @@ impl<Rhs: Filter, T: Component> std::ops::BitOr<Rhs> for ComponentFilter<T> {
 pub struct TagFilter<T>(PhantomData<T>);
 
 impl<T: Tag> TagFilter<T> {
-    fn new() -> Self {
-        TagFilter(PhantomData)
-    }
+    fn new() -> Self { TagFilter(PhantomData) }
 }
 
 impl<T: Tag> Filter for TagFilter<T> {
@@ -633,23 +575,17 @@ impl<T: Tag> Filter for TagFilter<T> {
     }
 
     #[inline]
-    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> {
-        None
-    }
+    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> { None }
 
     #[inline]
-    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> {
-        None
-    }
+    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> { None }
 }
 
 impl<T: Tag> std::ops::Not for TagFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<Rhs: Filter, T: Tag> std::ops::BitAnd<Rhs> for TagFilter<T> {
@@ -681,9 +617,7 @@ pub struct TagValueFilter<'a, T> {
 }
 
 impl<'a, T: Tag> TagValueFilter<'a, T> {
-    fn new(value: &'a T) -> Self {
-        TagValueFilter { value }
-    }
+    fn new(value: &'a T) -> Self { TagValueFilter { value } }
 }
 
 impl<'a, T: Tag> Filter for TagValueFilter<'a, T> {
@@ -698,18 +632,14 @@ impl<'a, T: Tag> Filter for TagValueFilter<'a, T> {
     }
 
     #[inline]
-    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> {
-        None
-    }
+    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> { None }
 }
 
 impl<'a, T: Tag> std::ops::Not for TagValueFilter<'a, T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, Rhs: Filter, T: Tag> std::ops::BitAnd<Rhs> for TagValueFilter<'a, T> {
@@ -755,9 +685,7 @@ impl<T: Component> std::ops::Not for ComponentChangedFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<T: Component> Filter for ComponentChangedFilter<T> {
@@ -767,9 +695,7 @@ impl<T: Component> Filter for ComponentChangedFilter<T> {
     }
 
     #[inline]
-    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> {
-        None
-    }
+    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> { None }
 
     fn filter_chunk_variable(&mut self, chunk: &Chunk) -> Option<bool> {
         use std::collections::hash_map::Entry;
@@ -1202,15 +1128,11 @@ pub struct ChunkView<'a, V: View<'a>> {
 impl<'a, V: View<'a>> ChunkView<'a, V> {
     /// Get a slice of all entities contained within the chunk.
     #[inline]
-    pub fn entities(&self) -> &'a [Entity] {
-        unsafe { self.chunk.entities() }
-    }
+    pub fn entities(&self) -> &'a [Entity] { unsafe { self.chunk.entities() } }
 
     /// Get an iterator of all data contained within the chunk.
     #[inline]
-    pub fn iter(&mut self) -> V::Iter {
-        V::fetch(self.chunk)
-    }
+    pub fn iter(&mut self) -> V::Iter { V::fetch(self.chunk) }
 
     /// Get an iterator of all data and entity IDs contained within the chunk.
     #[inline]
@@ -1224,9 +1146,7 @@ impl<'a, V: View<'a>> ChunkView<'a, V> {
     }
 
     /// Get a tag value.
-    pub fn tag<T: Tag>(&self) -> Option<&T> {
-        self.chunk.tag()
-    }
+    pub fn tag<T: Tag>(&self) -> Option<&T> { self.chunk.tag() }
 
     /// Get a slice of component data.
     ///
