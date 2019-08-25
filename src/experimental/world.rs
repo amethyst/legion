@@ -41,7 +41,7 @@ impl Universe {
 }
 
 pub struct World {
-    archetypes: Storage,
+    pub(crate) archetypes: Storage,
     entity_allocator: EntityAllocator,
 }
 
@@ -70,7 +70,6 @@ impl World {
                     .data_unchecked(archetype_id)
                     .deref()
                     .get_mut()
-                    .unwrap()
             };
             let component_storage = archetype.component_chunk_mut(chunk_id).unwrap();
 
@@ -95,8 +94,7 @@ impl World {
                 .archetypes
                 .data(location.archetype())
                 .unwrap()
-                .get_mut()
-                .unwrap();
+                .get_mut();
             let chunk = archetype.component_chunk_mut(location.chunk()).unwrap();
             if let Some(swapped) = chunk.swap_remove(location.component()) {
                 self.entity_allocator
@@ -121,7 +119,6 @@ impl World {
             self.archetypes
                 .data(location.archetype())?
                 .get()
-                .expect("archetype currently mutably borrowed elsewhere")
                 .deconstruct()
         };
         let chunk = archetype.component_chunk(location.chunk())?;
@@ -149,7 +146,6 @@ impl World {
             self.archetypes
                 .data(location.archetype())?
                 .get()
-                .expect("archetype currently mutably borrowed elsewhere")
                 .deconstruct()
         };
         let chunk = archetype.component_chunk(location.chunk())?;
@@ -178,7 +174,6 @@ impl World {
             self.archetypes
                 .data(location.archetype())?
                 .get()
-                .expect("archetype currently mutably borrowed elsewhere")
                 .deconstruct()
         };
         let tags = archetype.tags(&TagTypeId::of::<T>())?;
@@ -198,11 +193,11 @@ impl World {
                 tag_types: self.archetypes.tag_types(),
             };
 
-            let tag_iter = tags.collect(&archetype_data);
+            let tag_iter = tags.collect(archetype_data);
             let tag_matches =
-                tag_iter.map(|x| <T as Filter<'_, ArchetypeFilterData<'_>>>::is_match(tags, x));
-            let component_iter = components.collect(&archetype_data);
-            let component_matches = component_iter.map(|x| components.is_match(x));
+                tag_iter.map(|x| <T as Filter<'_, ArchetypeFilterData<'_>>>::is_match(tags, &x));
+            let component_iter = components.collect(archetype_data);
+            let component_matches = component_iter.map(|x| components.is_match(&x));
             if let Some(i) = tag_matches
                 .zip(component_matches)
                 .enumerate()
@@ -226,22 +221,17 @@ impl World {
     where
         T: TagSet,
     {
-        let mut archetype_data = unsafe {
-            self.archetypes
-                .data_unchecked(archetype)
-                .deref()
-                .get_mut()
-                .unwrap()
-        };
+        let mut archetype_data =
+            unsafe { self.archetypes.data_unchecked(archetype).deref().get_mut() };
 
         {
             let chunk_filter_data = ChunkFilterData {
-                archetype_data: &archetype_data,
+                archetype_data: archetype_data.deref(),
             };
 
-            let chunk_iter = tags.collect(&chunk_filter_data);
+            let chunk_iter = tags.collect(chunk_filter_data);
             let index = chunk_iter
-                .map(|x| <T as Filter<'_, ChunkFilterData<'_>>>::is_match(tags, x))
+                .map(|x| <T as Filter<'_, ChunkFilterData<'_>>>::is_match(tags, &x))
                 .zip(archetype_data.iter_component_chunks())
                 .enumerate()
                 .filter(|(_, (matches, components))| matches.is_pass() && !components.is_full())
@@ -388,11 +378,11 @@ mod tuple_impls {
             {
                 type Iter = SliceVecIter<'a, ComponentTypeId>;
 
-                fn collect(&self, source: &'a ArchetypeFilterData<'a>) -> Self::Iter {
+                fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
                     source.component_types.iter()
                 }
 
-                fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     let types = &[$( ComponentTypeId::of::<$ty>() ),*];
                     Some(types.len() == item.len() && types.iter().all(|t| item.contains(t)))
                 }
@@ -433,11 +423,11 @@ mod tuple_impls {
             {
                 type Iter = SliceVecIter<'a, TagTypeId>;
 
-                fn collect(&self, source: &'a ArchetypeFilterData<'a>) -> Self::Iter {
+                fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
                     source.tag_types.iter()
                 }
 
-                fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     let types = &[$( TagTypeId::of::<$ty>() ),*];
                     Some(types.len() == item.len() && types.iter().all(|t| item.contains(t)))
                 }
@@ -450,7 +440,7 @@ mod tuple_impls {
             {
                 type Iter = Zip<($( Iter<'a, $ty>, )*)>;
 
-                fn collect(&self, source: &'a ChunkFilterData<'a>) -> Self::Iter {
+                fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {
                     let iters = (
                         $(
                             unsafe {
@@ -466,10 +456,10 @@ mod tuple_impls {
                     itertools::multizip(iters)
                 }
 
-                fn is_match(&mut self, item: <Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     #![allow(non_snake_case)]
                     let ($( $ty, )*) = self;
-                    Some(($( &*$ty, )*) == item)
+                    Some(($( &*$ty, )*) == *item)
                 }
             }
         };
@@ -477,11 +467,11 @@ mod tuple_impls {
             impl<'a> Filter<'a, ChunkFilterData<'a>> for () {
                 type Iter = Take<Repeat<()>>;
 
-                fn collect(&self, source: &'a ChunkFilterData<'a>) -> Self::Iter {
+                fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {
                     std::iter::repeat(()).take(source.archetype_data.len())
                 }
 
-                fn is_match(&mut self, _: <Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     Some(true)
                 }
             }

@@ -16,7 +16,11 @@ impl<T> AtomicRefCell<T> {
         }
     }
 
-    pub fn get<'a>(&'a self) -> Result<Ref<'a, T>, &'static str> {
+    pub fn get<'a>(&'a self) -> Ref<'a, T> {
+        self.try_get().unwrap()
+    }
+
+    pub fn try_get<'a>(&'a self) -> Result<Ref<'a, T>, &'static str> {
         loop {
             let read = self.borrow_state.load(Ordering::SeqCst);
             if read < 0 {
@@ -40,7 +44,11 @@ impl<T> AtomicRefCell<T> {
         })
     }
 
-    pub fn get_mut<'a>(&'a self) -> Result<RefMut<'a, T>, &'static str> {
+    pub fn get_mut<'a>(&'a self) -> RefMut<'a, T> {
+        self.try_get_mut().unwrap()
+    }
+
+    pub fn try_get_mut<'a>(&'a self) -> Result<RefMut<'a, T>, &'static str> {
         let borrowed = self.borrow_state.compare_and_swap(0, -1, Ordering::SeqCst);
         match borrowed {
             0 => Ok(RefMut {
@@ -66,6 +74,13 @@ impl<'a> Drop for Borrow<'a> {
     }
 }
 
+impl<'a> Clone for Borrow<'a> {
+    fn clone(&self) -> Self {
+        self.state.fetch_add(1, Ordering::SeqCst);
+        Borrow { state: self.state }
+    }
+}
+
 #[derive(Debug)]
 pub struct BorrowMut<'a> {
     state: &'a AtomicIsize,
@@ -83,6 +98,15 @@ pub struct Ref<'a, T: 'a> {
     // held for drop impl
     borrow: Borrow<'a>,
     value: &'a T,
+}
+
+impl<'a, T: 'a> Clone for Ref<'a, T> {
+    fn clone(&self) -> Self {
+        Ref {
+            borrow: self.borrow.clone(),
+            value: self.value,
+        }
+    }
 }
 
 impl<'a, T: 'a> Ref<'a, T> {
@@ -182,6 +206,10 @@ pub struct RefMap<'a, T: 'a> {
 }
 
 impl<'a, T: 'a> RefMap<'a, T> {
+    pub fn new(borrow: Borrow<'a>, value: T) -> Self {
+        Self { borrow, value }
+    }
+
     pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMap<'a, K> {
         RefMap {
             value: f(&mut self.value),
@@ -214,6 +242,20 @@ impl<'a, T: 'a> std::borrow::Borrow<T> for RefMap<'a, T> {
     }
 }
 
+impl<'a, I: 'a + Iterator> Iterator for RefMap<'a, I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.value.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.value.size_hint()
+    }
+}
+
+impl<'a, I: 'a + ExactSizeIterator> ExactSizeIterator for RefMap<'a, I> {}
+
 #[derive(Debug)]
 pub struct RefMapMut<'a, T: 'a> {
     #[allow(dead_code)]
@@ -223,6 +265,10 @@ pub struct RefMapMut<'a, T: 'a> {
 }
 
 impl<'a, T: 'a> RefMapMut<'a, T> {
+    pub fn new(borrow: BorrowMut<'a>, value: T) -> Self {
+        Self { borrow, value }
+    }
+
     pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapMut<'a, K> {
         RefMapMut {
             value: f(&mut self.value),
@@ -260,6 +306,20 @@ impl<'a, T: 'a> std::borrow::Borrow<T> for RefMapMut<'a, T> {
         &self.value
     }
 }
+
+impl<'a, I: 'a + Iterator> Iterator for RefMapMut<'a, I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.value.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.value.size_hint()
+    }
+}
+
+impl<'a, I: 'a + ExactSizeIterator> ExactSizeIterator for RefMapMut<'a, I> {}
 
 #[derive(Debug)]
 pub struct ComponentRef<'a, 'b: 'a, T: 'b> {

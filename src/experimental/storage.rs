@@ -28,11 +28,11 @@ impl TagTypeId {
     }
 }
 
-pub trait Component: Copy + 'static {}
-pub trait Tag: Copy + PartialEq + 'static {}
+pub trait Component: Copy + Send + Sync + 'static {}
+pub trait Tag: Copy + Send + Sync + PartialEq + 'static {}
 
-impl<T: Copy + 'static> Component for T {}
-impl<T: Copy + PartialEq + 'static> Tag for T {}
+impl<T: Copy + Send + Sync + 'static> Component for T {}
+impl<T: Copy + Send + Sync + PartialEq + 'static> Tag for T {}
 
 pub struct ComponentTypes(SliceVec<ComponentTypeId>);
 pub struct TagTypes(SliceVec<TagTypeId>);
@@ -143,9 +143,7 @@ impl Storage {
             ))));
 
         let index = self.chunks.len() - 1;
-        (index, unsafe {
-            self.data_unchecked(index).get_mut().unwrap()
-        })
+        (index, unsafe { self.data_unchecked(index).get_mut() })
     }
 
     pub fn component_types(&self) -> &ComponentTypes {
@@ -242,6 +240,16 @@ const COMPONENT_STORAGE_ALIGNMENT: usize = 64;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct ArchetypeId(usize);
+
+impl ArchetypeId {
+    pub fn new(index: usize) -> Self {
+        ArchetypeId(index)
+    }
+
+    pub fn index(&self) -> usize {
+        self.0
+    }
+}
 
 pub struct ArchetypeData {
     id: ArchetypeId,
@@ -382,6 +390,20 @@ impl ComponentStorageLayout {
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub struct ChunkId(ArchetypeId, usize);
 
+impl ChunkId {
+    pub fn new(archetype: ArchetypeId, index: usize) -> Self {
+        ChunkId(archetype, index)
+    }
+
+    pub fn archetype_id(&self) -> ArchetypeId {
+        self.0
+    }
+
+    pub fn index(&self) -> usize {
+        self.1
+    }
+}
+
 pub struct ComponentStorage {
     id: ChunkId,
     capacity: usize,
@@ -443,7 +465,7 @@ impl Drop for ComponentStorage {
     fn drop(&mut self) {
         for (_, info) in unsafe { &mut *self.component_info.get() }.drain() {
             if let Some(drop_fn) = info.drop_fn {
-                drop_fn(info.ptr.get_mut().unwrap().as_ptr());
+                drop_fn(info.ptr.get_mut().as_ptr());
             }
         }
 
@@ -469,24 +491,12 @@ impl ComponentAccessor {
     }
 
     pub unsafe fn data_raw<'a>(&'a self) -> (Ref<'a, NonNull<u8>>, usize, usize) {
-        (
-            self.ptr
-                .get()
-                .expect("component slice already borrowed mutably"),
-            self.element_size,
-            *self.count.get(),
-        )
+        (self.ptr.get(), self.element_size, *self.count.get())
     }
 
     pub unsafe fn data_raw_mut<'a>(&'a self) -> (RefMut<'a, NonNull<u8>>, usize, usize) {
         *self.version.get() += Wrapping(1);
-        (
-            self.ptr
-                .get_mut()
-                .expect("component slice already borrowed elsewhere"),
-            self.element_size,
-            *self.count.get(),
-        )
+        (self.ptr.get_mut(), self.element_size, *self.count.get())
     }
 
     pub unsafe fn data_slice<'a, T>(&'a self) -> RefMap<'a, &[T]> {
@@ -526,7 +536,7 @@ impl<'a> ComponentWriter<'a> {
     fn new(accessor: &'a ComponentAccessor) -> ComponentWriter<'a> {
         Self {
             accessor,
-            ptr: accessor.ptr.get_mut().unwrap(),
+            ptr: accessor.ptr.get_mut(),
         }
     }
 
@@ -626,7 +636,6 @@ impl TagStorage {
             "incompatible element data size"
         );
         self.push_raw(&value as *const T as *const u8);
-        std::mem::forget(value);
     }
 
     pub unsafe fn data_raw(&self) -> (NonNull<u8>, usize, usize) {
