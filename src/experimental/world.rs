@@ -29,14 +29,15 @@ pub struct Universe {
 }
 
 impl Universe {
-    pub fn new() -> Self {
-        Universe {
-            allocator: Arc::from(Mutex::new(BlockAllocator::new())),
-        }
-    }
+    pub fn new() -> Self { Self::default() }
+    pub fn create_world(&self) -> World { World::new(EntityAllocator::new(self.allocator.clone())) }
+}
 
-    pub fn create_world(&self) -> World {
-        World::new(EntityAllocator::new(self.allocator.clone()))
+impl Default for Universe {
+    fn default() -> Self {
+        Self {
+            allocator: Arc::new(Mutex::new(BlockAllocator::new())),
+        }
     }
 }
 
@@ -48,7 +49,7 @@ pub struct World {
 impl World {
     pub fn new(allocator: EntityAllocator) -> Self {
         Self {
-            archetypes: Storage::new(),
+            archetypes: Storage::default(),
             entity_allocator: allocator,
         }
     }
@@ -78,18 +79,18 @@ impl World {
             let added = component_storage.entities().iter().enumerate().skip(start);
             for (i, e) in added {
                 let location = EntityLocation::new(archetype_id, chunk_id, i);
-                self.entity_allocator.set_location(&e.index(), location);
+                self.entity_allocator.set_location(e.index(), location);
             }
         }
 
         self.entity_allocator.allocation_buffer()
     }
 
-    pub fn delete(&mut self, entity: &Entity) -> bool {
-        let deleted = self.entity_allocator.delete_entity(*entity);
+    pub fn delete(&mut self, entity: Entity) -> bool {
+        let deleted = self.entity_allocator.delete_entity(entity);
 
         if deleted {
-            let location = *self.entity_allocator.get_location(&entity.index()).unwrap();
+            let location = self.entity_allocator.get_location(entity.index()).unwrap();
             let mut archetype = self
                 .archetypes
                 .data(location.archetype())
@@ -98,23 +99,21 @@ impl World {
             let chunk = archetype.component_chunk_mut(location.chunk()).unwrap();
             if let Some(swapped) = chunk.swap_remove(location.component()) {
                 self.entity_allocator
-                    .set_location(&swapped.index(), location);
+                    .set_location(swapped.index(), location);
             }
         }
 
         deleted
     }
 
-    pub fn is_alive(&self, entity: &Entity) -> bool {
-        self.entity_allocator.is_alive(entity)
-    }
+    pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
-    pub fn get_component<T: Component>(&mut self, entity: &Entity) -> Option<ComponentRef<T>> {
+    pub fn get_component<T: Component>(&mut self, entity: Entity) -> Option<ComponentRef<T>> {
         if !self.is_alive(entity) {
             return None;
         }
 
-        let location = self.entity_allocator.get_location(&entity.index())?;
+        let location = self.entity_allocator.get_location(entity.index())?;
         let (archetype_borrow, archetype) = unsafe {
             self.archetypes
                 .data(location.archetype())?
@@ -124,7 +123,7 @@ impl World {
         let chunk = archetype.component_chunk(location.chunk())?;
         let (slice_borrow, slice) = unsafe {
             chunk
-                .components(&ComponentTypeId::of::<T>())?
+                .components(ComponentTypeId::of::<T>())?
                 .data_slice::<T>()
                 .deconstruct()
         };
@@ -135,13 +134,13 @@ impl World {
 
     pub fn get_component_mut<T: Component>(
         &mut self,
-        entity: &Entity,
+        entity: Entity,
     ) -> Option<ComponentRefMut<T>> {
         if !self.is_alive(entity) {
             return None;
         }
 
-        let location = self.entity_allocator.get_location(&entity.index())?;
+        let location = self.entity_allocator.get_location(entity.index())?;
         let (archetype_borrow, archetype) = unsafe {
             self.archetypes
                 .data(location.archetype())?
@@ -151,7 +150,7 @@ impl World {
         let chunk = archetype.component_chunk(location.chunk())?;
         let (slice_borrow, slice) = unsafe {
             chunk
-                .components(&ComponentTypeId::of::<T>())?
+                .components(ComponentTypeId::of::<T>())?
                 .data_slice_mut::<T>()
                 .deconstruct()
         };
@@ -164,19 +163,19 @@ impl World {
         ))
     }
 
-    pub fn get_tag<T: Tag>(&self, entity: &Entity) -> Option<Ref<T>> {
+    pub fn get_tag<T: Tag>(&self, entity: Entity) -> Option<Ref<T>> {
         if !self.is_alive(entity) {
             return None;
         }
 
-        let location = self.entity_allocator.get_location(&entity.index())?;
+        let location = self.entity_allocator.get_location(entity.index())?;
         let (archetype_borrow, archetype) = unsafe {
             self.archetypes
                 .data(location.archetype())?
                 .get()
                 .deconstruct()
         };
-        let tags = archetype.tags(&TagTypeId::of::<T>())?;
+        let tags = archetype.tags(TagTypeId::of::<T>())?;
         let tag = unsafe { tags.data_slice::<T>().get(location.chunk())? };
 
         Some(Ref::new(archetype_borrow, tag))
@@ -209,7 +208,7 @@ impl World {
             };
         }
 
-        let mut description = ArchetypeDescription::new();
+        let mut description = ArchetypeDescription::default();
         tags.tailor_archetype(&mut description);
         components.tailor_archetype(&mut description);
 
@@ -445,7 +444,7 @@ mod tuple_impls {
                         $(
                             unsafe {
                                 source.archetype_data
-                                    .tags(&TagTypeId::of::<$ty>())
+                                    .tags(TagTypeId::of::<$ty>())
                                     .unwrap()
                                     .data_slice::<$ty>()
                                     .iter()
@@ -489,8 +488,6 @@ mod tuple_impls {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use parking_lot::Mutex;
-    use std::sync::Arc;
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
@@ -513,9 +510,7 @@ mod tests {
     }
 
     #[test]
-    fn create_universe() {
-        Universe::new();
-    }
+    fn create_universe() { Universe::default(); }
 
     #[test]
     fn create_world() {
@@ -553,11 +548,11 @@ mod tests {
             .iter()
             .enumerate()
         {
-            match world.get_component(&e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i).map(|(x, _)| x), None),
             }
-            match world.get_component(&e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i).map(|(_, x)| x), None),
             }
@@ -572,7 +567,7 @@ mod tests {
 
         let entity = *world.entity_allocator.allocation_buffer().get(0).unwrap();
 
-        assert!(world.get_component::<i32>(&entity).is_none());
+        assert!(world.get_component::<i32>(entity).is_none());
     }
 
     #[test]
@@ -588,8 +583,8 @@ mod tests {
         world.insert(shared, components);
 
         for e in world.entity_allocator.allocation_buffer().iter() {
-            assert_eq!(&Static, world.get_tag::<Static>(&e).unwrap().deref());
-            assert_eq!(&Model(5), world.get_tag::<Model>(&e).unwrap().deref());
+            assert_eq!(&Static, world.get_tag::<Static>(*e).unwrap().deref());
+            assert_eq!(&Model(5), world.get_tag::<Model>(*e).unwrap().deref());
         }
     }
 
@@ -601,7 +596,7 @@ mod tests {
 
         let entity = world.entity_allocator.allocation_buffer().get(0).unwrap();
 
-        assert!(world.get_tag::<Model>(entity).is_none());
+        assert!(world.get_tag::<Model>(*entity).is_none());
     }
 
     #[test]
@@ -617,12 +612,12 @@ mod tests {
         let entities = world.insert(shared, components).to_vec();
 
         for e in entities.iter() {
-            assert!(world.get_component::<Pos>(e).is_some());
+            assert!(world.get_component::<Pos>(*e).is_some());
         }
 
         for e in entities.iter() {
-            world.delete(e);
-            assert!(world.get_component::<Pos>(e).is_none());
+            world.delete(*e);
+            assert!(world.get_component::<Pos>(*e).is_none());
         }
     }
 
@@ -639,14 +634,14 @@ mod tests {
         let entities = world.insert(shared, components.clone()).to_vec();
 
         let last = *entities.last().unwrap();
-        world.delete(&last);
+        world.delete(last);
 
         for (i, e) in entities.iter().take(entities.len() - 1).enumerate() {
-            match world.get_component(&e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i).map(|(x, _)| x), None),
             }
-            match world.get_component(&e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i).map(|(_, x)| x), None),
             }
@@ -666,14 +661,14 @@ mod tests {
         let entities = world.insert(shared, components.clone()).to_vec();
 
         let first = *entities.first().unwrap();
-        world.delete(&first);
+        world.delete(first);
 
         for (i, e) in entities.iter().skip(1).enumerate() {
-            match world.get_component(&e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i + 1).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i + 1).map(|(x, _)| x), None),
             }
-            match world.get_component(&e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i + 1).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i + 1).map(|(_, x)| x), None),
             }

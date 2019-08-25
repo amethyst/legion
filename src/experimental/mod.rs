@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod borrow;
 pub mod entity;
 pub mod filter;

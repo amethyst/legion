@@ -84,15 +84,11 @@ impl<'a, 'b, T: 'a + Display> Display for Borrowed<'a, T> {
 }
 
 impl<'a, 'b, T: 'a + PartialEq<T>> PartialEq<Borrowed<'b, T>> for Borrowed<'a, T> {
-    fn eq(&self, other: &Borrowed<'b, T>) -> bool {
-        self.value.eq(other.value)
-    }
+    fn eq(&self, other: &Borrowed<'b, T>) -> bool { self.value.eq(other.value) }
 }
 
 impl<'a, 'b, T: 'a + PartialEq<T>> PartialEq<T> for Borrowed<'a, T> {
-    fn eq(&self, other: &T) -> bool {
-        self.value.eq(other)
-    }
+    fn eq(&self, other: &T) -> bool { self.value.eq(other) }
 }
 
 impl<'a, 'b, T: 'a + Eq> Eq for Borrowed<'a, T> {}
@@ -100,21 +96,15 @@ impl<'a, 'b, T: 'a + Eq> Eq for Borrowed<'a, T> {}
 impl<'a, T: 'a> Deref for Borrowed<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        self.value
-    }
+    fn deref(&self) -> &Self::Target { self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for Borrowed<'a, T> {
-    fn as_ref(&self) -> &T {
-        self.value
-    }
+    fn as_ref(&self) -> &T { self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for Borrowed<'a, T> {
-    fn borrow(&self) -> &T {
-        self.value
-    }
+    fn borrow(&self) -> &T { self.value }
 }
 
 /// Represents a piece of mutable runtime borrow checked data.
@@ -138,27 +128,19 @@ impl<'a, T: 'a> BorrowedMut<'a, T> {
 impl<'a, T: 'a> Deref for BorrowedMut<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target {
-        self.value
-    }
+    fn deref(&self) -> &Self::Target { self.value }
 }
 
 impl<'a, T: 'a> DerefMut for BorrowedMut<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.value
-    }
+    fn deref_mut(&mut self) -> &mut Self::Target { self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for BorrowedMut<'a, T> {
-    fn as_ref(&self) -> &T {
-        self.value
-    }
+    fn as_ref(&self) -> &T { self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for BorrowedMut<'a, T> {
-    fn borrow(&self) -> &T {
-        self.value
-    }
+    fn borrow(&self) -> &T { self.value }
 }
 
 impl<'a, 'b, T: 'a + Debug> Debug for BorrowedMut<'a, T> {
@@ -199,9 +181,7 @@ impl<'a, T: 'a> BorrowedSlice<'a, T> {
 impl<'a, T: 'a> Deref for BorrowedSlice<'a, T> {
     type Target = [T];
 
-    fn deref(&self) -> &Self::Target {
-        self.slice
-    }
+    fn deref(&self) -> &Self::Target { self.slice }
 }
 
 impl<'a, T: 'a> IntoIterator for BorrowedSlice<'a, T> {
@@ -210,7 +190,7 @@ impl<'a, T: 'a> IntoIterator for BorrowedSlice<'a, T> {
 
     fn into_iter(self) -> Self::IntoIter {
         BorrowedIter {
-            inner: self.slice.into_iter(),
+            inner: self.slice.iter(),
             state: self.state,
         }
     }
@@ -242,15 +222,11 @@ impl<'a, T: 'a> BorrowedMutSlice<'a, T> {
 impl<'a, T: 'a> Deref for BorrowedMutSlice<'a, T> {
     type Target = [T];
 
-    fn deref(&self) -> &Self::Target {
-        self.slice
-    }
+    fn deref(&self) -> &Self::Target { self.slice }
 }
 
 impl<'a, T: 'a> DerefMut for BorrowedMutSlice<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.slice
-    }
+    fn deref_mut(&mut self) -> &mut Self::Target { self.slice }
 }
 
 impl<'a, T: 'a> IntoIterator for BorrowedMutSlice<'a, T> {
@@ -259,7 +235,7 @@ impl<'a, T: 'a> IntoIterator for BorrowedMutSlice<'a, T> {
 
     fn into_iter(self) -> Self::IntoIter {
         BorrowedIter {
-            inner: self.slice.into_iter(),
+            inner: self.slice.iter_mut(),
             state: self.state,
         }
     }
@@ -276,13 +252,9 @@ pub struct BorrowedIter<'a, I: 'a + Iterator> {
 impl<'a, I: 'a + Iterator> Iterator for BorrowedIter<'a, I> {
     type Item = I::Item;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
-    }
+    fn next(&mut self) -> Option<Self::Item> { self.inner.next() }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.inner.size_hint()
-    }
+    fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
 }
 
 impl<'a, I: 'a + ExactSizeIterator> ExactSizeIterator for BorrowedIter<'a, I> {}

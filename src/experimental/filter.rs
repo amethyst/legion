@@ -77,9 +77,7 @@ impl FilterResult for Option<bool> {
     }
 
     #[inline]
-    fn is_pass(&self) -> bool {
-        self.unwrap_or(true)
-    }
+    fn is_pass(&self) -> bool { self.unwrap_or(true) }
 }
 
 pub trait Filter<'a, T: Copy> {
@@ -359,9 +357,7 @@ impl<'a> Filter<'a, ArchetypeFilterData<'a>> for Passthrough {
         std::iter::repeat(()).take(source.component_types.len())
     }
 
-    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> {
-        None
-    }
+    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<'a> Filter<'a, ChunkFilterData<'a>> for Passthrough {
@@ -371,36 +367,28 @@ impl<'a> Filter<'a, ChunkFilterData<'a>> for Passthrough {
         std::iter::repeat(()).take(source.archetype_data.len())
     }
 
-    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> {
-        None
-    }
+    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl std::ops::Not for Passthrough {
     type Output = Passthrough;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        self
-    }
+    fn not(self) -> Self::Output { self }
 }
 
 impl<'a, Rhs> std::ops::BitAnd<Rhs> for Passthrough {
     type Output = Rhs;
 
     #[inline]
-    fn bitand(self, rhs: Rhs) -> Self::Output {
-        rhs
-    }
+    fn bitand(self, rhs: Rhs) -> Self::Output { rhs }
 }
 
 impl<'a, Rhs> std::ops::BitOr<Rhs> for Passthrough {
     type Output = Rhs;
 
     #[inline]
-    fn bitor(self, rhs: Rhs) -> Self::Output {
-        rhs
-    }
+    fn bitor(self, rhs: Rhs) -> Self::Output { rhs }
 }
 
 #[derive(Debug)]
@@ -413,9 +401,7 @@ impl<F> ActiveFilter for Not<F> {}
 impl<'a, T: Copy, F: Filter<'a, T>> Filter<'a, T> for Not<F> {
     type Iter = F::Iter;
 
-    fn collect(&self, source: T) -> Self::Iter {
-        self.filter.collect(source)
-    }
+    fn collect(&self, source: T) -> Self::Iter { self.filter.collect(source) }
 
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         self.filter.is_match(item).map(|x| !x)
@@ -437,9 +423,7 @@ impl<'a, F> std::ops::BitAnd<Passthrough> for Not<F> {
     type Output = Self;
 
     #[inline]
-    fn bitand(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitand(self, _: Passthrough) -> Self::Output { self }
 }
 
 impl<'a, F, Rhs: ActiveFilter> std::ops::BitOr<Rhs> for Not<F> {
@@ -457,9 +441,7 @@ impl<'a, F> std::ops::BitOr<Passthrough> for Not<F> {
     type Output = Self;
 
     #[inline]
-    fn bitor(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
 #[derive(Debug)]
@@ -646,9 +628,7 @@ impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
 pub struct ComponentFilter<T>(PhantomData<T>);
 
 impl<T: Component> ComponentFilter<T> {
-    fn new() -> Self {
-        ComponentFilter(PhantomData)
-    }
+    fn new() -> Self { ComponentFilter(PhantomData) }
 }
 
 impl<T> ActiveFilter for ComponentFilter<T> {}
@@ -669,9 +649,7 @@ impl<T> std::ops::Not for ComponentFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, T, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for ComponentFilter<T> {
@@ -689,9 +667,7 @@ impl<'a, T> std::ops::BitAnd<Passthrough> for ComponentFilter<T> {
     type Output = Self;
 
     #[inline]
-    fn bitand(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitand(self, _: Passthrough) -> Self::Output { self }
 }
 
 impl<'a, T, Rhs: ActiveFilter> std::ops::BitOr<Rhs> for ComponentFilter<T> {
@@ -709,18 +685,14 @@ impl<'a, T> std::ops::BitOr<Passthrough> for ComponentFilter<T> {
     type Output = Self;
 
     #[inline]
-    fn bitor(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
 #[derive(Debug)]
 pub struct TagFilter<T>(PhantomData<T>);
 
 impl<T: Tag> TagFilter<T> {
-    fn new() -> Self {
-        TagFilter(PhantomData)
-    }
+    fn new() -> Self { TagFilter(PhantomData) }
 }
 
 impl<T> ActiveFilter for TagFilter<T> {}
@@ -728,9 +700,7 @@ impl<T> ActiveFilter for TagFilter<T> {}
 impl<'a, T: Tag> Filter<'a, ArchetypeFilterData<'a>> for TagFilter<T> {
     type Iter = SliceVecIter<'a, TagTypeId>;
 
-    fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
-        source.tag_types.iter()
-    }
+    fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter { source.tag_types.iter() }
 
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(item.contains(&TagTypeId::of::<T>()))
@@ -741,9 +711,7 @@ impl<T> std::ops::Not for TagFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, T, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for TagFilter<T> {
@@ -761,9 +729,7 @@ impl<'a, T> std::ops::BitAnd<Passthrough> for TagFilter<T> {
     type Output = Self;
 
     #[inline]
-    fn bitand(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitand(self, _: Passthrough) -> Self::Output { self }
 }
 
 impl<'a, T, Rhs: ActiveFilter> std::ops::BitOr<Rhs> for TagFilter<T> {
@@ -781,9 +747,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagFilter<T> {
     type Output = Self;
 
     #[inline]
-    fn bitor(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
 #[derive(Debug)]
@@ -792,9 +756,7 @@ pub struct TagValueFilter<'a, T> {
 }
 
 impl<'a, T: Tag> TagValueFilter<'a, T> {
-    fn new(value: &'a T) -> Self {
-        TagValueFilter { value }
-    }
+    fn new(value: &'a T) -> Self { TagValueFilter { value } }
 }
 
 impl<'a, T> ActiveFilter for TagValueFilter<'a, T> {}
@@ -806,7 +768,7 @@ impl<'a, 'b, T: Tag> Filter<'a, ChunkFilterData<'a>> for TagValueFilter<'b, T> {
         unsafe {
             source
                 .archetype_data
-                .tags(&TagTypeId::of::<T>())
+                .tags(TagTypeId::of::<T>())
                 .unwrap()
                 .data_slice::<T>()
                 .iter()
@@ -822,9 +784,7 @@ impl<'a, T> std::ops::Not for TagValueFilter<'a, T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, T, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for TagValueFilter<'a, T> {
@@ -842,9 +802,7 @@ impl<'a, T> std::ops::BitAnd<Passthrough> for TagValueFilter<'a, T> {
     type Output = Self;
 
     #[inline]
-    fn bitand(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitand(self, _: Passthrough) -> Self::Output { self }
 }
 
 impl<'a, T, Rhs: ActiveFilter> std::ops::BitOr<Rhs> for TagValueFilter<'a, T> {
@@ -862,9 +820,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagValueFilter<'a, T> {
     type Output = Self;
 
     #[inline]
-    fn bitor(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
 #[derive(Debug)]
@@ -893,7 +849,7 @@ impl<'a, T: Component> Filter<'a, ChunkFilterData<'a>> for ComponentChangedFilte
 
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         use std::collections::hash_map::Entry;
-        let components = item.components(&ComponentTypeId::of::<T>()).unwrap();
+        let components = item.components(ComponentTypeId::of::<T>()).unwrap();
         let version = components.version();
         match self.versions.entry(item.id()) {
             Entry::Occupied(mut entry) => Some(entry.insert(version) != version),
@@ -909,9 +865,7 @@ impl<'a, T: Component> std::ops::Not for ComponentChangedFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, T: Component, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for ComponentChangedFilter<T> {
@@ -929,9 +883,7 @@ impl<'a, T: Component> std::ops::BitAnd<Passthrough> for ComponentChangedFilter<
     type Output = Self;
 
     #[inline]
-    fn bitand(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitand(self, _: Passthrough) -> Self::Output { self }
 }
 
 impl<'a, T: Component, Rhs: ActiveFilter> std::ops::BitOr<Rhs> for ComponentChangedFilter<T> {
@@ -949,9 +901,7 @@ impl<'a, T: Component> std::ops::BitOr<Passthrough> for ComponentChangedFilter<T
     type Output = Self;
 
     #[inline]
-    fn bitor(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
 #[cfg(test)]

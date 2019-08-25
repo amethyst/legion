@@ -1,7 +1,9 @@
 use legion::prelude::*;
 use rayon::prelude::*;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 // use std::iter::FromIterator;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
