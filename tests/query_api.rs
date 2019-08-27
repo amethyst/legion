@@ -32,7 +32,7 @@ struct Static;
 //         ),
 //     >,
 // ) {
-//     let universe = Universe::new(None);
+//     let universe = Universe::new(None, None);
 //     let mut world = universe.create_world();
 //     let mut expected: HashMap<
 //         Entity,
@@ -95,7 +95,7 @@ struct Static;
 
 #[test]
 fn query_read_entity_data() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -129,7 +129,7 @@ fn query_read_entity_data() {
 
 #[test]
 fn query_cached_read_entity_data() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -163,7 +163,7 @@ fn query_cached_read_entity_data() {
 
 #[test]
 fn query_read_entity_data_par() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -198,7 +198,7 @@ fn query_read_entity_data_par() {
 
 #[test]
 fn query_read_entity_data_par_foreach() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -230,7 +230,7 @@ fn query_read_entity_data_par_foreach() {
 
 #[test]
 fn query_read_entity_data_tuple() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -265,7 +265,7 @@ fn query_read_entity_data_tuple() {
 
 #[test]
 fn query_write_entity_data() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -301,7 +301,7 @@ fn query_write_entity_data() {
 
 #[test]
 fn query_write_entity_data_tuple() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -339,7 +339,7 @@ fn query_write_entity_data_tuple() {
 
 #[test]
 fn query_mixed_entity_data_tuple() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -376,7 +376,7 @@ fn query_mixed_entity_data_tuple() {
 
 #[test]
 fn query_partial_match() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -413,7 +413,7 @@ fn query_partial_match() {
 
 #[test]
 fn query_read_shared_data() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -437,7 +437,7 @@ fn query_read_shared_data() {
 
 #[test]
 fn query_on_changed_first() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -471,7 +471,7 @@ fn query_on_changed_first() {
 
 #[test]
 fn query_on_changed_no_changes() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -513,7 +513,7 @@ fn query_on_changed_no_changes() {
 
 #[test]
 fn query_on_changed_self_changes() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));

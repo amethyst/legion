@@ -33,7 +33,7 @@ fn data(n: usize) -> Vec<(Position, Orientation, Scale, Transform)> {
 }
 
 fn setup(data: Vec<(Position, Orientation, Scale, Transform)>) -> World {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     world.insert_from((), data);

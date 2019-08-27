@@ -7,7 +7,7 @@ struct Vel(f32, f32, f32);
 
 fn main() {
     // create world
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     // create entities

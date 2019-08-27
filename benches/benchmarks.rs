@@ -77,7 +77,7 @@ fn add_background_entities(world: &mut World, count: usize) {
 }
 
 fn setup(n: usize) -> World {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     world.insert_from((), (0..n).map(|_| (Position(0.), Rotation(0.))));

@@ -18,7 +18,7 @@ struct Static;
 
 #[test]
 fn insert() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (1usize, 2f32, 3u16);
@@ -30,7 +30,7 @@ fn insert() {
 
 #[test]
 fn get_component() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -58,7 +58,7 @@ fn get_component() {
 
 #[test]
 fn get_component_wrong_type() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let entity = *world.insert_from((), vec![(0f64,)]).get(0).unwrap();
@@ -68,7 +68,7 @@ fn get_component_wrong_type() {
 
 #[test]
 fn get_shared() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -90,7 +90,7 @@ fn get_shared() {
 
 #[test]
 fn get_shared_wrong_type() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let entity = *world
@@ -103,7 +103,7 @@ fn get_shared_wrong_type() {
 
 #[test]
 fn delete() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -129,7 +129,7 @@ fn delete() {
 
 #[test]
 fn delete_last() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -162,7 +162,7 @@ fn delete_last() {
 
 #[test]
 fn delete_first() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -196,7 +196,7 @@ fn delete_first() {
 
 #[test]
 fn merge() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world_1 = universe.create_world();
     let mut world_2 = universe.create_world();
 
@@ -229,7 +229,7 @@ fn merge() {
 
 #[test]
 fn mutate_add_component() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5)).as_tags();
@@ -257,7 +257,7 @@ fn mutate_add_component() {
 
 #[test]
 fn mutate_remove_component() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5)).as_tags();
@@ -285,7 +285,7 @@ fn mutate_remove_component() {
 
 #[test]
 fn mutate_add_tag() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Model(5),).as_tags();
@@ -313,7 +313,7 @@ fn mutate_add_tag() {
 
 #[test]
 fn mutate_remove_tag() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Model(5), Static).as_tags();
@@ -341,7 +341,7 @@ fn mutate_remove_tag() {
 
 #[test]
 fn mutate_change_tag() {
-    let universe = Universe::new(None);
+    let universe = Universe::new(None, None);
     let mut world = universe.create_world();
 
     let shared = (Model(5),).as_tags();

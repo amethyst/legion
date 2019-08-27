@@ -1003,7 +1003,7 @@ where
 /// # struct Velocity;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Model;
-/// # let universe = Universe::new(None);
+/// # let universe = Universe::new(None, None);
 /// # let world = universe.create_world();
 /// // A query which writes `Position`, reads `Velocity` and reads `Model`
 /// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
@@ -1028,7 +1028,7 @@ where
 /// # struct Velocity;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Model;
-/// # let universe = Universe::new(None);
+/// # let universe = Universe::new(None, None);
 /// # let world = universe.create_world();
 /// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///

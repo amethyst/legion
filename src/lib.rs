@@ -29,7 +29,7 @@
 //! struct Static;
 //!
 //! // Create a world to store our entities
-//! let universe = Universe::new(None);
+//! let universe = Universe::new(None, None);
 //! let mut world = universe.create_world();
 //!
 //! // Create entities with `Position` and `Velocity` data
@@ -81,7 +81,7 @@
 //! # struct Model(usize);
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Static;
-//! # let universe = Universe::new(None);
+//! # let universe = Universe::new(None, None);
 //! # let mut world = universe.create_world();
 //! // It is possible to specify that entities must contain data beyond that being fetched
 //! let mut query = Read::<Position>::query()
@@ -109,7 +109,7 @@
 //! # struct Model(usize);
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Static;
-//! # let universe = Universe::new(None);
+//! # let universe = Universe::new(None, None);
 //! # let mut world = universe.create_world();
 //! // Filters can be combined with boolean operators
 //! let mut query = Read::<Position>::query()
@@ -137,7 +137,7 @@
 //! # struct Model(usize);
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Static;
-//! # let universe = Universe::new(None);
+//! # let universe = Universe::new(None, None);
 //! # let mut world = universe.create_world();
 //! // Filters can filter by specific tag values
 //! let mut query = Read::<Position>::query()
@@ -165,7 +165,7 @@
 //! # struct Model(usize);
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Static;
-//! # let universe = Universe::new(None);
+//! # let universe = Universe::new(None, None);
 //! # let mut world = universe.create_world();
 //! // Queries can perform coarse-grained change detection, rejecting entities who's data
 //! // has not changed since the last time the query was iterated.
@@ -183,7 +183,7 @@
 //!
 //! ```rust
 //! # use legion::prelude::*;
-//! let universe = Universe::new(None);
+//! let universe = Universe::new(None, None);
 //! let mut world_a = universe.create_world();
 //! let mut world_b = universe.create_world();
 //!
@@ -203,7 +203,7 @@
 //! # struct Transform;
 //! # #[derive(Clone, Copy, Debug, PartialEq)]
 //! # struct Model(usize);
-//! # let universe = Universe::new(None);
+//! # let universe = Universe::new(None, None);
 //! # let mut world = universe.create_world();
 //! fn render_instanced(model: &Model, transforms: &[Transform]) {
 //!     // pass `transforms` pointer to graphics API to load into constant buffer
@@ -669,7 +669,7 @@ impl World {
     /// # struct Position(f32);
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
     /// # struct Rotation(f32);
-    /// # let universe = Universe::new(None);
+    /// # let universe = Universe::new(None, None);
     /// # let mut world = universe.create_world();
     /// # let model = 0u8;
     /// # let color = 0u16;
@@ -794,7 +794,7 @@ impl World {
     /// # struct Position(f32);
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
     /// # struct Rotation(f32);
-    /// # let universe = Universe::new(None);
+    /// # let universe = Universe::new(None, None);
     /// # let mut world = universe.create_world();
     /// # let model = 0u8;
     /// # let color = 0u16;
@@ -1183,12 +1183,12 @@ mod tests {
 
     #[test]
     fn create_universe() {
-        Universe::new(None);
+        Universe::new(None, None);
     }
 
     #[test]
     fn create_world() {
-        let universe = Universe::new(None);
+        let universe = Universe::new(None, None);
         universe.create_world();
     }
 
@@ -1307,7 +1307,7 @@ mod tests {
 
     #[test]
     fn get_component_empty_world() {
-        let universe = Universe::new(None);
+        let universe = Universe::new(None, None);
         let world = universe.create_world();
 
         assert_eq!(None, world.component::<i32>(Entity::new(0, Wrapping(0))));
@@ -1315,7 +1315,7 @@ mod tests {
 
     #[test]
     fn get_shared_empty_world() {
-        let universe = Universe::new(None);
+        let universe = Universe::new(None, None);
         let world = universe.create_world();
 
         assert_eq!(None, world.tag::<i32>(Entity::new(0, Wrapping(0))));
