@@ -1,4 +1,5 @@
 use std::cell::UnsafeCell;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -16,11 +17,11 @@ impl<T> AtomicRefCell<T> {
         }
     }
 
-    pub fn get<'a>(&'a self) -> Ref<'a, T> {
-        self.try_get().unwrap()
-    }
+    #[inline(always)]
+    pub fn get<'a>(&'a self) -> Ref<'a, Shared, T> { self.try_get().unwrap() }
 
-    pub fn try_get<'a>(&'a self) -> Result<Ref<'a, T>, &'static str> {
+    #[cfg(debug_assertions)]
+    pub fn try_get<'a>(&'a self) -> Result<Ref<'a, Shared<'a>, T>, &'static str> {
         loop {
             let read = self.borrow_state.load(Ordering::SeqCst);
             if read < 0 {
@@ -36,317 +37,317 @@ impl<T> AtomicRefCell<T> {
             }
         }
 
-        Ok(Ref {
-            borrow: Borrow {
-                state: &self.borrow_state,
-            },
-            value: unsafe { &*self.value.get() },
-        })
+        Ok(Ref::new(Shared::new(&self.borrow_state), unsafe {
+            &*self.value.get()
+        }))
     }
 
-    pub fn get_mut<'a>(&'a self) -> RefMut<'a, T> {
-        self.try_get_mut().unwrap()
+    #[cfg(not(debug_assertions))]
+    #[inline(always)]
+    pub fn try_get<'a>(&'a self) -> Result<Ref<'a, Shared<'a>, T>, &'static str> {
+        Ok(Ref::new(Shared::new(&self.borrow_state), unsafe {
+            &*self.value.get()
+        }))
     }
 
-    pub fn try_get_mut<'a>(&'a self) -> Result<RefMut<'a, T>, &'static str> {
+    #[inline(always)]
+    pub fn get_mut<'a>(&'a self) -> RefMut<'a, Exclusive, T> { self.try_get_mut().unwrap() }
+
+    #[cfg(debug_assertions)]
+    pub fn try_get_mut<'a>(&'a self) -> Result<RefMut<'a, Exclusive<'a>, T>, &'static str> {
         let borrowed = self.borrow_state.compare_and_swap(0, -1, Ordering::SeqCst);
         match borrowed {
-            0 => Ok(RefMut {
-                borrow: BorrowMut {
-                    state: &self.borrow_state,
-                },
-                value: unsafe { &mut *self.value.get() },
-            }),
+            0 => Ok(RefMut::new(Exclusive::new(&self.borrow_state), unsafe {
+                &mut *self.value.get()
+            })),
             x if x < 0 => Err("resource already borrowed as mutable"),
             _ => Err("resource already borrowed as immutable"),
         }
     }
+
+    #[cfg(not(debug_assertions))]
+    #[inline(always)]
+    pub fn try_get_mut<'a>(&'a self) -> Result<RefMut<'a, Exclusive<'a>, T>, &'static str> {
+        Ok(RefMut::new(Exclusive::new(&self.borrow_state), unsafe {
+            &mut *self.value.get()
+        }))
+    }
+}
+
+pub trait UnsafeClone {
+    unsafe fn clone(&self) -> Self;
+}
+
+impl<A: UnsafeClone, B: UnsafeClone> UnsafeClone for (A, B) {
+    unsafe fn clone(&self) -> Self { (self.0.clone(), self.1.clone()) }
 }
 
 #[derive(Debug)]
-pub struct Borrow<'a> {
+pub struct Shared<'a> {
+    #[cfg(debug_assertions)]
     state: &'a AtomicIsize,
+    #[cfg(not(debug_assertions))]
+    state: PhantomData<&'a ()>,
 }
 
-impl<'a> Drop for Borrow<'a> {
+impl<'a> Shared<'a> {
+    #[cfg(debug_assertions)]
+    fn new(state: &'a AtomicIsize) -> Self { Self { state } }
+    #[cfg(not(debug_assertions))]
+    #[inline(always)]
+    fn new(_: &'a AtomicIsize) -> Self { Self { state: PhantomData } }
+}
+
+#[cfg(debug_assertions)]
+impl<'a> Drop for Shared<'a> {
     fn drop(&mut self) { self.state.fetch_sub(1, Ordering::SeqCst); }
 }
 
-impl<'a> Clone for Borrow<'a> {
+impl<'a> Clone for Shared<'a> {
     fn clone(&self) -> Self {
+        #[cfg(debug_assertions)]
         self.state.fetch_add(1, Ordering::SeqCst);
-        Borrow { state: self.state }
+        Shared { state: self.state }
+    }
+}
+
+impl<'a> UnsafeClone for Shared<'a> {
+    unsafe fn clone(&self) -> Self { std::clone::Clone::clone(&self) }
+}
+
+#[derive(Debug)]
+pub struct Exclusive<'a> {
+    #[cfg(debug_assertions)]
+    state: &'a AtomicIsize,
+    #[cfg(not(debug_assertions))]
+    state: PhantomData<&'a ()>,
+}
+
+impl<'a> Exclusive<'a> {
+    #[cfg(debug_assertions)]
+    fn new(state: &'a AtomicIsize) -> Self { Self { state } }
+    #[cfg(not(debug_assertions))]
+    #[inline(always)]
+    fn new(_: &'a AtomicIsize) -> Self { Self { state: PhantomData } }
+}
+
+#[cfg(debug_assertions)]
+impl<'a> Drop for Exclusive<'a> {
+    fn drop(&mut self) { self.state.fetch_add(1, Ordering::SeqCst); }
+}
+
+impl<'a> UnsafeClone for Exclusive<'a> {
+    unsafe fn clone(&self) -> Self {
+        #[cfg(debug_assertions)]
+        self.state.fetch_sub(1, Ordering::SeqCst);
+        Exclusive { state: self.state }
     }
 }
 
 #[derive(Debug)]
-pub struct BorrowMut<'a> {
-    state: &'a AtomicIsize,
-}
-
-impl<'a> Drop for BorrowMut<'a> {
-    fn drop(&mut self) { self.state.store(0, Ordering::SeqCst); }
-}
-
-#[derive(Debug)]
-pub struct Ref<'a, T: 'a> {
+pub struct Ref<'a, State: 'a, T: 'a> {
     #[allow(dead_code)]
     // held for drop impl
-    borrow: Borrow<'a>,
+    borrow: State,
     value: &'a T,
 }
 
-impl<'a, T: 'a> Clone for Ref<'a, T> {
-    fn clone(&self) -> Self {
-        Ref {
-            borrow: self.borrow.clone(),
-            value: self.value,
-        }
-    }
+impl<'a, State: 'a + Clone, T: 'a> Clone for Ref<'a, State, T> {
+    fn clone(&self) -> Self { Ref::new(self.borrow.clone(), self.value) }
 }
 
-impl<'a, T: 'a> Ref<'a, T> {
-    pub fn new(borrow: Borrow<'a>, value: &'a T) -> Self { Self { borrow, value } }
+impl<'a, State: 'a + Clone, T: 'a> Ref<'a, State, T> {
+    pub fn new(borrow: State, value: &'a T) -> Self { Self { borrow, value } }
 
-    pub fn map_into<K: 'a, F: FnMut(&T) -> K>(self, mut f: F) -> RefMap<'a, K> {
-        RefMap {
-            value: f(&self.value),
-            borrow: self.borrow,
-        }
+    pub fn map_into<K: 'a, F: FnMut(&'a T) -> K>(self, mut f: F) -> RefMap<'a, State, K> {
+        RefMap::new(self.borrow, f(&self.value))
     }
 
-    pub unsafe fn deconstruct(self) -> (Borrow<'a>, &'a T) { (self.borrow, self.value) }
+    pub fn map<K: 'a, F: FnMut(&T) -> &K>(&self, mut f: F) -> Ref<'a, State, K> {
+        Ref::new(self.borrow.clone(), f(&self.value))
+    }
+
+    pub unsafe fn deconstruct(self) -> (State, &'a T) { (self.borrow, self.value) }
 }
 
-impl<'a, T: 'a> Deref for Ref<'a, T> {
+impl<'a, State: 'a + Clone, T: 'a> Deref for Ref<'a, State, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target { self.value }
 }
 
-impl<'a, T: 'a> AsRef<T> for Ref<'a, T> {
+impl<'a, State: 'a + Clone, T: 'a> AsRef<T> for Ref<'a, State, T> {
     fn as_ref(&self) -> &T { self.value }
 }
 
-impl<'a, T: 'a> std::borrow::Borrow<T> for Ref<'a, T> {
+impl<'a, State: 'a + Clone, T: 'a> std::borrow::Borrow<T> for Ref<'a, State, T> {
     fn borrow(&self) -> &T { self.value }
 }
 
 #[derive(Debug)]
-pub struct RefMut<'a, T: 'a> {
+pub struct RefMut<'a, State: 'a + UnsafeClone, T: 'a> {
     #[allow(dead_code)]
     // held for drop impl
-    borrow: BorrowMut<'a>,
+    borrow: State,
     value: &'a mut T,
 }
 
-impl<'a, T: 'a> RefMut<'a, T> {
-    pub fn new(borrow: BorrowMut<'a>, value: &'a mut T) -> Self { Self { borrow, value } }
+impl<'a, State: 'a + UnsafeClone, T: 'a> RefMut<'a, State, T> {
+    pub fn new(borrow: State, value: &'a mut T) -> Self { Self { borrow, value } }
 
-    pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapMut<'a, K> {
-        RefMapMut {
-            value: f(&mut self.value),
-            borrow: self.borrow,
-        }
+    pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapMut<'a, State, K> {
+        RefMapMut::new(self.borrow, f(&mut self.value))
     }
 
-    pub unsafe fn deconstruct(self) -> (BorrowMut<'a>, &'a mut T) { (self.borrow, self.value) }
+    pub unsafe fn deconstruct(self) -> (State, &'a mut T) { (self.borrow, self.value) }
+
+    pub fn split<First, Rest, F: Fn(&'a mut T) -> (&'a mut First, &'a mut Rest)>(
+        self,
+        f: F,
+    ) -> (RefMut<'a, State, First>, RefMut<'a, State, Rest>) {
+        let (first, rest) = f(self.value);
+        (
+            RefMut::new(unsafe { self.borrow.clone() }, first),
+            RefMut::new(self.borrow, rest),
+        )
+    }
 }
 
-impl<'a, T: 'a> Deref for RefMut<'a, T> {
+impl<'a, State: 'a + UnsafeClone, T: 'a> Deref for RefMut<'a, State, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target { self.value }
 }
 
-impl<'a, T: 'a> DerefMut for RefMut<'a, T> {
+impl<'a, State: 'a + UnsafeClone, T: 'a> DerefMut for RefMut<'a, State, T> {
     fn deref_mut(&mut self) -> &mut Self::Target { self.value }
 }
 
-impl<'a, T: 'a> AsRef<T> for RefMut<'a, T> {
+impl<'a, State: 'a + UnsafeClone, T: 'a> AsRef<T> for RefMut<'a, State, T> {
     fn as_ref(&self) -> &T { self.value }
 }
 
-impl<'a, T: 'a> std::borrow::Borrow<T> for RefMut<'a, T> {
+impl<'a, State: 'a + UnsafeClone, T: 'a> std::borrow::Borrow<T> for RefMut<'a, State, T> {
     fn borrow(&self) -> &T { self.value }
 }
 
 #[derive(Debug)]
-pub struct RefMap<'a, T: 'a> {
+pub struct RefMap<'a, State: 'a + Clone, T: 'a> {
     #[allow(dead_code)]
     // held for drop impl
-    borrow: Borrow<'a>,
+    borrow: State,
     value: T,
+    _phantom: PhantomData<&'a State>,
 }
 
-impl<'a, T: 'a> RefMap<'a, T> {
-    pub fn new(borrow: Borrow<'a>, value: T) -> Self {
-        Self { borrow, value }
-    }
-
-    pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMap<'a, K> {
-        RefMap {
-            value: f(&mut self.value),
-            borrow: self.borrow,
+impl<'a, State: 'a + Clone, T: 'a> RefMap<'a, State, T> {
+    pub fn new(borrow: State, value: T) -> Self {
+        Self {
+            borrow,
+            value,
+            _phantom: PhantomData,
         }
     }
 
-    pub unsafe fn deconstruct(self) -> (Borrow<'a>, T) { (self.borrow, self.value) }
+    pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMap<'a, State, K> {
+        RefMap::new(self.borrow, f(&mut self.value))
+    }
+
+    pub unsafe fn deconstruct(self) -> (State, T) { (self.borrow, self.value) }
 }
 
-impl<'a, T: 'a> Deref for RefMap<'a, T> {
+impl<'a, State: 'a + Clone, T: 'a> Deref for RefMap<'a, State, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target { &self.value }
 }
 
-impl<'a, T: 'a> AsRef<T> for RefMap<'a, T> {
+impl<'a, State: 'a + Clone, T: 'a> AsRef<T> for RefMap<'a, State, T> {
     fn as_ref(&self) -> &T { &self.value }
 }
 
-impl<'a, T: 'a> std::borrow::Borrow<T> for RefMap<'a, T> {
+impl<'a, State: 'a + Clone, T: 'a> std::borrow::Borrow<T> for RefMap<'a, State, T> {
     fn borrow(&self) -> &T { &self.value }
 }
 
-impl<'a, I: 'a + Iterator> Iterator for RefMap<'a, I> {
-    type Item = I::Item;
+impl<'a, State: 'a + Clone, I: 'a + Iterator> Iterator for RefMap<'a, State, I> {
+    type Item = RefMap<'a, State, I::Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.value.next()
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.value.size_hint()
-    }
-}
-
-impl<'a, I: 'a + ExactSizeIterator> ExactSizeIterator for RefMap<'a, I> {}
-
-#[derive(Debug)]
-pub struct RefMapMut<'a, T: 'a> {
-    #[allow(dead_code)]
-    // held for drop impl
-    borrow: BorrowMut<'a>,
-    value: T,
-}
-
-impl<'a, T: 'a> RefMapMut<'a, T> {
-    pub fn new(borrow: BorrowMut<'a>, value: T) -> Self {
-        Self { borrow, value }
-    }
-
-    pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapMut<'a, K> {
-        RefMapMut {
-            value: f(&mut self.value),
-            borrow: self.borrow,
+        if let Some(item) = self.value.next() {
+            Some(RefMap::new(self.borrow.clone(), item))
+        } else {
+            None
         }
     }
 
-    pub unsafe fn deconstruct(self) -> (BorrowMut<'a>, T) { (self.borrow, self.value) }
+    fn size_hint(&self) -> (usize, Option<usize>) { self.value.size_hint() }
 }
 
-impl<'a, T: 'a> Deref for RefMapMut<'a, T> {
+impl<'a, State: 'a + Clone, I: 'a + ExactSizeIterator> ExactSizeIterator for RefMap<'a, State, I> {}
+
+#[derive(Debug)]
+pub struct RefMapMut<'a, State: 'a + UnsafeClone, T: 'a> {
+    #[allow(dead_code)]
+    // held for drop impl
+    borrow: State,
+    value: T,
+    _phantom: PhantomData<&'a State>,
+}
+
+impl<'a, State: 'a + UnsafeClone, T: 'a> RefMapMut<'a, State, T> {
+    pub fn new(borrow: State, value: T) -> Self {
+        Self {
+            borrow,
+            value,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapMut<'a, State, K> {
+        RefMapMut {
+            value: f(&mut self.value),
+            borrow: self.borrow,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub unsafe fn deconstruct(self) -> (State, T) { (self.borrow, self.value) }
+}
+
+impl<'a, State: 'a + UnsafeClone, T: 'a> Deref for RefMapMut<'a, State, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target { &self.value }
 }
 
-impl<'a, T: 'a> DerefMut for RefMapMut<'a, T> {
+impl<'a, State: 'a + UnsafeClone, T: 'a> DerefMut for RefMapMut<'a, State, T> {
     fn deref_mut(&mut self) -> &mut Self::Target { &mut self.value }
 }
 
-impl<'a, T: 'a> AsRef<T> for RefMapMut<'a, T> {
+impl<'a, State: 'a + UnsafeClone, T: 'a> AsRef<T> for RefMapMut<'a, State, T> {
     fn as_ref(&self) -> &T { &self.value }
 }
 
-impl<'a, T: 'a> std::borrow::Borrow<T> for RefMapMut<'a, T> {
+impl<'a, State: 'a + UnsafeClone, T: 'a> std::borrow::Borrow<T> for RefMapMut<'a, State, T> {
     fn borrow(&self) -> &T { &self.value }
 }
 
-impl<'a, I: 'a + Iterator> Iterator for RefMapMut<'a, I> {
-    type Item = I::Item;
+impl<'a, State: 'a + UnsafeClone, I: 'a + Iterator> Iterator for RefMapMut<'a, State, I> {
+    type Item = RefMapMut<'a, State, I::Item>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.value.next()
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.value.size_hint()
-    }
-}
-
-impl<'a, I: 'a + ExactSizeIterator> ExactSizeIterator for RefMapMut<'a, I> {}
-
-#[derive(Debug)]
-pub struct ComponentRef<'a, 'b: 'a, T: 'b> {
-    #[allow(dead_code)]
-    // held for drop impl
-    arch_borrow: Borrow<'a>,
-    #[allow(dead_code)]
-    // held for drop impl
-    chunk_borrow: Borrow<'b>,
-    value: &'b T,
-}
-
-impl<'a, 'b: 'a, T: 'b> ComponentRef<'a, 'b, T> {
-    pub fn new(arch_borrow: Borrow<'a>, chunk_borrow: Borrow<'b>, value: &'b T) -> Self {
-        Self {
-            arch_borrow,
-            chunk_borrow,
-            value,
+        if let Some(item) = self.value.next() {
+            Some(RefMapMut::new(unsafe { self.borrow.clone() }, item))
+        } else {
+            None
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) { self.value.size_hint() }
 }
 
-impl<'a, 'b: 'a, T: 'b> Deref for ComponentRef<'a, 'b, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target { self.value }
-}
-
-impl<'a, 'b: 'a, T: 'b> AsRef<T> for ComponentRef<'a, 'b, T> {
-    fn as_ref(&self) -> &T { self.value }
-}
-
-impl<'a, 'b: 'a, T: 'b> std::borrow::Borrow<T> for ComponentRef<'a, 'b, T> {
-    fn borrow(&self) -> &T { self.value }
-}
-
-#[derive(Debug)]
-pub struct ComponentRefMut<'a, 'b: 'a, T: 'b> {
-    #[allow(dead_code)]
-    // held for drop impl
-    arch_borrow: Borrow<'a>,
-    #[allow(dead_code)]
-    // held for drop impl
-    chunk_borrow: BorrowMut<'b>,
-    value: &'b mut T,
-}
-
-impl<'a, 'b: 'a, T: 'b> ComponentRefMut<'a, 'b, T> {
-    pub fn new(arch_borrow: Borrow<'a>, chunk_borrow: BorrowMut<'b>, value: &'b mut T) -> Self {
-        Self {
-            arch_borrow,
-            chunk_borrow,
-            value,
-        }
-    }
-}
-
-impl<'a, 'b: 'a, T: 'b> Deref for ComponentRefMut<'a, 'b, T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target { self.value }
-}
-
-impl<'a, 'b: 'a, T: 'b> DerefMut for ComponentRefMut<'a, 'b, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target { self.value }
-}
-
-impl<'a, 'b: 'a, T: 'b> AsRef<T> for ComponentRefMut<'a, 'b, T> {
-    fn as_ref(&self) -> &T { self.value }
-}
-
-impl<'a, 'b: 'a, T: 'b> std::borrow::Borrow<T> for ComponentRefMut<'a, 'b, T> {
-    fn borrow(&self) -> &T { self.value }
+impl<'a, State: 'a + UnsafeClone, I: 'a + ExactSizeIterator> ExactSizeIterator
+    for RefMapMut<'a, State, I>
+{
 }

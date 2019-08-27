@@ -1,5 +1,4 @@
-use crate::experimental::borrow::Borrow;
-use crate::experimental::borrow::Ref;
+use crate::experimental::borrow::Shared;
 use crate::experimental::storage::ArchetypeData;
 use crate::experimental::storage::ArchetypeId;
 use crate::experimental::storage::ChunkId;
@@ -12,7 +11,6 @@ use crate::experimental::storage::Storage;
 use crate::experimental::storage::Tag;
 use crate::experimental::storage::TagTypeId;
 use crate::experimental::storage::TagTypes;
-use crate::experimental::world::World;
 use std::collections::HashMap;
 use std::iter::Enumerate;
 use std::iter::Repeat;
@@ -80,7 +78,7 @@ impl FilterResult for Option<bool> {
     fn is_pass(&self) -> bool { self.unwrap_or(true) }
 }
 
-pub trait Filter<'a, T: Copy> {
+pub trait Filter<T: Copy> {
     type Iter: Iterator;
 
     fn collect(&self, source: T) -> Self::Iter;
@@ -101,8 +99,8 @@ pub struct ChunkFilterData<'a> {
 pub trait ActiveFilter {}
 
 pub trait EntityFilter {
-    type ArchetypeFilter: for<'a> Filter<'a, ArchetypeFilterData<'a>>;
-    type ChunkFilter: for<'a> Filter<'a, ChunkFilterData<'a>>;
+    type ArchetypeFilter: for<'a> Filter<ArchetypeFilterData<'a>>;
+    type ChunkFilter: for<'a> Filter<ChunkFilterData<'a>>;
 
     fn filters(&mut self) -> (&mut Self::ArchetypeFilter, &mut Self::ChunkFilter);
 
@@ -130,8 +128,8 @@ pub struct EntityFilterTuple<A, C> {
 
 impl<A, C> EntityFilterTuple<A, C>
 where
-    A: for<'a> Filter<'a, ArchetypeFilterData<'a>>,
-    C: for<'a> Filter<'a, ChunkFilterData<'a>>,
+    A: for<'a> Filter<ArchetypeFilterData<'a>>,
+    C: for<'a> Filter<ChunkFilterData<'a>>,
 {
     pub fn new(arch_filter: A, chunk_filter: C) -> Self {
         Self {
@@ -143,8 +141,8 @@ where
 
 impl<A, C> EntityFilter for EntityFilterTuple<A, C>
 where
-    A: for<'a> Filter<'a, ArchetypeFilterData<'a>>,
-    C: for<'a> Filter<'a, ChunkFilterData<'a>>,
+    A: for<'a> Filter<ArchetypeFilterData<'a>>,
+    C: for<'a> Filter<ChunkFilterData<'a>>,
 {
     type ArchetypeFilter = A;
     type ChunkFilter = C;
@@ -192,7 +190,7 @@ where
 
         let iter = self.arch_filter.collect(data).enumerate();
         FilterEntityIter {
-            storage: storage,
+            storage,
             arch_filter: &mut self.arch_filter,
             chunk_filter: &mut self.chunk_filter,
             archetypes: iter,
@@ -249,12 +247,12 @@ where
     }
 }
 
-pub struct FilterArchIter<'a, 'b, F: Filter<'a, ArchetypeFilterData<'a>>> {
+pub struct FilterArchIter<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> {
     filter: &'b mut F,
     archetypes: Enumerate<F::Iter>,
 }
 
-impl<'a, 'b, F: Filter<'a, ArchetypeFilterData<'a>>> Iterator for FilterArchIter<'a, 'b, F> {
+impl<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> Iterator for FilterArchIter<'a, 'b, F> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -268,12 +266,12 @@ impl<'a, 'b, F: Filter<'a, ArchetypeFilterData<'a>>> Iterator for FilterArchIter
     }
 }
 
-pub struct FilterChunkIter<'a, 'b, F: Filter<'a, ChunkFilterData<'a>>> {
+pub struct FilterChunkIter<'a, 'b, F: Filter<ChunkFilterData<'a>>> {
     filter: &'b mut F,
     chunks: Enumerate<F::Iter>,
 }
 
-impl<'a, 'b, F: Filter<'a, ChunkFilterData<'a>>> Iterator for FilterChunkIter<'a, 'b, F> {
+impl<'a, 'b, F: Filter<ChunkFilterData<'a>>> Iterator for FilterChunkIter<'a, 'b, F> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -290,25 +288,25 @@ impl<'a, 'b, F: Filter<'a, ChunkFilterData<'a>>> Iterator for FilterChunkIter<'a
 pub struct FilterEntityIter<
     'a,
     'b,
-    Arch: Filter<'a, ArchetypeFilterData<'a>>,
-    Chunk: Filter<'a, ChunkFilterData<'a>>,
+    Arch: Filter<ArchetypeFilterData<'a>>,
+    Chunk: Filter<ChunkFilterData<'a>>,
 > {
     storage: &'a Storage,
     arch_filter: &'b mut Arch,
     chunk_filter: &'b mut Chunk,
     archetypes: Enumerate<Arch::Iter>,
-    chunks: Option<(ArchetypeId, Borrow<'a>, Enumerate<Chunk::Iter>)>,
+    chunks: Option<(ArchetypeId, Shared<'a>, Enumerate<Chunk::Iter>)>,
 }
 
-impl<'a, 'b, Arch: Filter<'a, ArchetypeFilterData<'a>>, Chunk: Filter<'a, ChunkFilterData<'a>>>
-    Iterator for FilterEntityIter<'a, 'b, Arch, Chunk>
+impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunkFilterData<'a>>> Iterator
+    for FilterEntityIter<'a, 'b, Arch, Chunk>
 {
     type Item = ChunkId;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some((arch_id, _, ref mut chunks)) = self.chunks {
-                while let Some((chunk_index, chunk_data)) = chunks.next() {
+                for (chunk_index, chunk_data) in chunks {
                     if self.chunk_filter.is_match(&chunk_data).is_pass() {
                         return Some(ChunkId::new(arch_id, chunk_index));
                     }
@@ -350,7 +348,7 @@ impl<'a, 'b, Arch: Filter<'a, ArchetypeFilterData<'a>>, Chunk: Filter<'a, ChunkF
 #[derive(Debug)]
 pub struct Passthrough;
 
-impl<'a> Filter<'a, ArchetypeFilterData<'a>> for Passthrough {
+impl<'a> Filter<ArchetypeFilterData<'a>> for Passthrough {
     type Iter = Take<Repeat<()>>;
 
     fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
@@ -360,7 +358,7 @@ impl<'a> Filter<'a, ArchetypeFilterData<'a>> for Passthrough {
     fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
-impl<'a> Filter<'a, ChunkFilterData<'a>> for Passthrough {
+impl<'a> Filter<ChunkFilterData<'a>> for Passthrough {
     type Iter = Take<Repeat<()>>;
 
     fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {
@@ -398,7 +396,7 @@ pub struct Not<F> {
 
 impl<F> ActiveFilter for Not<F> {}
 
-impl<'a, T: Copy, F: Filter<'a, T>> Filter<'a, T> for Not<F> {
+impl<'a, T: Copy, F: Filter<T>> Filter<T> for Not<F> {
     type Iter = F::Iter;
 
     fn collect(&self, source: T) -> Self::Iter { self.filter.collect(source) }
@@ -453,7 +451,7 @@ macro_rules! impl_and_filter {
     ( $( $ty: ident => $ty2: ident ),* ) => {
         impl<$( $ty ),*> ActiveFilter for And<($( $ty, )*)> {}
 
-        impl<'a, T: Copy, $( $ty: Filter<'a, T> ),*> Filter<'a, T> for And<($( $ty, )*)> {
+        impl<'a, T: Copy, $( $ty: Filter<T> ),*> Filter<T> for And<($( $ty, )*)> {
             type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
 
             fn collect(&self, source: T) -> Self::Iter {
@@ -543,7 +541,7 @@ macro_rules! impl_or_filter {
     ( $( $ty: ident => $ty2: ident ),* ) => {
         impl<$( $ty ),*> ActiveFilter for Or<($( $ty, )*)> {}
 
-        impl<'a, T: Copy, $( $ty: Filter<'a, T> ),*> Filter<'a, T> for Or<($( $ty, )*)> {
+        impl<'a, T: Copy, $( $ty: Filter<T> ),*> Filter<T> for Or<($( $ty, )*)> {
             type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
 
             fn collect(&self, source: T) -> Self::Iter {
@@ -633,7 +631,7 @@ impl<T: Component> ComponentFilter<T> {
 
 impl<T> ActiveFilter for ComponentFilter<T> {}
 
-impl<'a, T: Component> Filter<'a, ArchetypeFilterData<'a>> for ComponentFilter<T> {
+impl<'a, T: Component> Filter<ArchetypeFilterData<'a>> for ComponentFilter<T> {
     type Iter = SliceVecIter<'a, ComponentTypeId>;
 
     fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
@@ -697,7 +695,7 @@ impl<T: Tag> TagFilter<T> {
 
 impl<T> ActiveFilter for TagFilter<T> {}
 
-impl<'a, T: Tag> Filter<'a, ArchetypeFilterData<'a>> for TagFilter<T> {
+impl<'a, T: Tag> Filter<ArchetypeFilterData<'a>> for TagFilter<T> {
     type Iter = SliceVecIter<'a, TagTypeId>;
 
     fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter { source.tag_types.iter() }
@@ -761,7 +759,7 @@ impl<'a, T: Tag> TagValueFilter<'a, T> {
 
 impl<'a, T> ActiveFilter for TagValueFilter<'a, T> {}
 
-impl<'a, 'b, T: Tag> Filter<'a, ChunkFilterData<'a>> for TagValueFilter<'b, T> {
+impl<'a, 'b, T: Tag> Filter<ChunkFilterData<'a>> for TagValueFilter<'b, T> {
     type Iter = Iter<'a, T>;
 
     fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {
@@ -840,7 +838,7 @@ impl<T: Component> ComponentChangedFilter<T> {
 
 impl<T: Component> ActiveFilter for ComponentChangedFilter<T> {}
 
-impl<'a, T: Component> Filter<'a, ChunkFilterData<'a>> for ComponentChangedFilter<T> {
+impl<'a, T: Component> Filter<ChunkFilterData<'a>> for ComponentChangedFilter<T> {
     type Iter = Iter<'a, ComponentStorage>;
 
     fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {
@@ -907,7 +905,6 @@ impl<'a, T: Component> std::ops::BitOr<Passthrough> for ComponentChangedFilter<T
 #[cfg(test)]
 mod test {
     use super::filter_fns::*;
-    use super::*;
 
     #[test]
     pub fn create() {

@@ -1,17 +1,19 @@
-use crate::experimental::borrow::Borrow;
+use crate::experimental::borrow::Exclusive;
 use crate::experimental::borrow::Ref;
 use crate::experimental::borrow::RefMap;
 use crate::experimental::borrow::RefMapMut;
+use crate::experimental::borrow::Shared;
 use crate::experimental::entity::Entity;
-use crate::experimental::filter::And;
 use crate::experimental::filter::ArchetypeFilterData;
 use crate::experimental::filter::ChunkFilterData;
+use crate::experimental::filter::ComponentFilter;
 use crate::experimental::filter::EntityFilter;
+use crate::experimental::filter::EntityFilterTuple;
 use crate::experimental::filter::Filter;
-use crate::experimental::filter::FilterEntityIter;
+use crate::experimental::filter::FilterResult;
+use crate::experimental::filter::Passthrough;
+use crate::experimental::filter::TagFilter;
 use crate::experimental::storage::ArchetypeData;
-use crate::experimental::storage::ArchetypeId;
-use crate::experimental::storage::ChunkId;
 use crate::experimental::storage::Component;
 use crate::experimental::storage::ComponentStorage;
 use crate::experimental::storage::ComponentTypeId;
@@ -26,7 +28,6 @@ use std::iter::Take;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::slice::Iter;
-use std::slice::IterMut;
 
 /// A type which can fetch a strongly-typed view of the data contained
 /// within a `Chunk`.
@@ -36,8 +37,8 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
 
     /// Pulls data out of a chunk.
     fn fetch(
-        archetype: &'a ArchetypeData,
-        chunk: &'a ComponentStorage,
+        archetype: Ref<'a, Shared, ArchetypeData>,
+        chunk: Ref<'a, Shared, ComponentStorage>,
         chunk_index: usize,
     ) -> Self::Iter;
 
@@ -51,39 +52,73 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
     fn writes<T: Component>() -> bool;
 }
 
+/// A type which can construct a default entity filter.
+pub trait DefaultFilter {
+    /// The type of entity filter constructed.
+    type Filter: EntityFilter;
+
+    /// constructs an entity filter.
+    fn filter() -> Self::Filter;
+}
+
 #[doc(hidden)]
 pub trait ViewElement {
     type Component;
+}
+
+/// Converts a `View` into a `Query`.
+pub trait IntoQuery: DefaultFilter + for<'a> View<'a> {
+    /// Converts the `View` type into a `Query`.
+    fn query() -> Query<Self, <Self as DefaultFilter>::Filter>;
+}
+
+impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
+    fn query() -> Query<Self, <Self as DefaultFilter>::Filter> {
+        if !Self::validate() {
+            panic!("invalid view, please ensure the view contains no duplicate component types");
+        }
+
+        Query {
+            view: PhantomData,
+            filter: Self::filter(),
+        }
+    }
 }
 
 /// Reads a single entity data component type from a `Chunk`.
 #[derive(Debug)]
 pub struct Read<T: Component>(PhantomData<T>);
 
-impl<'a, T: Component> View<'a> for Read<T> {
-    type Iter = RefMap<'a, Iter<'a, T>>;
+impl<'a, T: Component> DefaultFilter for Read<T> {
+    type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough>;
 
-    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
-        unsafe {
+    fn filter() -> Self::Filter { super::filter::filter_fns::component() }
+}
+
+impl<'a, T: Component> View<'a> for Read<T> {
+    type Iter = RefMap<'a, (Shared<'a>, Shared<'a>), Iter<'a, T>>;
+
+    fn fetch(
+        _: Ref<'a, Shared, ArchetypeData>,
+        chunk: Ref<'a, Shared, ComponentStorage>,
+        _: usize,
+    ) -> Self::Iter {
+        let (arch_borrow, chunk) = unsafe { chunk.deconstruct() };
+        let (slice_borrow, slice) = unsafe {
             chunk
-                .components(&ComponentTypeId::of::<T>())
+                .components(ComponentTypeId::of::<T>())
                 .unwrap()
                 .data_slice::<T>()
-                .map_into(|x| x.iter())
-        }
+                .deconstruct()
+        };
+        RefMap::new((arch_borrow, slice_borrow), slice.iter())
     }
 
-    fn validate() -> bool {
-        true
-    }
+    fn validate() -> bool { true }
 
-    fn reads<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
-    fn writes<D: Component>() -> bool {
-        false
-    }
+    fn writes<D: Component>() -> bool { false }
 }
 
 impl<T: Component> ViewElement for Read<T> {
@@ -94,32 +129,36 @@ impl<T: Component> ViewElement for Read<T> {
 #[derive(Debug)]
 pub struct Write<T: Component>(PhantomData<T>);
 
-impl<'a, T: Component> View<'a> for Write<T> {
-    type Iter = RefMapMut<'a, IterMut<'a, T>>;
+impl<'a, T: Component> DefaultFilter for Write<T> {
+    type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough>;
 
-    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
-        unsafe {
-            let (borrow, slice) = chunk
-                .components(&ComponentTypeId::of::<T>())
+    fn filter() -> Self::Filter { super::filter::filter_fns::component() }
+}
+
+impl<'a, T: Component> View<'a> for Write<T> {
+    type Iter = RefMapMut<'a, (Shared<'a>, Exclusive<'a>), Iter<'a, T>>;
+
+    fn fetch(
+        _: Ref<'a, Shared, ArchetypeData>,
+        chunk: Ref<'a, Shared, ComponentStorage>,
+        _: usize,
+    ) -> Self::Iter {
+        let (arch_borrow, chunk) = unsafe { chunk.deconstruct() };
+        let (slice_borrow, slice) = unsafe {
+            chunk
+                .components(ComponentTypeId::of::<T>())
                 .unwrap()
                 .data_slice_mut::<T>()
-                .deconstruct();
-
-            RefMapMut::new(borrow, slice.iter_mut())
-        }
+                .deconstruct()
+        };
+        RefMapMut::new((arch_borrow, slice_borrow), slice.iter())
     }
 
-    fn validate() -> bool {
-        true
-    }
+    fn validate() -> bool { true }
 
-    fn reads<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
-    fn writes<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 }
 
 impl<T: Component> ViewElement for Write<T> {
@@ -130,35 +169,35 @@ impl<T: Component> ViewElement for Write<T> {
 #[derive(Debug)]
 pub struct Tagged<T: Tag>(PhantomData<T>);
 
+impl<'a, T: Tag> DefaultFilter for Tagged<T> {
+    type Filter = EntityFilterTuple<TagFilter<T>, Passthrough>;
+
+    fn filter() -> Self::Filter { super::filter::filter_fns::tag() }
+}
+
 impl<'a, T: Tag> View<'a> for Tagged<T> {
-    type Iter = Take<Repeat<&'a T>>;
+    type Iter = Take<Repeat<Ref<'a, Shared<'a>, T>>>;
 
     fn fetch(
-        archetype: &'a ArchetypeData,
-        chunk: &'a ComponentStorage,
+        archetype: Ref<'a, Shared, ArchetypeData>,
+        chunk: Ref<'a, Shared, ComponentStorage>,
         chunk_index: usize,
     ) -> Self::Iter {
+        let (arch_borrow, arch) = unsafe { archetype.deconstruct() };
         let data = unsafe {
-            archetype
-                .tags(&TagTypeId::of::<T>())
+            arch.tags(TagTypeId::of::<T>())
                 .unwrap()
                 .data_slice::<T>()
                 .get_unchecked(chunk_index)
         };
-        std::iter::repeat(data).take(chunk.len())
+        std::iter::repeat(Ref::new(arch_borrow, data)).take(chunk.len())
     }
 
-    fn validate() -> bool {
-        true
-    }
+    fn validate() -> bool { true }
 
-    fn reads<D: Component>() -> bool {
-        false
-    }
+    fn reads<D: Component>() -> bool { false }
 
-    fn writes<D: Component>() -> bool {
-        false
-    }
+    fn writes<D: Component>() -> bool { false }
 }
 
 impl<T: Tag> ViewElement for Tagged<T> {
@@ -171,11 +210,11 @@ macro_rules! impl_view_tuple {
             type Iter = itertools::Zip<($( $ty::Iter, )*)>;
 
             fn fetch(
-                archetype: &'a ArchetypeData,
-                chunk: &'a ComponentStorage,
+                archetype: Ref<'a, Shared, ArchetypeData>,
+                chunk: Ref<'a, Shared, ComponentStorage>,
                 chunk_index: usize,
             ) -> Self::Iter {
-                itertools::multizip(($( $ty::fetch(archetype, chunk, chunk_index), )*))
+                itertools::multizip(($( $ty::fetch(archetype.clone(), chunk.clone(), chunk_index), )*))
             }
 
             fn validate() -> bool {
@@ -211,18 +250,17 @@ impl_view_tuple!(A, B, C, D, E, F);
 
 /// A type-safe view of a "chunk" of entities.
 pub struct Chunk<'a, V: for<'b> View<'b>> {
-    archetype: Ref<'a, ArchetypeData>,
-    components: &'a ComponentStorage,
+    archetype: Ref<'a, Shared<'a>, ArchetypeData>,
+    components: Ref<'a, Shared<'a>, ComponentStorage>,
     index: usize,
     view: PhantomData<V>,
 }
 
 impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
-    pub fn new(archetype: Ref<'a, ArchetypeData>, index: usize) -> Self {
-        let (borrow, arch) = unsafe { archetype.deconstruct() };
+    pub fn new(archetype: Ref<'a, Shared, ArchetypeData>, index: usize) -> Self {
         Self {
-            archetype: Ref::new(borrow, arch),
-            components: arch.component_chunk(index).unwrap(),
+            components: archetype.map(|arch| arch.component_chunk(index).unwrap()),
+            archetype,
             index,
             view: PhantomData,
         }
@@ -230,22 +268,22 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
 
     /// Get a slice of all entities contained within the chunk.
     #[inline]
-    pub fn entities(&self) -> &'a [Entity] {
-        self.components.entities()
+    pub fn entities(&self) -> RefMap<'a, Shared<'a>, &'a [Entity]> {
+        self.components.clone().map_into(|c| c.entities())
     }
 
     /// Get an iterator of all data contained within the chunk.
     #[inline]
-    pub fn iter<'b: 'a>(&'b mut self) -> <V as View<'b>>::Iter {
-        V::fetch(self.archetype.deref(), self.components, self.index)
+    pub fn iter(&mut self) -> <V as View<'a>>::Iter {
+        V::fetch(self.archetype.clone(), self.components.clone(), self.index)
     }
 
     /// Get an iterator of all data and entity IDs contained within the chunk.
     #[inline]
-    pub fn iter_entities<'b: 'a>(&'b mut self) -> ZipEntities<'b, V> {
+    pub fn iter_entities(&mut self) -> ZipEntities<'a, V> {
         ZipEntities {
             entities: self.entities(),
-            data: V::fetch(self.archetype.deref(), self.components, self.index),
+            data: V::fetch(self.archetype.clone(), self.components.clone(), self.index),
             index: 0,
             view: PhantomData,
         }
@@ -254,7 +292,7 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
     /// Get a tag value.
     pub fn tag<T: Tag>(&self) -> Option<&T> {
         self.archetype
-            .tags(&TagTypeId::of::<T>())
+            .tags(TagTypeId::of::<T>())
             .map(|tags| unsafe { tags.data_slice::<T>() })
             .map(|slice| unsafe { slice.get_unchecked(self.index) })
     }
@@ -265,15 +303,15 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
     ///
     /// This method performs runtime borrow checking. It will panic if
     /// any other code is concurrently writing to the data slice.
-    pub fn components<T: Component>(&self) -> Option<RefMap<'a, &[T]>> {
+    pub fn components<T: Component>(&self) -> Option<RefMap<'a, (Shared<'a>, Shared<'a>), &[T]>> {
         if !V::reads::<T>() {
             panic!("data type not readable via this query");
         }
-        unsafe {
-            self.components
-                .components(&ComponentTypeId::of::<T>())
-                .map(|components| components.data_slice::<T>())
-        }
+        let (arch_borrow, components) = unsafe { self.components.clone().deconstruct() };
+        components.components(ComponentTypeId::of::<T>()).map(|c| {
+            let (comp_borrow, slice) = unsafe { c.data_slice::<T>().deconstruct() };
+            RefMap::new((arch_borrow, comp_borrow), slice)
+        })
     }
 
     /// Get a mutable slice of component data.
@@ -282,21 +320,23 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
     ///
     /// This method performs runtime borrow checking. It will panic if
     /// any other code is concurrently accessing the data slice.
-    pub fn components_mut<T: Component>(&self) -> Option<RefMapMut<'a, &mut [T]>> {
+    pub fn components_mut<T: Component>(
+        &self,
+    ) -> Option<RefMapMut<'a, (Shared<'a>, Exclusive<'a>), &mut [T]>> {
         if !V::writes::<T>() {
             panic!("data type not writable via this query");
         }
-        unsafe {
-            self.components
-                .components(&ComponentTypeId::of::<T>())
-                .map(|components| components.data_slice_mut::<T>())
-        }
+        let (arch_borrow, components) = unsafe { self.components.clone().deconstruct() };
+        components.components(ComponentTypeId::of::<T>()).map(|c| {
+            let (comp_borrow, slice) = unsafe { c.data_slice_mut::<T>().deconstruct() };
+            RefMapMut::new((arch_borrow, comp_borrow), slice)
+        })
     }
 }
 
 /// An iterator which yields view data tuples and entity IDs from a `Chunk`.
 pub struct ZipEntities<'data, V: View<'data>> {
-    entities: &'data [Entity],
+    entities: RefMap<'data, Shared<'data>, &'data [Entity]>,
     data: <V as View<'data>>::Iter,
     index: usize,
     view: PhantomData<V>,
@@ -323,67 +363,142 @@ impl<'data, V: View<'data>> Iterator for ZipEntities<'data, V> {
     }
 }
 
-pub struct ChunkViewIter<'data, V: for<'a> View<'a>, I: Iterator<Item = ChunkId>> {
-    iter: I,
-    storage: &'data Storage,
-    current_archetype: Option<(ArchetypeId, Ref<'data, ArchetypeData>)>,
-    view: PhantomData<V>,
-}
-
-impl<'data, V: for<'a> View<'a>, I: Iterator<Item = ChunkId>> Iterator
-    for ChunkViewIter<'data, V, I>
-{
-    type Item = Chunk<'data, V>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(chunk_id) = self.iter.next() {
-            if self
-                .current_archetype
-                .as_ref()
-                .map_or(true, |(archetype_id, _)| {
-                    *archetype_id != chunk_id.archetype_id()
-                })
-            {
-                let id = chunk_id.archetype_id();
-                let arch = self.storage.data(id.index()).unwrap().deref().get();
-                self.current_archetype = Some((id, arch));
-            }
-
-            if let Some((_, archetype)) = &self.current_archetype {
-                return Some(Chunk::new(archetype.clone(), chunk_id.index()));
-            }
-        }
-
-        None
-    }
-}
-
-pub struct ChunkViewIter2<
+pub struct ChunkViewIter<
     'data,
     'filter,
-    Arch: Filter<'data, ArchetypeFilterData<'data>>,
-    Chunk: Filter<'data, ChunkFilterData<'data>>,
+    V: for<'a> View<'a>,
+    Arch: Filter<ArchetypeFilterData<'data>>,
+    Chunk: Filter<ChunkFilterData<'data>>,
 > {
+    _view: PhantomData<V>,
     storage: &'data Storage,
     arch_filter: &'filter mut Arch,
     chunk_filter: &'filter mut Chunk,
     archetypes: Enumerate<Arch::Iter>,
     frontier: Option<(
-        ArchetypeId,
-        &'data ArchetypeData,
-        Borrow<'data>,
+        Ref<'data, Shared<'data>, ArchetypeData>,
         Enumerate<Chunk::Iter>,
     )>,
 }
 
-// impl<
-//         'data,
-//         'filter,
-//         Arch: Filter<'data, ArchetypeFilterData<'data>>,
-//         Chunk: Filter<'data, ChunkFilterData<'data>>,
-//     > Iterator for ChunkViewIter2<'data, 'filter, Arch, Chunk>
-// {
-// }
+impl<
+        'data,
+        'filter,
+        V: for<'a> View<'a>,
+        ArchFilter: Filter<ArchetypeFilterData<'data>>,
+        ChunkFilter: Filter<ChunkFilterData<'data>>,
+    > Iterator for ChunkViewIter<'data, 'filter, V, ArchFilter, ChunkFilter>
+{
+    type Item = Chunk<'data, V>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some((ref arch, ref mut chunks)) = self.frontier {
+                for (chunk_index, chunk_data) in chunks {
+                    if self.chunk_filter.is_match(&chunk_data).is_pass() {
+                        return Some(Chunk::new(arch.clone(), chunk_index));
+                    }
+                }
+            }
+            loop {
+                match self.archetypes.next() {
+                    Some((arch_index, arch_data)) => {
+                        if self.arch_filter.is_match(&arch_data).is_pass() {
+                            self.frontier = {
+                                let (borrow, archetype) = unsafe {
+                                    self.storage
+                                        .data(arch_index)
+                                        .unwrap()
+                                        .deref()
+                                        .get()
+                                        .deconstruct()
+                                };
+                                let data = ChunkFilterData {
+                                    archetype_data: archetype,
+                                };
+
+                                Some((
+                                    Ref::new(borrow, archetype),
+                                    self.chunk_filter.collect(data).enumerate(),
+                                ))
+                            };
+                            break;
+                        }
+                    }
+                    None => return None,
+                }
+            }
+        }
+    }
+}
+
+/// An iterator which iterates through all entity data in all chunks.
+pub struct ChunkDataIter<'data, V, I>
+where
+    V: for<'a> View<'a>,
+    I: Iterator<Item = Chunk<'data, V>>,
+{
+    iter: I,
+    frontier: Option<<V as View<'data>>::Iter>,
+    _view: PhantomData<V>,
+}
+
+impl<'data, V, I> Iterator for ChunkDataIter<'data, V, I>
+where
+    V: for<'a> View<'a>,
+    I: Iterator<Item = Chunk<'data, V>>,
+{
+    type Item = <<V as View<'data>>::Iter as Iterator>::Item;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(ref mut inner) = self.frontier {
+                if let elt @ Some(_) = inner.next() {
+                    return elt;
+                }
+            }
+            match self.iter.next() {
+                Some(mut inner) => self.frontier = Some(inner.iter()),
+                None => return None,
+            }
+        }
+    }
+}
+
+/// An iterator which iterates through all entity data in all chunks, zipped with entity ID.
+pub struct ChunkEntityIter<'data, V, I>
+where
+    V: for<'a> View<'a>,
+    I: Iterator<Item = Chunk<'data, V>>,
+{
+    iter: I,
+    frontier: Option<ZipEntities<'data, V>>,
+    _view: PhantomData<V>,
+}
+
+impl<'data, 'query, V, I> Iterator for ChunkEntityIter<'data, V, I>
+where
+    V: for<'a> View<'a>,
+    I: Iterator<Item = Chunk<'data, V>>,
+{
+    type Item = (Entity, <<V as View<'data>>::Iter as Iterator>::Item);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some(ref mut inner) = self.frontier {
+                if let elt @ Some(_) = inner.next() {
+                    return elt;
+                }
+            }
+            match self.iter.next() {
+                Some(mut inner) => self.frontier = Some(inner.iter_entities()),
+                None => return None,
+            }
+        }
+    }
+}
 
 pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
     view: PhantomData<V>,
@@ -406,16 +521,56 @@ where
         }
     }
 
-    // fn iter_chunks<'a, 'data>(
-    //     &'a mut self,
-    //     world: &'data World,
-    // ) -> ChunkViewIter<'data, V, FilterEntityIter<'a, 'data, F::ArchetypeFilter, F::ChunkFilter>>
-    // {
-    //     ChunkViewIter {
-    //         iter: self.filter.iter(&world.archetypes),
-    //         storage: &world.archetypes,
-    //         current_archetype: None,
-    //         view: PhantomData,
-    //     }
-    // }
+    pub fn iter_chunks<'a, 'data>(
+        &'a mut self,
+        world: &'data World,
+    ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunkFilter> {
+        let (arch_filter, chunk_filter) = self.filter.filters();
+        let storage = &world.archetypes;
+        let archetypes = arch_filter
+            .collect(ArchetypeFilterData {
+                component_types: storage.component_types(),
+                tag_types: storage.tag_types(),
+            })
+            .enumerate();
+        ChunkViewIter {
+            storage,
+            arch_filter,
+            chunk_filter,
+            archetypes,
+            frontier: None,
+            _view: PhantomData,
+        }
+    }
+
+    pub fn iter_entities<'a, 'data>(
+        &'a mut self,
+        world: &'data World,
+    ) -> ChunkEntityIter<'data, V, ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunkFilter>>
+    {
+        ChunkEntityIter {
+            iter: self.iter_chunks(world),
+            frontier: None,
+            _view: PhantomData,
+        }
+    }
+
+    pub fn iter<'a, 'data>(
+        &'a mut self,
+        world: &'data World,
+    ) -> ChunkDataIter<'data, V, ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunkFilter>>
+    {
+        ChunkDataIter {
+            iter: self.iter_chunks(world),
+            frontier: None,
+            _view: PhantomData,
+        }
+    }
+
+    pub fn for_each<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
+    where
+        T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
+    {
+        self.iter(world).for_each(&mut f);
+    }
 }

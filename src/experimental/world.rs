@@ -1,6 +1,7 @@
-use crate::experimental::borrow::ComponentRef;
-use crate::experimental::borrow::ComponentRefMut;
+use crate::experimental::borrow::Exclusive;
 use crate::experimental::borrow::Ref;
+use crate::experimental::borrow::RefMut;
+use crate::experimental::borrow::Shared;
 use crate::experimental::entity::BlockAllocator;
 use crate::experimental::entity::Entity;
 use crate::experimental::entity::EntityAllocator;
@@ -108,7 +109,10 @@ impl World {
 
     pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
-    pub fn get_component<T: Component>(&mut self, entity: Entity) -> Option<ComponentRef<T>> {
+    pub fn get_component<T: Component>(
+        &mut self,
+        entity: Entity,
+    ) -> Option<Ref<(Shared, Shared), T>> {
         if !self.is_alive(entity) {
             return None;
         }
@@ -129,13 +133,13 @@ impl World {
         };
         let component = slice.get(location.component())?;
 
-        Some(ComponentRef::new(archetype_borrow, slice_borrow, component))
+        Some(Ref::new((archetype_borrow, slice_borrow), component))
     }
 
     pub fn get_component_mut<T: Component>(
         &mut self,
         entity: Entity,
-    ) -> Option<ComponentRefMut<T>> {
+    ) -> Option<RefMut<(Shared, Exclusive), T>> {
         if !self.is_alive(entity) {
             return None;
         }
@@ -156,14 +160,10 @@ impl World {
         };
         let component = slice.get_mut(location.component())?;
 
-        Some(ComponentRefMut::new(
-            archetype_borrow,
-            slice_borrow,
-            component,
-        ))
+        Some(RefMut::new((archetype_borrow, slice_borrow), component))
     }
 
-    pub fn get_tag<T: Tag>(&self, entity: Entity) -> Option<Ref<T>> {
+    pub fn get_tag<T: Tag>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
         if !self.is_alive(entity) {
             return None;
         }
@@ -194,7 +194,7 @@ impl World {
 
             let tag_iter = tags.collect(archetype_data);
             let tag_matches =
-                tag_iter.map(|x| <T as Filter<'_, ArchetypeFilterData<'_>>>::is_match(tags, &x));
+                tag_iter.map(|x| <T as Filter<ArchetypeFilterData<'_>>>::is_match(tags, &x));
             let component_iter = components.collect(archetype_data);
             let component_matches = component_iter.map(|x| components.is_match(&x));
             if let Some(i) = tag_matches
@@ -230,7 +230,7 @@ impl World {
 
             let chunk_iter = tags.collect(chunk_filter_data);
             let index = chunk_iter
-                .map(|x| <T as Filter<'_, ChunkFilterData<'_>>>::is_match(tags, &x))
+                .map(|x| <T as Filter<ChunkFilterData<'_>>>::is_match(tags, &x))
                 .zip(archetype_data.iter_component_chunks())
                 .enumerate()
                 .filter(|(_, (matches, components))| matches.is_pass() && !components.is_full())
@@ -248,15 +248,15 @@ impl World {
     }
 }
 
-pub trait ComponentLayout: Sized + for<'a> Filter<'a, ArchetypeFilterData<'a>> {
+pub trait ComponentLayout: Sized + for<'a> Filter<ArchetypeFilterData<'a>> {
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription);
 }
 
-pub trait TagLayout: Sized + for<'a> Filter<'a, ArchetypeFilterData<'a>> {
+pub trait TagLayout: Sized + for<'a> Filter<ArchetypeFilterData<'a>> {
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription);
 }
 
-pub trait TagSet: TagLayout + for<'a> Filter<'a, ChunkFilterData<'a>> {
+pub trait TagSet: TagLayout + for<'a> Filter<ChunkFilterData<'a>> {
     fn write_tags(&self, tags: &mut HashMap<TagTypeId, TagStorage>);
 }
 
@@ -370,7 +370,7 @@ mod tuple_impls {
                 }
             }
 
-            impl<'a, I, $( $ty ),*> Filter<'a, ArchetypeFilterData<'a>> for ComponentTupleSet<($( $ty, )*), I>
+            impl<'a, I, $( $ty ),*> Filter<ArchetypeFilterData<'a>> for ComponentTupleSet<($( $ty, )*), I>
             where
                 I: Iterator<Item = ($( $ty, )*)>,
                 $( $ty: Component ),*
@@ -416,7 +416,7 @@ mod tuple_impls {
                 }
             }
 
-            impl<'a, $( $ty ),*> Filter<'a, ArchetypeFilterData<'a>> for ($( $ty, )*)
+            impl<'a, $( $ty ),*> Filter<ArchetypeFilterData<'a>> for ($( $ty, )*)
             where
                 $( $ty: Tag ),*
             {
@@ -433,7 +433,7 @@ mod tuple_impls {
             }
         };
         ( @CHUNK_FILTER $( $ty: ident => $id: ident ),+ ) => {
-            impl<'a, $( $ty ),*> Filter<'a, ChunkFilterData<'a>> for ($( $ty, )*)
+            impl<'a, $( $ty ),*> Filter<ChunkFilterData<'a>> for ($( $ty, )*)
             where
                 $( $ty: Tag ),*
             {
@@ -463,7 +463,7 @@ mod tuple_impls {
             }
         };
         ( @CHUNK_FILTER ) => {
-            impl<'a> Filter<'a, ChunkFilterData<'a>> for () {
+            impl<'a> Filter<ChunkFilterData<'a>> for () {
                 type Iter = Take<Repeat<()>>;
 
                 fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {

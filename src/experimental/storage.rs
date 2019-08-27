@@ -1,3 +1,5 @@
+use crate::experimental::borrow::Exclusive;
+use crate::experimental::borrow::Shared;
 use crate::experimental::borrow::{AtomicRefCell, Ref, RefMap, RefMapMut, RefMut};
 use crate::experimental::entity::Entity;
 use derivative::Derivative;
@@ -115,7 +117,7 @@ impl Storage {
     pub fn alloc_archetype(
         &mut self,
         desc: &ArchetypeDescription,
-    ) -> (usize, RefMut<ArchetypeData>) {
+    ) -> (usize, RefMut<Exclusive, ArchetypeData>) {
         self.component_types
             .0
             .push(desc.components.iter().map(|(type_id, _)| *type_id));
@@ -218,7 +220,7 @@ pub struct ArchetypeId(usize);
 impl ArchetypeId {
     pub fn new(index: usize) -> Self { ArchetypeId(index) }
 
-    pub fn index(&self) -> usize { self.0 }
+    pub fn index(self) -> usize { self.0 }
 }
 
 pub struct ArchetypeData {
@@ -440,21 +442,21 @@ pub struct ComponentAccessor {
 impl ComponentAccessor {
     pub fn version(&self) -> usize { unsafe { (*self.version.get()).0 } }
 
-    pub unsafe fn data_raw<'a>(&'a self) -> (Ref<'a, NonNull<u8>>, usize, usize) {
+    pub unsafe fn data_raw(&self) -> (Ref<Shared, NonNull<u8>>, usize, usize) {
         (self.ptr.get(), self.element_size, *self.count.get())
     }
 
-    pub unsafe fn data_raw_mut<'a>(&'a self) -> (RefMut<'a, NonNull<u8>>, usize, usize) {
+    pub unsafe fn data_raw_mut(&self) -> (RefMut<Exclusive, NonNull<u8>>, usize, usize) {
         *self.version.get() += Wrapping(1);
         (self.ptr.get_mut(), self.element_size, *self.count.get())
     }
 
-    pub unsafe fn data_slice<'a, T>(&'a self) -> RefMap<'a, &[T]> {
+    pub unsafe fn data_slice<T>(&self) -> RefMap<Shared, &[T]> {
         let (ptr, _size, count) = self.data_raw();
         ptr.map_into(|ptr| std::slice::from_raw_parts(ptr.as_ptr() as *const T, count))
     }
 
-    pub unsafe fn data_slice_mut<'a, T>(&'a self) -> RefMapMut<'a, &mut [T]> {
+    pub unsafe fn data_slice_mut<T>(&self) -> RefMapMut<Exclusive, &mut [T]> {
         let (ptr, _size, count) = self.data_raw_mut();
         ptr.map_into(|ptr| std::slice::from_raw_parts_mut(ptr.as_ptr() as *mut T, count))
     }
@@ -477,7 +479,7 @@ impl Debug for ComponentAccessor {
 
 pub struct ComponentWriter<'a> {
     accessor: &'a ComponentAccessor,
-    ptr: RefMut<'a, NonNull<u8>>,
+    ptr: RefMut<'a, Exclusive<'a>, NonNull<u8>>,
 }
 
 impl<'a> ComponentWriter<'a> {
