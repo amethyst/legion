@@ -14,7 +14,6 @@ use crate::experimental::storage::TagTypes;
 use std::collections::HashMap;
 use std::iter::Enumerate;
 use std::iter::Repeat;
-use std::iter::Take;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::slice::Iter;
@@ -104,6 +103,8 @@ pub trait EntityFilter {
 
     fn filters(&mut self) -> (&mut Self::ArchetypeFilter, &mut Self::ChunkFilter);
 
+    fn into_filters(self) -> (Self::ArchetypeFilter, Self::ChunkFilter);
+
     fn iter_archetype_indexes<'a, 'b>(
         &'a mut self,
         storage: &'b Storage,
@@ -149,6 +150,10 @@ where
 
     fn filters(&mut self) -> (&mut Self::ArchetypeFilter, &mut Self::ChunkFilter) {
         (&mut self.arch_filter, &mut self.chunk_filter)
+    }
+
+    fn into_filters(self) -> (Self::ArchetypeFilter, Self::ChunkFilter) {
+        (self.arch_filter, self.chunk_filter)
     }
 
     fn iter_archetype_indexes<'a, 'b>(
@@ -349,22 +354,22 @@ impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunkFilterDat
 pub struct Passthrough;
 
 impl<'a> Filter<ArchetypeFilterData<'a>> for Passthrough {
-    type Iter = Take<Repeat<()>>;
+    type Iter = Repeat<()>;
 
-    fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
-        std::iter::repeat(()).take(source.component_types.len())
-    }
+    #[inline]
+    fn collect(&self, _: ArchetypeFilterData<'a>) -> Self::Iter { std::iter::repeat(()) }
 
+    #[inline]
     fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<'a> Filter<ChunkFilterData<'a>> for Passthrough {
-    type Iter = Take<Repeat<()>>;
+    type Iter = Repeat<()>;
 
-    fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {
-        std::iter::repeat(()).take(source.archetype_data.len())
-    }
+    #[inline]
+    fn collect(&self, _: ChunkFilterData<'a>) -> Self::Iter { std::iter::repeat(()) }
 
+    #[inline]
     fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
@@ -399,8 +404,10 @@ impl<F> ActiveFilter for Not<F> {}
 impl<'a, T: Copy, F: Filter<T>> Filter<T> for Not<F> {
     type Iter = F::Iter;
 
+    #[inline]
     fn collect(&self, source: T) -> Self::Iter { self.filter.collect(source) }
 
+    #[inline]
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         self.filter.is_match(item).map(|x| !x)
     }
@@ -447,6 +454,63 @@ pub struct And<T> {
     pub filters: T,
 }
 
+impl<T> ActiveFilter for And<(T,)> {}
+
+impl<'a, T: Copy, F: Filter<T>> Filter<T> for And<(F,)> {
+    type Iter = F::Iter;
+
+    #[inline]
+    fn collect(&self, source: T) -> Self::Iter { self.filters.0.collect(source) }
+
+    #[inline]
+    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+        self.filters.0.is_match(item)
+    }
+}
+
+impl<T> std::ops::Not for And<(T,)> {
+    type Output = Not<Self>;
+
+    #[inline]
+    fn not(self) -> Self::Output { Not { filter: self } }
+}
+
+impl<T, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for And<(T,)> {
+    type Output = And<(T, Rhs)>;
+
+    #[inline]
+    fn bitand(self, rhs: Rhs) -> Self::Output {
+        And {
+            filters: (self.filters.0, rhs),
+        }
+    }
+}
+
+impl<T> std::ops::BitAnd<Passthrough> for And<(T,)> {
+    type Output = Self;
+
+    #[inline]
+    fn bitand(self, _: Passthrough) -> Self::Output { self }
+}
+
+impl<T, Rhs: ActiveFilter> std::ops::BitOr<Rhs> for And<(T,)> {
+    type Output = Or<(Self, Rhs)>;
+
+    #[inline]
+    fn bitor(self, rhs: Rhs) -> Self::Output {
+        Or {
+            filters: (self, rhs),
+        }
+    }
+}
+
+impl<T> std::ops::BitOr<Passthrough> for And<(T,)> {
+    type Output = Self;
+
+    #[inline]
+    fn bitor(self, _: Passthrough) -> Self::Output { self }
+}
+
 macro_rules! impl_and_filter {
     ( $( $ty: ident => $ty2: ident ),* ) => {
         impl<$( $ty ),*> ActiveFilter for And<($( $ty, )*)> {}
@@ -463,6 +527,7 @@ macro_rules! impl_and_filter {
                 itertools::multizip(iters)
             }
 
+            #[inline]
             fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &mut self.filters;
@@ -553,6 +618,7 @@ macro_rules! impl_or_filter {
                 itertools::multizip(iters)
             }
 
+            #[inline]
             fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &mut self.filters;
@@ -634,10 +700,12 @@ impl<T> ActiveFilter for ComponentFilter<T> {}
 impl<'a, T: Component> Filter<ArchetypeFilterData<'a>> for ComponentFilter<T> {
     type Iter = SliceVecIter<'a, ComponentTypeId>;
 
+    #[inline]
     fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
         source.component_types.iter()
     }
 
+    #[inline]
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(item.contains(&ComponentTypeId::of::<T>()))
     }
@@ -698,8 +766,10 @@ impl<T> ActiveFilter for TagFilter<T> {}
 impl<'a, T: Tag> Filter<ArchetypeFilterData<'a>> for TagFilter<T> {
     type Iter = SliceVecIter<'a, TagTypeId>;
 
+    #[inline]
     fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter { source.tag_types.iter() }
 
+    #[inline]
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(item.contains(&TagTypeId::of::<T>()))
     }
@@ -773,6 +843,7 @@ impl<'a, 'b, T: Tag> Filter<ChunkFilterData<'a>> for TagValueFilter<'b, T> {
         }
     }
 
+    #[inline]
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(**item == *self.value)
     }
@@ -845,6 +916,7 @@ impl<'a, T: Component> Filter<ChunkFilterData<'a>> for ComponentChangedFilter<T>
         source.archetype_data.iter_component_chunks()
     }
 
+    #[inline]
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         use std::collections::hash_map::Entry;
         let components = item.components(ComponentTypeId::of::<T>()).unwrap();

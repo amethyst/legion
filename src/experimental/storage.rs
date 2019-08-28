@@ -3,24 +3,27 @@ use crate::experimental::borrow::Shared;
 use crate::experimental::borrow::{AtomicRefCell, Ref, RefMap, RefMapMut, RefMut};
 use crate::experimental::entity::Entity;
 use derivative::Derivative;
+use smallvec::Drain;
+use smallvec::SmallVec;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::mem::size_of;
 use std::num::Wrapping;
 use std::ptr::NonNull;
+use std::slice::Iter;
+use std::slice::IterMut;
 use std::sync::Arc;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct ComponentTypeId(TypeId);
 
 impl ComponentTypeId {
     pub fn of<T: Component>() -> Self { ComponentTypeId(TypeId::of::<T>()) }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct TagTypeId(TypeId);
 
 impl TagTypeId {
@@ -223,9 +226,34 @@ impl ArchetypeId {
     pub fn index(self) -> usize { self.0 }
 }
 
+pub struct Tags(SmallVec<[(TagTypeId, TagStorage); 3]>);
+
+impl Tags {
+    pub fn new(mut data: SmallVec<[(TagTypeId, TagStorage); 3]>) -> Self {
+        data.sort_by_key(|(t, _)| *t);
+        Self(data)
+    }
+
+    #[inline]
+    pub fn get(&self, type_id: TagTypeId) -> Option<&TagStorage> {
+        self.0
+            .binary_search_by_key(&type_id, |(t, _)| *t)
+            .ok()
+            .map(|i| unsafe { &self.0.get_unchecked(i).1 })
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, type_id: TagTypeId) -> Option<&mut TagStorage> {
+        self.0
+            .binary_search_by_key(&type_id, |(t, _)| *t)
+            .ok()
+            .map(move |i| unsafe { &mut self.0.get_unchecked_mut(i).1 })
+    }
+}
+
 pub struct ArchetypeData {
     id: ArchetypeId,
-    tags: HashMap<TagTypeId, TagStorage>,
+    tags: Tags,
     component_layout: ComponentStorageLayout,
     component_chunks: Vec<ComponentStorage>,
 }
@@ -264,7 +292,7 @@ impl ArchetypeData {
 
         ArchetypeData {
             id,
-            tags,
+            tags: Tags::new(tags),
             component_layout: ComponentStorageLayout {
                 capacity: entity_capacity,
                 alloc_layout: data_alignment,
@@ -274,13 +302,7 @@ impl ArchetypeData {
         }
     }
 
-    pub fn alloc_chunk(
-        &mut self,
-    ) -> (
-        usize,
-        &mut HashMap<TagTypeId, TagStorage>,
-        &mut ComponentStorage,
-    ) {
+    pub fn alloc_chunk(&mut self) -> (usize, &mut Tags, &mut ComponentStorage) {
         let chunk = self
             .component_layout
             .alloc_storage(ChunkId(self.id, self.component_chunks.len()));
@@ -296,7 +318,7 @@ impl ArchetypeData {
 
     pub fn is_empty(&self) -> bool { self.len() < 1 }
 
-    pub fn tags(&self, tag_type: TagTypeId) -> Option<&TagStorage> { self.tags.get(&tag_type) }
+    pub fn tags(&self, tag_type: TagTypeId) -> Option<&TagStorage> { self.tags.get(tag_type) }
 
     pub fn iter_component_chunks(&self) -> std::slice::Iter<ComponentStorage> {
         self.component_chunks.iter()
@@ -323,7 +345,7 @@ impl ComponentStorageLayout {
     fn alloc_storage(&self, id: ChunkId) -> ComponentStorage {
         unsafe {
             let data_storage = std::alloc::alloc(self.alloc_layout);
-            let storage_info: HashMap<_, _> = self
+            let storage_info = self
                 .data_layout
                 .iter()
                 .map(|(ty, offset, meta)| {
@@ -348,7 +370,7 @@ impl ComponentStorageLayout {
                 capacity: self.capacity,
                 entities: Vec::with_capacity(self.capacity),
                 component_layout: self.alloc_layout,
-                component_info: UnsafeCell::new(storage_info),
+                component_info: UnsafeCell::new(Components::new(storage_info)),
                 component_data: NonNull::new_unchecked(data_storage),
             }
         }
@@ -366,12 +388,45 @@ impl ChunkId {
     pub fn index(&self) -> usize { self.1 }
 }
 
+pub struct Components(SmallVec<[(ComponentTypeId, ComponentAccessor); 5]>);
+
+impl Components {
+    pub fn new(mut data: SmallVec<[(ComponentTypeId, ComponentAccessor); 5]>) -> Self {
+        data.sort_by_key(|(t, _)| *t);
+        Self(data)
+    }
+
+    #[inline]
+    pub fn get(&self, type_id: ComponentTypeId) -> Option<&ComponentAccessor> {
+        self.0
+            .binary_search_by_key(&type_id, |(t, _)| *t)
+            .ok()
+            .map(|i| unsafe { &self.0.get_unchecked(i).1 })
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, type_id: ComponentTypeId) -> Option<&mut ComponentAccessor> {
+        self.0
+            .binary_search_by_key(&type_id, |(t, _)| *t)
+            .ok()
+            .map(move |i| unsafe { &mut self.0.get_unchecked_mut(i).1 })
+    }
+
+    pub fn iter(&mut self) -> Iter<(ComponentTypeId, ComponentAccessor)> { self.0.iter() }
+
+    pub fn iter_mut(&mut self) -> IterMut<(ComponentTypeId, ComponentAccessor)> {
+        self.0.iter_mut()
+    }
+
+    pub fn drain(&mut self) -> Drain<(ComponentTypeId, ComponentAccessor)> { self.0.drain() }
+}
+
 pub struct ComponentStorage {
     id: ChunkId,
     capacity: usize,
     entities: Vec<Entity>,
     component_layout: std::alloc::Layout,
-    component_info: UnsafeCell<HashMap<ComponentTypeId, ComponentAccessor>>,
+    component_info: UnsafeCell<Components>,
     component_data: NonNull<u8>,
 }
 
@@ -389,7 +444,7 @@ impl ComponentStorage {
     pub fn entities(&self) -> &[Entity] { self.entities.as_slice() }
 
     pub fn components(&self, component_type: ComponentTypeId) -> Option<&ComponentAccessor> {
-        unsafe { &*self.component_info.get() }.get(&component_type)
+        unsafe { &*self.component_info.get() }.get(component_type)
     }
 
     pub fn swap_remove(&mut self, index: usize) -> Option<Entity> {
@@ -405,12 +460,7 @@ impl ComponentStorage {
         }
     }
 
-    pub fn write(
-        &mut self,
-    ) -> (
-        &mut Vec<Entity>,
-        &UnsafeCell<HashMap<ComponentTypeId, ComponentAccessor>>,
-    ) {
+    pub fn write(&mut self) -> (&mut Vec<Entity>, &UnsafeCell<Components>) {
         (&mut self.entities, &self.component_info)
     }
 }
@@ -673,16 +723,14 @@ mod test {
         let (_arch_id, mut data) = archetypes.alloc_archetype(&desc);
         let (_, tags, components) = data.alloc_chunk();
 
-        tags.get_mut(&TagTypeId::of::<usize>())
-            .unwrap()
-            .push(1isize);
+        tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize);
 
         let (chunk_entities, chunk_components) = components.write();
 
         chunk_entities.push(Entity::new(1, Wrapping(0)));
         unsafe {
             (&mut *chunk_components.get())
-                .get_mut(&ComponentTypeId::of::<isize>())
+                .get_mut(ComponentTypeId::of::<isize>())
                 .unwrap()
                 .writer()
                 .push(&[1usize]);
@@ -712,17 +760,17 @@ mod test {
             chunk_entities.push(*entity);
             unsafe {
                 (&mut *chunk_components.get())
-                    .get_mut(&ComponentTypeId::of::<isize>())
+                    .get_mut(ComponentTypeId::of::<isize>())
                     .unwrap()
                     .writer()
                     .push(&[*c1]);
                 (&mut *chunk_components.get())
-                    .get_mut(&ComponentTypeId::of::<usize>())
+                    .get_mut(ComponentTypeId::of::<usize>())
                     .unwrap()
                     .writer()
                     .push(&[*c2]);
                 (&mut *chunk_components.get())
-                    .get_mut(&ComponentTypeId::of::<ZeroSize>())
+                    .get_mut(ComponentTypeId::of::<ZeroSize>())
                     .unwrap()
                     .writer()
                     .push(&[*c3]);
@@ -731,7 +779,7 @@ mod test {
 
         unsafe {
             for (i, c) in (*chunk_components.get())
-                .get(&ComponentTypeId::of::<isize>())
+                .get(ComponentTypeId::of::<isize>())
                 .unwrap()
                 .data_slice::<isize>()
                 .iter()
@@ -741,7 +789,7 @@ mod test {
             }
 
             for (i, c) in (*chunk_components.get())
-                .get(&ComponentTypeId::of::<usize>())
+                .get(ComponentTypeId::of::<usize>())
                 .unwrap()
                 .data_slice::<usize>()
                 .iter()
@@ -751,7 +799,7 @@ mod test {
             }
 
             for (i, c) in (*chunk_components.get())
-                .get(&ComponentTypeId::of::<ZeroSize>())
+                .get(ComponentTypeId::of::<ZeroSize>())
                 .unwrap()
                 .data_slice::<ZeroSize>()
                 .iter()
@@ -776,10 +824,8 @@ mod test {
 
         for (t1, t2) in tag_values.iter() {
             let (_, tags, _) = data.alloc_chunk();
-            tags.get_mut(&TagTypeId::of::<isize>()).unwrap().push(*t1);
-            tags.get_mut(&TagTypeId::of::<ZeroSize>())
-                .unwrap()
-                .push(*t2);
+            tags.get_mut(TagTypeId::of::<isize>()).unwrap().push(*t1);
+            tags.get_mut(TagTypeId::of::<ZeroSize>()).unwrap().push(*t2);
         }
 
         unsafe {
@@ -814,7 +860,7 @@ mod test {
         let (_arch_id, mut data) = archetypes.alloc_archetype(&desc);
         let (_, tags, components) = data.alloc_chunk();
 
-        tags.get_mut(&TagTypeId::of::<ZeroSize>())
+        tags.get_mut(TagTypeId::of::<ZeroSize>())
             .unwrap()
             .push(ZeroSize);
 
@@ -823,7 +869,7 @@ mod test {
         chunk_entities.push(Entity::new(1, Wrapping(0)));
         unsafe {
             (&mut *chunk_components.get())
-                .get_mut(&ComponentTypeId::of::<isize>())
+                .get_mut(ComponentTypeId::of::<isize>())
                 .unwrap()
                 .writer()
                 .push(&[1usize]);
@@ -841,16 +887,14 @@ mod test {
         let (_arch_id, mut data) = archetypes.alloc_archetype(&desc);
         let (_, tags, components) = data.alloc_chunk();
 
-        tags.get_mut(&TagTypeId::of::<usize>())
-            .unwrap()
-            .push(1isize);
+        tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize);
 
         let (chunk_entities, chunk_components) = components.write();
 
         chunk_entities.push(Entity::new(1, Wrapping(0)));
         unsafe {
             (&mut *chunk_components.get())
-                .get_mut(&ComponentTypeId::of::<ZeroSize>())
+                .get_mut(ComponentTypeId::of::<ZeroSize>())
                 .unwrap()
                 .writer()
                 .push(&[ZeroSize]);

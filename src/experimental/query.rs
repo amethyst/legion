@@ -1,9 +1,12 @@
 use crate::experimental::borrow::Exclusive;
 use crate::experimental::borrow::Ref;
+use crate::experimental::borrow::RefIter;
+use crate::experimental::borrow::RefIterMut;
 use crate::experimental::borrow::RefMap;
 use crate::experimental::borrow::RefMapMut;
 use crate::experimental::borrow::Shared;
 use crate::experimental::entity::Entity;
+use crate::experimental::filter::And;
 use crate::experimental::filter::ArchetypeFilterData;
 use crate::experimental::filter::ChunkFilterData;
 use crate::experimental::filter::ComponentFilter;
@@ -28,6 +31,7 @@ use std::iter::Take;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::slice::Iter;
+use std::slice::IterMut;
 
 /// A type which can fetch a strongly-typed view of the data contained
 /// within a `Chunk`.
@@ -96,7 +100,7 @@ impl<'a, T: Component> DefaultFilter for Read<T> {
 }
 
 impl<'a, T: Component> View<'a> for Read<T> {
-    type Iter = RefMap<'a, (Shared<'a>, Shared<'a>), Iter<'a, T>>;
+    type Iter = RefIter<'a, (Shared<'a>, Shared<'a>), T, Iter<'a, T>>;
 
     fn fetch(
         _: Ref<'a, Shared, ArchetypeData>,
@@ -111,7 +115,7 @@ impl<'a, T: Component> View<'a> for Read<T> {
                 .data_slice::<T>()
                 .deconstruct()
         };
-        RefMap::new((arch_borrow, slice_borrow), slice.iter())
+        RefIter::new((arch_borrow, slice_borrow), slice.iter())
     }
 
     fn validate() -> bool { true }
@@ -136,8 +140,9 @@ impl<'a, T: Component> DefaultFilter for Write<T> {
 }
 
 impl<'a, T: Component> View<'a> for Write<T> {
-    type Iter = RefMapMut<'a, (Shared<'a>, Exclusive<'a>), Iter<'a, T>>;
+    type Iter = RefIterMut<'a, (Shared<'a>, Exclusive<'a>), T, IterMut<'a, T>>;
 
+    #[inline]
     fn fetch(
         _: Ref<'a, Shared, ArchetypeData>,
         chunk: Ref<'a, Shared, ComponentStorage>,
@@ -151,13 +156,16 @@ impl<'a, T: Component> View<'a> for Write<T> {
                 .data_slice_mut::<T>()
                 .deconstruct()
         };
-        RefMapMut::new((arch_borrow, slice_borrow), slice.iter())
+        RefIterMut::new((arch_borrow, slice_borrow), slice.iter_mut())
     }
 
+    #[inline]
     fn validate() -> bool { true }
 
+    #[inline]
     fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
+    #[inline]
     fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 }
 
@@ -178,6 +186,7 @@ impl<'a, T: Tag> DefaultFilter for Tagged<T> {
 impl<'a, T: Tag> View<'a> for Tagged<T> {
     type Iter = Take<Repeat<Ref<'a, Shared<'a>, T>>>;
 
+    #[inline]
     fn fetch(
         archetype: Ref<'a, Shared, ArchetypeData>,
         chunk: Ref<'a, Shared, ComponentStorage>,
@@ -193,10 +202,13 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
         std::iter::repeat(Ref::new(arch_borrow, data)).take(chunk.len())
     }
 
+    #[inline]
     fn validate() -> bool { true }
 
+    #[inline]
     fn reads<D: Component>() -> bool { false }
 
+    #[inline]
     fn writes<D: Component>() -> bool { false }
 }
 
@@ -206,9 +218,23 @@ impl<T: Tag> ViewElement for Tagged<T> {
 
 macro_rules! impl_view_tuple {
     ( $( $ty: ident ),* ) => {
+        impl<$( $ty: ViewElement + DefaultFilter ),*> DefaultFilter for ($( $ty, )*) {
+            type Filter = EntityFilterTuple<And<($( <$ty::Filter as EntityFilter>::ArchetypeFilter, )*)>, And<($( <$ty::Filter as EntityFilter>::ChunkFilter, )*)>>;
+
+            fn filter() -> Self::Filter {
+                #![allow(non_snake_case)]
+                $( let $ty = $ty::filter().into_filters(); )*
+                EntityFilterTuple::new(
+                    And { filters: ($( $ty.0, )*) },
+                    And { filters: ($( $ty.1, )*) },
+                )
+            }
+        }
+
         impl<'a, $( $ty: ViewElement + View<'a> ),* > View<'a> for ($( $ty, )*) {
             type Iter = itertools::Zip<($( $ty::Iter, )*)>;
 
+            #[inline]
             fn fetch(
                 archetype: Ref<'a, Shared, ArchetypeData>,
                 chunk: Ref<'a, Shared, ComponentStorage>,
@@ -377,7 +403,7 @@ pub struct ChunkViewIter<
     archetypes: Enumerate<Arch::Iter>,
     frontier: Option<(
         Ref<'data, Shared<'data>, ArchetypeData>,
-        Enumerate<Chunk::Iter>,
+        Take<Enumerate<Chunk::Iter>>,
     )>,
 }
 
@@ -419,7 +445,10 @@ impl<
 
                                 Some((
                                     Ref::new(borrow, archetype),
-                                    self.chunk_filter.collect(data).enumerate(),
+                                    self.chunk_filter
+                                        .collect(data)
+                                        .enumerate()
+                                        .take(archetype.len()),
                                 ))
                             };
                             break;

@@ -16,10 +16,9 @@ use crate::experimental::storage::ComponentStorage;
 use crate::experimental::storage::ComponentTypeId;
 use crate::experimental::storage::Storage;
 use crate::experimental::storage::Tag;
-use crate::experimental::storage::TagStorage;
 use crate::experimental::storage::TagTypeId;
+use crate::experimental::storage::Tags;
 use parking_lot::Mutex;
-use std::collections::HashMap;
 use std::iter::Peekable;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -257,7 +256,7 @@ pub trait TagLayout: Sized + for<'a> Filter<ArchetypeFilterData<'a>> {
 }
 
 pub trait TagSet: TagLayout + for<'a> Filter<ChunkFilterData<'a>> {
-    fn write_tags(&self, tags: &mut HashMap<TagTypeId, TagStorage>);
+    fn write_tags(&self, tags: &mut Tags);
 }
 
 pub trait ComponentSource: ComponentLayout {
@@ -353,7 +352,7 @@ mod tuple_impls {
 
                     unsafe {
                         $(
-                            let mut $ty = (&mut *components.get()).get_mut(&ComponentTypeId::of::<$ty>()).unwrap().writer();
+                            let mut $ty = (&mut *components.get()).get_mut(ComponentTypeId::of::<$ty>()).unwrap().writer();
                         )*
 
                         while let Some(($( $id, )*)) = { if count == space { None } else { self.iter.next() } } {
@@ -394,12 +393,12 @@ mod tuple_impls {
             where
                 $( $ty: Tag ),*
             {
-                fn write_tags(&self, tags: &mut HashMap<TagTypeId, TagStorage>) {
+                fn write_tags(&self, tags: &mut Tags) {
                     #![allow(unused_variables)]
                     #![allow(non_snake_case)]
                     let ($($id,)*) = self;
                     $(
-                        tags.get_mut(&TagTypeId::of::<$ty>()).unwrap().push($id.clone());
+                        tags.get_mut(TagTypeId::of::<$ty>()).unwrap().push($id.clone());
                     )*
                 }
             }
