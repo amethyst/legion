@@ -50,7 +50,7 @@ pub mod filter_fns {
     }
 }
 
-pub trait FilterResult {
+pub(crate) trait FilterResult {
     fn coalesce_and(self, other: Self) -> Self;
     fn coalesce_or(self, other: Self) -> Self;
     fn is_pass(&self) -> bool;
@@ -77,50 +77,67 @@ impl FilterResult for Option<bool> {
     fn is_pass(&self) -> bool { self.unwrap_or(true) }
 }
 
-pub trait Filter<T: Copy> {
-    type Iter: Iterator;
+/// A streaming iterator of bools.
+pub trait Filter<T: Copy>: Send + Sync {
+    type Iter: Iterator + Send + Sync;
 
+    /// Pulls iterator data out of the source.
     fn collect(&self, source: T) -> Self::Iter;
+
+    /// Determines if an element of `Self::Iter` matches the filter conditions.
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool>;
 }
 
+/// Input data for archetype filters.
 #[derive(Copy, Clone)]
 pub struct ArchetypeFilterData<'a> {
+    /// The component types in each archetype.
     pub component_types: &'a ComponentTypes,
+    /// The tag types in each archetype.
     pub tag_types: &'a TagTypes,
 }
 
+/// Input data for chunk filters.
 #[derive(Copy, Clone)]
 pub struct ChunkFilterData<'a> {
+    /// The component data in an archetype.
     pub archetype_data: &'a ArchetypeData,
 }
 
+/// A marker trait for filters that are not no-ops.
 pub trait ActiveFilter {}
 
+/// A type which combines both an archetype and a chunk filter.
 pub trait EntityFilter {
     type ArchetypeFilter: for<'a> Filter<ArchetypeFilterData<'a>>;
     type ChunkFilter: for<'a> Filter<ChunkFilterData<'a>>;
 
+    /// Gets mutable references to both inner filters.
     fn filters(&mut self) -> (&mut Self::ArchetypeFilter, &mut Self::ChunkFilter);
 
+    /// Converts self into both inner filters.
     fn into_filters(self) -> (Self::ArchetypeFilter, Self::ChunkFilter);
 
+    /// Gets an iterator over all matching archetype indexes.
     fn iter_archetype_indexes<'a, 'b>(
         &'a mut self,
         storage: &'b Storage,
     ) -> FilterArchIter<'b, 'a, Self::ArchetypeFilter>;
 
+    /// Gets an iterator over all matching chunk indexes.
     fn iter_chunk_indexes<'a, 'b>(
         &'a mut self,
         archetype: &'b ArchetypeData,
     ) -> FilterChunkIter<'b, 'a, Self::ChunkFilter>;
 
+    /// Gets an iterator over all matching archetypes and chunks.
     fn iter<'a, 'b>(
         &'a mut self,
         storage: &'b Storage,
     ) -> FilterEntityIter<'b, 'a, Self::ArchetypeFilter, Self::ChunkFilter>;
 }
 
+/// An EntityFilter which combined both an archetype filter and a chunk filter.
 #[derive(Debug)]
 pub struct EntityFilterTuple<A, C> {
     pub arch_filter: A,
@@ -132,6 +149,7 @@ where
     A: for<'a> Filter<ArchetypeFilterData<'a>>,
     C: for<'a> Filter<ChunkFilterData<'a>>,
 {
+    /// Creates a new entity filter.
     pub fn new(arch_filter: A, chunk_filter: C) -> Self {
         Self {
             arch_filter,
@@ -252,6 +270,7 @@ where
     }
 }
 
+/// An iterator which yields the indexes of archetypes that match a filter.
 pub struct FilterArchIter<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> {
     filter: &'b mut F,
     archetypes: Enumerate<F::Iter>,
@@ -271,6 +290,7 @@ impl<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> Iterator for FilterArchIter<'a,
     }
 }
 
+/// An iterator which yields the index of chuinks that match a filter.
 pub struct FilterChunkIter<'a, 'b, F: Filter<ChunkFilterData<'a>>> {
     filter: &'b mut F,
     chunks: Enumerate<F::Iter>,
@@ -290,6 +310,7 @@ impl<'a, 'b, F: Filter<ChunkFilterData<'a>>> Iterator for FilterChunkIter<'a, 'b
     }
 }
 
+/// An iterator which yields the IDs of chunks that match an entity filter.
 pub struct FilterEntityIter<
     'a,
     'b,
@@ -350,6 +371,7 @@ impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunkFilterDat
     }
 }
 
+/// A passthrough filter which allows through all elements.
 #[derive(Debug)]
 pub struct Passthrough;
 
@@ -394,6 +416,7 @@ impl<'a, Rhs> std::ops::BitOr<Rhs> for Passthrough {
     fn bitor(self, rhs: Rhs) -> Self::Output { rhs }
 }
 
+/// A filter which negates `F`.
 #[derive(Debug)]
 pub struct Not<F> {
     pub filter: F,
@@ -449,6 +472,7 @@ impl<'a, F> std::ops::BitOr<Passthrough> for Not<F> {
     fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
+/// A filter which requires all filters within `T` match.
 #[derive(Debug)]
 pub struct And<T> {
     pub filters: T,
@@ -597,6 +621,7 @@ impl_and_filter!(A => a, B => b, C => c, D => d);
 impl_and_filter!(A => a, B => b, C => c, D => d, E => e);
 impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
 
+/// A filter which requires that any filter within `T` match.
 #[derive(Debug)]
 pub struct Or<T> {
     pub filters: T,
@@ -688,6 +713,7 @@ impl_or_filter!(A => a, B => b, C => c, D => d);
 impl_or_filter!(A => a, B => b, C => c, D => d, E => e);
 impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
 
+/// A filter qhich requires that all chunks contain entity data components of type `T`.
 #[derive(Debug)]
 pub struct ComponentFilter<T>(PhantomData<T>);
 
@@ -754,6 +780,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for ComponentFilter<T> {
     fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
+/// A filter which requires that all chunks contain shared tag data of type `T`.
 #[derive(Debug)]
 pub struct TagFilter<T>(PhantomData<T>);
 
@@ -818,6 +845,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagFilter<T> {
     fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
+/// A filter which requires that all chunks contain a specific tag value.
 #[derive(Debug)]
 pub struct TagValueFilter<'a, T> {
     value: &'a T,
@@ -892,6 +920,8 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagValueFilter<'a, T> {
     fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
+/// A filter which requires that entity data of type `T` has changed within the
+/// chunk since the last time the filter was executed.
 #[derive(Debug)]
 pub struct ComponentChangedFilter<T: Component> {
     versions: HashMap<ChunkId, usize>,

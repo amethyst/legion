@@ -28,7 +28,7 @@ impl Display for Entity {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct EntityLocation {
+pub(crate) struct EntityLocation {
     archetype_index: usize,
     chunk_index: usize,
     component_index: usize,
@@ -129,12 +129,12 @@ impl EntityBlock {
         }
     }
 
-    pub fn free(&mut self, entity: Entity) -> Option<bool> {
-        if let Some(alive) = self.is_alive(entity) {
+    pub fn free(&mut self, entity: Entity) -> Option<EntityLocation> {
+        if let Some(true) = self.is_alive(entity) {
             let i = self.index(entity.index);
             self.versions[i] += Wrapping(1);
             self.free.push(entity.index);
-            Some(alive)
+            self.get_location(entity.index)
         } else {
             None
         }
@@ -203,11 +203,8 @@ impl EntityAllocator {
         entity
     }
 
-    pub(crate) fn delete_entity(&mut self, entity: Entity) -> bool {
-        self.blocks
-            .iter_mut()
-            .find_map(|b| b.free(entity))
-            .unwrap_or(false)
+    pub(crate) fn delete_entity(&mut self, entity: Entity) -> Option<EntityLocation> {
+        self.blocks.iter_mut().find_map(|b| b.free(entity))
     }
 
     pub(crate) fn set_location(&mut self, entity: EntityIndex, location: EntityLocation) {
@@ -315,7 +312,7 @@ mod tests {
         let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = allocator.create_entity();
 
-        assert_eq!(true, allocator.delete_entity(entity));
+        assert_eq!(true, allocator.delete_entity(entity).is_some());
     }
 
     #[test]
@@ -324,7 +321,7 @@ mod tests {
         let entity = allocator.create_entity();
         allocator.delete_entity(entity);
 
-        assert_eq!(false, allocator.delete_entity(entity));
+        assert_eq!(None, allocator.delete_entity(entity));
     }
 
     #[test]
@@ -332,7 +329,7 @@ mod tests {
         let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = Entity::new(10 as EntityIndex, Wrapping(10));
 
-        assert_eq!(false, allocator.delete_entity(entity));
+        assert_eq!(None, allocator.delete_entity(entity));
     }
 
     #[test]

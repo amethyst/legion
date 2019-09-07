@@ -23,13 +23,23 @@ use std::iter::Peekable;
 use std::ops::Deref;
 use std::sync::Arc;
 
+/// The `Universe` is a factory for creating `World`s.
+///
+/// Entities inserted into worlds created within the same universe are guarenteed to have
+/// unique `Entity` IDs, even across worlds.
 #[derive(Debug)]
 pub struct Universe {
     allocator: Arc<Mutex<BlockAllocator>>,
 }
 
 impl Universe {
+    /// Creates a new `Universe`.
     pub fn new() -> Self { Self::default() }
+
+    /// Creates a new `World` within this `Unvierse`.
+    ///
+    /// Entities inserted into worlds created within the same universe are guarenteed to have
+    /// unique `Entity` IDs, even across worlds.
     pub fn create_world(&self) -> World { World::new(EntityAllocator::new(self.allocator.clone())) }
 }
 
@@ -41,31 +51,61 @@ impl Default for Universe {
     }
 }
 
+/// Contains queryable collections of data associated with `Entity`s.
 pub struct World {
     pub(crate) archetypes: Storage,
     entity_allocator: EntityAllocator,
 }
 
 impl World {
-    pub fn new(allocator: EntityAllocator) -> Self {
+    fn new(allocator: EntityAllocator) -> Self {
         Self {
             archetypes: Storage::default(),
             entity_allocator: allocator,
         }
     }
 
+    /// Inserts new entities into the world.
+    ///
+    /// # Examples
+    ///
+    /// Inserting entity tuples:
+    ///
+    /// ```
+    /// # use legion::experimental::prelude::*;
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Position(f32);
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Rotation(f32);
+    /// # let universe = Universe::new();
+    /// # let mut world = universe.create_world();
+    /// # let model = 0u8;
+    /// # let color = 0u16;
+    /// let tags = (model, color);
+    /// let data = vec![
+    ///     (Position(0.0), Rotation(0.0)),
+    ///     (Position(1.0), Rotation(1.0)),
+    ///     (Position(2.0), Rotation(2.0)),
+    /// ];
+    /// world.insert(tags, data);
+    /// ```
     pub fn insert<T, C>(&mut self, mut tags: T, components: C) -> &[Entity]
     where
         T: TagSet,
         C: IntoComponentSource,
     {
+        // find or create archetype
         let mut components = components.into();
         let archetype_id = self.find_or_create_archetype(&mut tags, &mut components);
 
         self.entity_allocator.clear_allocation_buffer();
 
+        // insert components into chunks
         while !components.is_empty() {
+            // find or create chunk
             let chunk_id = self.find_or_create_chunk(archetype_id, &mut tags);
+
+            // get chunk component storage
             let mut archetype = unsafe {
                 self.archetypes
                     .data_unchecked(archetype_id)
@@ -74,7 +114,10 @@ impl World {
             };
             let component_storage = archetype.component_chunk_mut(chunk_id).unwrap();
 
+            // insert as many components as we can into the chunk
             let allocated = components.write(&mut self.entity_allocator, component_storage);
+
+            // record new entity locations
             let start = component_storage.len() - allocated;
             let added = component_storage.entities().iter().enumerate().skip(start);
             for (i, e) in added {
@@ -86,99 +129,40 @@ impl World {
         self.entity_allocator.allocation_buffer()
     }
 
+    /// Removes the given `Entity` from the `World`.
+    ///
+    /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
-        let deleted = self.entity_allocator.delete_entity(entity);
-
-        if deleted {
-            let location = self.entity_allocator.get_location(entity.index()).unwrap();
+        if let Some(location) = self.entity_allocator.delete_entity(entity) {
+            // find entity's chunk
             let mut archetype = self
                 .archetypes
                 .data(location.archetype())
                 .unwrap()
                 .get_mut();
             let chunk = archetype.component_chunk_mut(location.chunk()).unwrap();
+
+            // swap remove with last entity in chunk
             if let Some(swapped) = chunk.swap_remove(location.component()) {
+                // record swapped entity's new location
                 self.entity_allocator
                     .set_location(swapped.index(), location);
             }
-        }
 
-        deleted
+            true
+        } else {
+            false
+        }
     }
 
+    /// Determines if the given `Entity` is alive within this `World`.
     pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
-    pub fn get_component<T: Component>(
-        &mut self,
-        entity: Entity,
-    ) -> Option<Ref<(Shared, Shared), T>> {
-        if !self.is_alive(entity) {
-            return None;
-        }
-
-        let location = self.entity_allocator.get_location(entity.index())?;
-        let (archetype_borrow, archetype) = unsafe {
-            self.archetypes
-                .data(location.archetype())?
-                .get()
-                .deconstruct()
-        };
-        let chunk = archetype.component_chunk(location.chunk())?;
-        let (slice_borrow, slice) = unsafe {
-            chunk
-                .components(ComponentTypeId::of::<T>())?
-                .data_slice::<T>()
-                .deconstruct()
-        };
-        let component = slice.get(location.component())?;
-
-        Some(Ref::new((archetype_borrow, slice_borrow), component))
-    }
-
-    pub fn get_component_mut<T: Component>(
-        &mut self,
-        entity: Entity,
-    ) -> Option<RefMut<(Shared, Exclusive), T>> {
-        if !self.is_alive(entity) {
-            return None;
-        }
-
-        let location = self.entity_allocator.get_location(entity.index())?;
-        let (archetype_borrow, archetype) = unsafe {
-            self.archetypes
-                .data(location.archetype())?
-                .get()
-                .deconstruct()
-        };
-        let chunk = archetype.component_chunk(location.chunk())?;
-        let (slice_borrow, slice) = unsafe {
-            chunk
-                .components(ComponentTypeId::of::<T>())?
-                .data_slice_mut::<T>()
-                .deconstruct()
-        };
-        let component = slice.get_mut(location.component())?;
-
-        Some(RefMut::new((archetype_borrow, slice_borrow), component))
-    }
-
-    pub fn get_tag<T: Tag>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
-        if !self.is_alive(entity) {
-            return None;
-        }
-
-        let location = self.entity_allocator.get_location(entity.index())?;
-        let (archetype_borrow, archetype) = unsafe {
-            self.archetypes
-                .data(location.archetype())?
-                .get()
-                .deconstruct()
-        };
-        let tags = archetype.tags(TagTypeId::of::<T>())?;
-        let tag = unsafe { tags.data_slice::<T>().get(location.chunk())? };
-
-        Some(Ref::new(archetype_borrow, tag))
-    }
+    /// Creates a random accessor for entity data stored within this world.
+    ///
+    /// With a random accessor, entity data can be retrieved via `Entity` ID.
+    /// Runtime borrow checking enforces safe component access.
+    pub fn random_access(&mut self) -> WorldRandomAccessor { WorldRandomAccessor { world: self } }
 
     fn find_or_create_archetype<T, C>(&mut self, tags: &mut T, components: &mut C) -> usize
     where
@@ -186,6 +170,7 @@ impl World {
         C: ComponentLayout,
     {
         {
+            // search for an archetype with an exact match for the desired component layout
             let archetype_data = ArchetypeFilterData {
                 component_types: self.archetypes.component_types(),
                 tag_types: self.archetypes.tag_types(),
@@ -207,6 +192,7 @@ impl World {
             };
         }
 
+        // create a new archetype
         let mut description = ArchetypeDescription::default();
         tags.tailor_archetype(&mut description);
         components.tailor_archetype(&mut description);
@@ -219,10 +205,12 @@ impl World {
     where
         T: TagSet,
     {
+        // fetch the archetype, we can already assume that the archetype index is valid
         let mut archetype_data =
             unsafe { self.archetypes.data_unchecked(archetype).deref().get_mut() };
 
         {
+            // find a chunk with the correct tags
             let chunk_filter_data = ChunkFilterData {
                 archetype_data: archetype_data.deref(),
             };
@@ -241,35 +229,165 @@ impl World {
             }
         }
 
+        // allocate a new chunk
         let (id, chunk_tags, _) = archetype_data.alloc_chunk();
         tags.write_tags(chunk_tags);
         id
     }
 }
 
+/// Provides random access to the component data within a `World`.
+///
+/// Random accesses requires exclusive access to the world, and thus cannot occur
+/// at the same time as entity creation, deletion, mutation, or query iteration.
+///
+/// However, components can be accessed through a `WorldRandomAccessor` via a shared
+/// reference.
+///
+/// # Safety
+///     
+/// Component access is runtime borrow checked to ensure that safety is not breached.
+/// Currently, this check is performed per-component-type and per-chunk. e.g. You cannot
+/// access the same component type both mutably and immutably at the same time for two
+/// entities stored in the same chunk.
+pub struct WorldRandomAccessor<'a> {
+    world: &'a mut World,
+}
+
+impl<'a> WorldRandomAccessor<'a> {
+    /// Borrows component data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    ///
+    /// # Panics
+    ///
+    /// This function borrows all components of type `T` in the world. It may panic if
+    /// any other code is currently borrowing `T` mutably (such as in a query).
+    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<(Shared, Shared), T>> {
+        let world = &self.world;
+
+        if !world.is_alive(entity) {
+            return None;
+        }
+
+        let location = world.entity_allocator.get_location(entity.index())?;
+        let (archetype_borrow, archetype) = unsafe {
+            world
+                .archetypes
+                .data(location.archetype())?
+                .get()
+                .deconstruct()
+        };
+        let chunk = archetype.component_chunk(location.chunk())?;
+        let (slice_borrow, slice) = unsafe {
+            chunk
+                .components(ComponentTypeId::of::<T>())?
+                .data_slice::<T>()
+                .deconstruct()
+        };
+        let component = slice.get(location.component())?;
+
+        Some(Ref::new((archetype_borrow, slice_borrow), component))
+    }
+
+    /// Mutably borrows entity data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    pub fn get_component_mut<T: Component>(
+        &self,
+        entity: Entity,
+    ) -> Option<RefMut<(Shared, Exclusive), T>> {
+        let world = &self.world;
+
+        if !world.is_alive(entity) {
+            return None;
+        }
+
+        let location = world.entity_allocator.get_location(entity.index())?;
+        let (archetype_borrow, archetype) = unsafe {
+            world
+                .archetypes
+                .data(location.archetype())?
+                .get()
+                .deconstruct()
+        };
+        let chunk = archetype.component_chunk(location.chunk())?;
+        let (slice_borrow, slice) = unsafe {
+            chunk
+                .components(ComponentTypeId::of::<T>())?
+                .data_slice_mut::<T>()
+                .deconstruct()
+        };
+        let component = slice.get_mut(location.component())?;
+
+        Some(RefMut::new((archetype_borrow, slice_borrow), component))
+    }
+
+    /// Gets tag data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    pub fn get_tag<T: Tag>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
+        let world = &self.world;
+
+        if !world.is_alive(entity) {
+            return None;
+        }
+
+        let location = world.entity_allocator.get_location(entity.index())?;
+        let (archetype_borrow, archetype) = unsafe {
+            world
+                .archetypes
+                .data(location.archetype())?
+                .get()
+                .deconstruct()
+        };
+        let tags = archetype.tags(TagTypeId::of::<T>())?;
+        let tag = unsafe { tags.data_slice::<T>().get(location.chunk())? };
+
+        Some(Ref::new(archetype_borrow, tag))
+    }
+}
+
+/// Describes the types of a set of components attached to an entity.
 pub trait ComponentLayout: Sized + for<'a> Filter<ArchetypeFilterData<'a>> {
+    /// Modifies an archetype description to include the components described by this layout.
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription);
 }
 
+/// Describes the types of a set of tags attached to an entity.
 pub trait TagLayout: Sized + for<'a> Filter<ArchetypeFilterData<'a>> {
+    /// Modifies an archetype description to include the tags described by this layout.
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription);
 }
 
+/// A set of tag values to be attached to an entity.
 pub trait TagSet: TagLayout + for<'a> Filter<ChunkFilterData<'a>> {
+    /// Writes the tags in this set to a new chunk.
     fn write_tags(&self, tags: &mut Tags);
 }
 
+/// A set of components to be attached to one or more entities.
 pub trait ComponentSource: ComponentLayout {
+    /// Determines if this component source has any more entity data to write.
     fn is_empty(&mut self) -> bool;
+
+    /// Writes as many components as possible into a chunk.
     fn write(&mut self, allocator: &mut EntityAllocator, chunk: &mut ComponentStorage) -> usize;
 }
 
+/// An object that can be converted into a `ComponentSource`.
 pub trait IntoComponentSource {
+    /// The component source type that can be converted into.
     type Source: ComponentSource;
 
+    /// Converts `self` into a component source.
     fn into(self) -> Self::Source;
 }
 
+/// A `ComponentSource` which can insert tuples of components representing each entity into a world.
 pub struct ComponentTupleSet<T, I>
 where
     I: Iterator<Item = T>,
@@ -322,7 +440,7 @@ mod tuple_impls {
         ( @COMPONENT_SOURCE $( $ty: ident => $id: ident ),* ) => {
             impl<I, $( $ty ),*> ComponentLayout for ComponentTupleSet<($( $ty, )*), I>
             where
-                I: Iterator<Item = ($( $ty, )*)>,
+                I: Iterator<Item = ($( $ty, )*)> + Sync + Send,
                 $( $ty: Component ),*
             {
                 fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
@@ -335,7 +453,7 @@ mod tuple_impls {
 
             impl<I, $( $ty ),*> ComponentSource for ComponentTupleSet<($( $ty, )*), I>
             where
-                I: Iterator<Item = ($( $ty, )*)>,
+                I: Iterator<Item = ($( $ty, )*)> + Sync + Send,
                 $( $ty: Component ),*
             {
                 fn is_empty(&mut self) -> bool {
@@ -371,7 +489,7 @@ mod tuple_impls {
 
             impl<'a, I, $( $ty ),*> Filter<ArchetypeFilterData<'a>> for ComponentTupleSet<($( $ty, )*), I>
             where
-                I: Iterator<Item = ($( $ty, )*)>,
+                I: Iterator<Item = ($( $ty, )*)> + Sync + Send,
                 $( $ty: Component ),*
             {
                 type Iter = SliceVecIter<'a, ComponentTypeId>;
@@ -398,7 +516,11 @@ mod tuple_impls {
                     #![allow(non_snake_case)]
                     let ($($id,)*) = self;
                     $(
-                        tags.get_mut(TagTypeId::of::<$ty>()).unwrap().push($id.clone());
+                        unsafe {
+                            tags.get_mut(TagTypeId::of::<$ty>())
+                                .unwrap()
+                                .push($id.clone())
+                        };
                     )*
                 }
             }
@@ -547,11 +669,11 @@ mod tests {
             .iter()
             .enumerate()
         {
-            match world.get_component(*e) {
+            match world.random_access().get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i).map(|(x, _)| x), None),
             }
-            match world.get_component(*e) {
+            match world.random_access().get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i).map(|(_, x)| x), None),
             }
@@ -566,7 +688,7 @@ mod tests {
 
         let entity = *world.entity_allocator.allocation_buffer().get(0).unwrap();
 
-        assert!(world.get_component::<i32>(entity).is_none());
+        assert!(world.random_access().get_component::<i32>(entity).is_none());
     }
 
     #[test]
@@ -581,9 +703,15 @@ mod tests {
 
         world.insert(shared, components);
 
-        for e in world.entity_allocator.allocation_buffer().iter() {
-            assert_eq!(&Static, world.get_tag::<Static>(*e).unwrap().deref());
-            assert_eq!(&Model(5), world.get_tag::<Model>(*e).unwrap().deref());
+        for e in world.entity_allocator.allocation_buffer().to_vec().iter() {
+            assert_eq!(
+                &Static,
+                world.random_access().get_tag::<Static>(*e).unwrap().deref()
+            );
+            assert_eq!(
+                &Model(5),
+                world.random_access().get_tag::<Model>(*e).unwrap().deref()
+            );
         }
     }
 
@@ -593,9 +721,9 @@ mod tests {
 
         world.insert((Static,), vec![(0f64,)]);
 
-        let entity = world.entity_allocator.allocation_buffer().get(0).unwrap();
+        let entity = *world.entity_allocator.allocation_buffer().get(0).unwrap();
 
-        assert!(world.get_tag::<Model>(*entity).is_none());
+        assert!(world.random_access().get_tag::<Model>(entity).is_none());
     }
 
     #[test]
@@ -611,12 +739,12 @@ mod tests {
         let entities = world.insert(shared, components).to_vec();
 
         for e in entities.iter() {
-            assert!(world.get_component::<Pos>(*e).is_some());
+            assert!(world.random_access().get_component::<Pos>(*e).is_some());
         }
 
         for e in entities.iter() {
             world.delete(*e);
-            assert!(world.get_component::<Pos>(*e).is_none());
+            assert!(world.random_access().get_component::<Pos>(*e).is_none());
         }
     }
 
@@ -636,11 +764,11 @@ mod tests {
         world.delete(last);
 
         for (i, e) in entities.iter().take(entities.len() - 1).enumerate() {
-            match world.get_component(*e) {
+            match world.random_access().get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i).map(|(x, _)| x), None),
             }
-            match world.get_component(*e) {
+            match world.random_access().get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i).map(|(_, x)| x), None),
             }
@@ -663,11 +791,11 @@ mod tests {
         world.delete(first);
 
         for (i, e) in entities.iter().skip(1).enumerate() {
-            match world.get_component(*e) {
+            match world.random_access().get_component(*e) {
                 Some(x) => assert_eq!(components.get(i + 1).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i + 1).map(|(x, _)| x), None),
             }
-            match world.get_component(*e) {
+            match world.random_access().get_component(*e) {
                 Some(x) => assert_eq!(components.get(i + 1).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i + 1).map(|(_, x)| x), None),
             }

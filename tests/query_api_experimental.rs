@@ -1,7 +1,4 @@
-use legion::experimental::entity::*;
-use legion::experimental::filter::filter_fns::*;
-use legion::experimental::query::*;
-use legion::experimental::world::*;
+use legion::experimental::prelude::*;
 use rayon::prelude::*;
 use std::{
     collections::HashMap,
@@ -158,64 +155,64 @@ fn query_cached_read_entity_data() {
     assert_eq!(components.len(), count);
 }
 
-// #[test]
-// fn query_read_entity_data_par() {
-//     let universe = Universe::new();
-//     let mut world = universe.create_world();
+#[test]
+fn query_read_entity_data_par() {
+    let universe = Universe::new();
+    let mut world = universe.create_world();
 
-//     let shared = (Static, Model(5));
-//     let components = vec![
-//         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
-//         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
-//     ];
+    let shared = (Static, Model(5));
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
 
-//     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
+    let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-//     for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
-//         if let Some((pos, rot)) = components.get(i) {
-//             expected.insert(*e, (*pos, *rot));
-//         }
-//     }
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+        if let Some((pos, rot)) = components.get(i) {
+            expected.insert(*e, (*pos, *rot));
+        }
+    }
 
-//     let count = AtomicUsize::new(0);
-//     let mut query = Read::<Pos>::query();
-//     query.par_iter_chunks(&world).for_each(|mut chunk| {
-//         for (entity, pos) in chunk.iter_entities() {
-//             assert_eq!(expected.get(&entity).unwrap().0, &*pos);
-//             count.fetch_add(1, Ordering::SeqCst);
-//         }
-//     });
+    let count = AtomicUsize::new(0);
+    let mut query = Read::<Pos>::query();
+    query.par_iter_chunks(&world).for_each(|mut chunk| {
+        for (entity, pos) in chunk.iter_entities() {
+            assert_eq!(expected.get(&entity).unwrap().0, *pos);
+            count.fetch_add(1, Ordering::SeqCst);
+        }
+    });
 
-//     assert_eq!(components.len(), count.load(Ordering::SeqCst));
-// }
+    assert_eq!(components.len(), count.load(Ordering::SeqCst));
+}
 
-// #[test]
-// fn query_read_entity_data_par_foreach() {
-//     let universe = Universe::new();
-//     let mut world = universe.create_world();
+#[test]
+fn query_read_entity_data_par_foreach() {
+    let universe = Universe::new();
+    let mut world = universe.create_world();
 
-//     let shared = (Static, Model(5));
-//     let components = vec![
-//         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
-//         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
-//     ];
+    let shared = (Static, Model(5));
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
 
-//     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
+    let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-//     for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
-//         if let Some((pos, rot)) = components.get(i) {
-//             expected.insert(*e, (*pos, *rot));
-//         }
-//     }
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+        if let Some((pos, rot)) = components.get(i) {
+            expected.insert(*e, (*pos, *rot));
+        }
+    }
 
-//     let count = AtomicUsize::new(0);
-//     let mut query = Read::<Pos>::query();
-//     query.par_for_each(&world, |_pos| {
-//         count.fetch_add(1, Ordering::SeqCst);
-//     });
+    let count = AtomicUsize::new(0);
+    let mut query = Read::<Pos>::query();
+    query.par_for_each(&world, |_pos| {
+        count.fetch_add(1, Ordering::SeqCst);
+    });
 
-//     assert_eq!(components.len(), count.load(Ordering::SeqCst));
-// }
+    assert_eq!(components.len(), count.load(Ordering::SeqCst));
+}
 
 #[test]
 fn query_read_entity_data_tuple() {

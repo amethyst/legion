@@ -2,12 +2,7 @@ use criterion::*;
 
 use cgmath::prelude::*;
 use cgmath::{vec3, Matrix4, Quaternion, Vector3};
-use legion::experimental::borrow::*;
-use legion::experimental::entity::*;
-use legion::experimental::filter::filter_fns::*;
-use legion::experimental::filter::*;
-use legion::experimental::query::*;
-use legion::experimental::world::*;
+use legion::experimental::prelude::*;
 use rayon::join;
 
 #[derive(Copy, Clone, Debug, PartialEq)]

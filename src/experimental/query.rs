@@ -33,8 +33,11 @@ use std::ops::Deref;
 use std::slice::Iter;
 use std::slice::IterMut;
 
+#[cfg(feature = "par-iter")]
+use rayon::prelude::*;
+
 /// A type which can fetch a strongly-typed view of the data contained
-/// within a `Chunk`.
+/// within a chunk.
 pub trait View<'a>: Sized + Send + Sync + 'static {
     /// The iterator over the chunk data.
     type Iter: Iterator + 'a;
@@ -89,7 +92,7 @@ impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
     }
 }
 
-/// Reads a single entity data component type from a `Chunk`.
+/// Reads a single entity data component type from a chunk.
 #[derive(Debug)]
 pub struct Read<T: Component>(PhantomData<T>);
 
@@ -129,7 +132,7 @@ impl<T: Component> ViewElement for Read<T> {
     type Component = T;
 }
 
-/// Writes to a single entity data component type from a `Chunk`.
+/// Writes to a single entity data component type from a chunk.
 #[derive(Debug)]
 pub struct Write<T: Component>(PhantomData<T>);
 
@@ -173,7 +176,7 @@ impl<T: Component> ViewElement for Write<T> {
     type Component = T;
 }
 
-/// Reads a single shared data component type in a `Chunk`.
+/// Reads a single shared data component type in a chunk.
 #[derive(Debug)]
 pub struct Tagged<T: Tag>(PhantomData<T>);
 
@@ -274,7 +277,7 @@ impl_view_tuple!(A, B, C, D);
 impl_view_tuple!(A, B, C, D, E);
 impl_view_tuple!(A, B, C, D, E, F);
 
-/// A type-safe view of a "chunk" of entities.
+/// A type-safe view of a chunk of entities all of the same data layout.
 pub struct Chunk<'a, V: for<'b> View<'b>> {
     archetype: Ref<'a, Shared<'a>, ArchetypeData>,
     components: Ref<'a, Shared<'a>, ComponentStorage>,
@@ -316,11 +319,12 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
     }
 
     /// Get a tag value.
-    pub fn tag<T: Tag>(&self) -> Option<&T> {
-        self.archetype
-            .tags(TagTypeId::of::<T>())
+    pub fn tag<T: Tag>(&self) -> Option<RefMap<'a, Shared<'a>, &T>> {
+        let (arch_borrow, arch) = unsafe { self.archetype.clone().deconstruct() };
+        arch.tags(TagTypeId::of::<T>())
             .map(|tags| unsafe { tags.data_slice::<T>() })
             .map(|slice| unsafe { slice.get_unchecked(self.index) })
+            .map(|tag| RefMap::new(arch_borrow, tag))
     }
 
     /// Get a slice of component data.
@@ -389,6 +393,7 @@ impl<'data, V: View<'data>> Iterator for ZipEntities<'data, V> {
     }
 }
 
+/// An iterator over all chunks that match a given query.
 pub struct ChunkViewIter<
     'data,
     'filter,
@@ -529,6 +534,128 @@ where
     }
 }
 
+/// Queries for entities within a `World`.
+///
+/// # Examples
+///
+/// Queries can be constructed from any `View` type, including tuples of `View`s.
+///
+/// ```rust
+/// # use legion::prelude::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// // A query which matches any entity with a `Position` component
+/// let mut query = Read::<Position>::query();
+///
+/// // A query which matches any entity with both a `Position` and a `Velocity` component
+/// let mut query = <(Read<Position>, Read<Velocity>)>::query();
+/// ```
+///
+/// The view determines what data is accessed, and whether it is accessed mutably or not.
+///
+/// ```rust
+/// # use legion::prelude::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// // A query which writes `Position`, reads `Velocity` and reads `Model`
+/// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
+/// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
+/// ```
+///
+/// By default, a query will filter its results to include only entities with the data
+/// types accessed by the view. However, additional filters can be specified if needed:
+///
+/// ```rust
+/// # use legion::prelude::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// #[derive(Copy, Clone, Debug, PartialEq)]
+/// struct Static;
+///
+/// // A query which also requires that entities have the `Static` tag
+/// let mut query = <(Read<Position>, Tagged<Model>)>::query().filter(tag::<Static>());
+/// ```
+///
+/// Filters can be combined with bitwise operators:
+///
+/// ```rust
+/// # use legion::prelude::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// #[derive(Copy, Clone, Debug, PartialEq)]
+/// struct Static;
+///
+/// // This query matches entities with positions and a model
+/// // But it also requires that the entity is not static, or has moved (even if static)
+/// let mut query = <(Read<Position>, Tagged<Model>)>::query()
+///     .filter(!tag::<Static>() | changed::<Position>());
+/// ```
+///
+/// Filters can be iterated through to pull data out of a `World`:
+///
+/// ```rust
+/// # use legion::prelude::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// # let universe = Universe::new(None);
+/// # let world = universe.create_world();
+/// // A query which writes `Position`, reads `Velocity` and reads `Model`
+/// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
+/// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
+///
+/// for (mut pos, vel, model) in query.iter(&world) {
+///     // `.iter` yields tuples of references to a single entity's data:
+///     // pos: &mut Position
+///     // vel: &Velocity
+///     // model: &Model
+/// }
+/// ```
+///
+/// The lower level `iter_chunks` function allows access to each underlying chunk of entity data.
+/// This allows you to run code for each tag value, or to retrieve a contiguous data slice.
+///
+/// ```rust
+/// # use legion::prelude::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// # let universe = Universe::new(None);
+/// # let world = universe.create_world();
+/// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
+///
+/// for chunk in query.iter_chunks(&world) {
+///     let model = chunk.tag::<Model>();
+///     let positions = chunk.components_mut::<Position>();
+///     let velocities = chunk.components::<Velocity>();
+/// }
+/// ```
+///
+/// The `ChunkView` yielded from `iter_chunks` allows access to all shared data in the chunk (queried for or not),
+/// but entity data slices can only be accessed if they were requested in the query's view. Attempting to access
+/// other data types, or attempting to write to components that were only requested via a `Read` will panic.
 pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
     view: PhantomData<V>,
     filter: F,
@@ -539,6 +666,7 @@ where
     V: for<'a> View<'a>,
     F: EntityFilter,
 {
+    /// Adds an additional filter to the query.
     pub fn filter<T: EntityFilter>(self, filter: T) -> Query<V, <F as std::ops::BitAnd<T>>::Output>
     where
         F: std::ops::BitAnd<T>,
@@ -550,6 +678,7 @@ where
         }
     }
 
+    /// Gets an iterator which iterates through all chunks that match the query.
     pub fn iter_chunks<'a, 'data>(
         &'a mut self,
         world: &'data World,
@@ -572,6 +701,7 @@ where
         }
     }
 
+    /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     pub fn iter_entities<'a, 'data>(
         &'a mut self,
         world: &'data World,
@@ -584,6 +714,7 @@ where
         }
     }
 
+    /// Gets an iterator which iterates through all entity data that matches the query.
     pub fn iter<'a, 'data>(
         &'a mut self,
         world: &'data World,
@@ -596,10 +727,33 @@ where
         }
     }
 
+    /// Iterates through all entity data that matches the query.
     pub fn for_each<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
         self.iter(world).for_each(&mut f);
+    }
+
+    /// Iterates through all entity data that matches the query in parallel.
+    #[cfg(feature = "par-iter")]
+    pub fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
+    where
+        T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
+    {
+        self.par_iter_chunks(world).for_each(|mut chunk| {
+            for data in chunk.iter() {
+                f(data);
+            }
+        });
+    }
+
+    /// Gets a parallel iterator of chunks that match the query.
+    #[cfg(feature = "par-iter")]
+    pub fn par_iter_chunks<'a>(
+        &'a mut self,
+        world: &'a World,
+    ) -> impl ParallelIterator<Item = Chunk<'a, V>> {
+        self.iter_chunks(world).par_bridge()
     }
 }
