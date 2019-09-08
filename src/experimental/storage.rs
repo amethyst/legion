@@ -14,7 +14,6 @@ use std::num::Wrapping;
 use std::ptr::NonNull;
 use std::slice::Iter;
 use std::slice::IterMut;
-use std::sync::Arc;
 
 /// A type ID identifying a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
@@ -139,7 +138,7 @@ impl<'a, T> Iterator for SliceVecIter<'a, T> {
 pub struct Storage {
     component_types: ComponentTypes,
     tag_types: TagTypes,
-    chunks: Vec<Arc<AtomicRefCell<ArchetypeData>>>,
+    chunks: Vec<ArchetypeData>,
 }
 
 impl Storage {
@@ -147,10 +146,7 @@ impl Storage {
     ///
     /// Returns the index of the newly created archetype and an exclusive reference to the
     /// achetype's data.
-    pub fn alloc_archetype(
-        &mut self,
-        desc: &ArchetypeDescription,
-    ) -> (usize, RefMut<Exclusive, ArchetypeData>) {
+    pub fn alloc_archetype(&mut self, desc: &ArchetypeDescription) -> (usize, &mut ArchetypeData) {
         self.component_types
             .0
             .push(desc.components.iter().map(|(type_id, _)| *type_id));
@@ -158,13 +154,10 @@ impl Storage {
             .0
             .push(desc.tags.iter().map(|(type_id, _)| *type_id));
         self.chunks
-            .push(Arc::new(AtomicRefCell::new(ArchetypeData::new(
-                ArchetypeId(self.chunks.len()),
-                desc,
-            ))));
+            .push(ArchetypeData::new(ArchetypeId(self.chunks.len()), desc));
 
         let index = self.chunks.len() - 1;
-        (index, unsafe { self.data_unchecked(index).get_mut() })
+        (index, unsafe { self.data_unchecked_mut(index) })
     }
 
     /// Gets a vector of slices of all component types for all archetypes.
@@ -178,8 +171,11 @@ impl Storage {
     pub fn tag_types(&self) -> &TagTypes { &self.tag_types }
 
     /// Gets the entity data for the specified archetype.
-    pub fn data(&self, archetype: usize) -> Option<&Arc<AtomicRefCell<ArchetypeData>>> {
-        self.chunks.get(archetype)
+    pub fn data(&self, archetype: usize) -> Option<&ArchetypeData> { self.chunks.get(archetype) }
+
+    /// Gets the entity data for the specified archetype.
+    pub fn data_mut(&mut self, archetype: usize) -> Option<&mut ArchetypeData> {
+        self.chunks.get_mut(archetype)
     }
 
     /// Gets the entity data for the specified archetype.
@@ -187,8 +183,17 @@ impl Storage {
     /// # Safety
     ///
     /// This method performs no bounds checking. Calling it with an out-of-bounds index is *undefined behavior*.
-    pub unsafe fn data_unchecked(&self, archetype: usize) -> &Arc<AtomicRefCell<ArchetypeData>> {
+    pub unsafe fn data_unchecked(&self, archetype: usize) -> &ArchetypeData {
         self.chunks.get_unchecked(archetype)
+    }
+
+    /// Gets the entity data for the specified archetype.
+    ///
+    /// # Safety
+    ///
+    /// This method performs no bounds checking. Calling it with an out-of-bounds index is *undefined behavior*.
+    pub unsafe fn data_unchecked_mut(&mut self, archetype: usize) -> &mut ArchetypeData {
+        self.chunks.get_unchecked_mut(archetype)
     }
 }
 
@@ -892,7 +897,7 @@ mod test {
         desc.register_tag::<usize>();
         desc.register_component::<isize>();
 
-        let (_arch_id, mut data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
         let (_, tags, components) = data.alloc_chunk();
 
         unsafe { tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize) };
@@ -918,7 +923,7 @@ mod test {
         desc.register_component::<usize>();
         desc.register_component::<ZeroSize>();
 
-        let (_arch_id, mut data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
         let (_, _, components) = data.alloc_chunk();
 
         let entities = [
@@ -990,7 +995,7 @@ mod test {
         desc.register_tag::<isize>();
         desc.register_tag::<ZeroSize>();
 
-        let (_arch_id, mut data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
 
         let tag_values = [(0isize, ZeroSize), (1isize, ZeroSize), (2isize, ZeroSize)];
 
@@ -1029,7 +1034,7 @@ mod test {
         desc.register_tag::<ZeroSize>();
         desc.register_component::<isize>();
 
-        let (_arch_id, mut data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
         let (_, tags, components) = data.alloc_chunk();
 
         unsafe {
@@ -1058,7 +1063,7 @@ mod test {
         desc.register_tag::<usize>();
         desc.register_component::<ZeroSize>();
 
-        let (_arch_id, mut data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
         let (_, tags, components) = data.alloc_chunk();
 
         unsafe { tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize) };

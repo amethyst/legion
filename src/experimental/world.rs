@@ -106,13 +106,8 @@ impl World {
             let chunk_id = self.find_or_create_chunk(archetype_id, &mut tags);
 
             // get chunk component storage
-            let mut archetype = unsafe {
-                self.archetypes
-                    .data_unchecked(archetype_id)
-                    .deref()
-                    .get_mut()
-            };
-            let component_storage = archetype.component_chunk_mut(chunk_id).unwrap();
+            let chunks = unsafe { self.archetypes.data_unchecked_mut(archetype_id) };
+            let component_storage = chunks.component_chunk_mut(chunk_id).unwrap();
 
             // insert as many components as we can into the chunk
             let allocated = components.write(&mut self.entity_allocator, component_storage);
@@ -135,12 +130,8 @@ impl World {
     pub fn delete(&mut self, entity: Entity) -> bool {
         if let Some(location) = self.entity_allocator.delete_entity(entity) {
             // find entity's chunk
-            let mut archetype = self
-                .archetypes
-                .data(location.archetype())
-                .unwrap()
-                .get_mut();
-            let chunk = archetype.component_chunk_mut(location.chunk()).unwrap();
+            let chunks = self.archetypes.data_mut(location.archetype()).unwrap();
+            let chunk = chunks.component_chunk_mut(location.chunk()).unwrap();
 
             // swap remove with last entity in chunk
             if let Some(swapped) = chunk.swap_remove(location.component()) {
@@ -164,19 +155,14 @@ impl World {
     ///
     /// This function borrows all components of type `T` in the world. It may panic if
     /// any other code is currently borrowing `T` mutably (such as in a query).
-    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<(Shared, Shared), T>> {
+    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
         if !self.is_alive(entity) {
             return None;
         }
 
         let location = self.entity_allocator.get_location(entity.index())?;
-        let (archetype_borrow, archetype) = unsafe {
-            self.archetypes
-                .data(location.archetype())?
-                .get()
-                .deconstruct()
-        };
-        let chunk = archetype.component_chunk(location.chunk())?;
+        let chunks = self.archetypes.data(location.archetype())?;
+        let chunk = chunks.component_chunk(location.chunk())?;
         let (slice_borrow, slice) = unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())?
@@ -185,7 +171,7 @@ impl World {
         };
         let component = slice.get(location.component())?;
 
-        Some(Ref::new((archetype_borrow, slice_borrow), component))
+        Some(Ref::new(slice_borrow, component))
     }
 
     /// Mutably borrows entity data for the given entity.
@@ -197,22 +183,14 @@ impl World {
     ///
     /// This function borrows all components of type `T` in the world. It may panic if
     /// any other code is currently borrowing `T` (such as in a query).
-    pub fn get_component_mut<T: Component>(
-        &self,
-        entity: Entity,
-    ) -> Option<RefMut<(Shared, Exclusive), T>> {
+    pub fn get_component_mut<T: Component>(&self, entity: Entity) -> Option<RefMut<Exclusive, T>> {
         if !self.is_alive(entity) {
             return None;
         }
 
         let location = self.entity_allocator.get_location(entity.index())?;
-        let (archetype_borrow, archetype) = unsafe {
-            self.archetypes
-                .data(location.archetype())?
-                .get()
-                .deconstruct()
-        };
-        let chunk = archetype.component_chunk(location.chunk())?;
+        let chunks = self.archetypes.data(location.archetype())?;
+        let chunk = chunks.component_chunk(location.chunk())?;
         let (slice_borrow, slice) = unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())?
@@ -221,29 +199,22 @@ impl World {
         };
         let component = slice.get_mut(location.component())?;
 
-        Some(RefMut::new((archetype_borrow, slice_borrow), component))
+        Some(RefMut::new(slice_borrow, component))
     }
 
     /// Gets tag data for the given entity.
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
-    pub fn get_tag<T: Tag>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
+    pub fn get_tag<T: Tag>(&self, entity: Entity) -> Option<&T> {
         if !self.is_alive(entity) {
             return None;
         }
 
         let location = self.entity_allocator.get_location(entity.index())?;
-        let (archetype_borrow, archetype) = unsafe {
-            self.archetypes
-                .data(location.archetype())?
-                .get()
-                .deconstruct()
-        };
-        let tags = archetype.tags(TagTypeId::of::<T>())?;
-        let tag = unsafe { tags.data_slice::<T>().get(location.chunk())? };
-
-        Some(Ref::new(archetype_borrow, tag))
+        let chunks = self.archetypes.data(location.archetype())?;
+        let tags = chunks.tags(TagTypeId::of::<T>())?;
+        unsafe { tags.data_slice::<T>().get(location.chunk()) }
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
@@ -291,8 +262,7 @@ impl World {
         T: TagSet,
     {
         // fetch the archetype, we can already assume that the archetype index is valid
-        let mut archetype_data =
-            unsafe { self.archetypes.data_unchecked(archetype).deref().get_mut() };
+        let archetype_data = unsafe { self.archetypes.data_unchecked_mut(archetype) };
 
         {
             // find a chunk with the correct tags

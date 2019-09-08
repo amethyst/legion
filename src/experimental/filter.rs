@@ -1,4 +1,3 @@
-use crate::experimental::borrow::Shared;
 use crate::experimental::storage::ArchetypeData;
 use crate::experimental::storage::ArchetypeId;
 use crate::experimental::storage::ChunkId;
@@ -15,7 +14,6 @@ use std::collections::HashMap;
 use std::iter::Enumerate;
 use std::iter::Repeat;
 use std::marker::PhantomData;
-use std::ops::Deref;
 use std::slice::Iter;
 
 pub mod filter_fns {
@@ -321,7 +319,7 @@ pub struct FilterEntityIter<
     arch_filter: &'b mut Arch,
     chunk_filter: &'b mut Chunk,
     archetypes: Enumerate<Arch::Iter>,
-    chunks: Option<(ArchetypeId, Shared<'a>, Enumerate<Chunk::Iter>)>,
+    chunks: Option<(ArchetypeId, Enumerate<Chunk::Iter>)>,
 }
 
 impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunkFilterData<'a>>> Iterator
@@ -331,7 +329,7 @@ impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunkFilterDat
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some((arch_id, _, ref mut chunks)) = self.chunks {
+            if let Some((arch_id, ref mut chunks)) = self.chunks {
                 for (chunk_index, chunk_data) in chunks {
                     if self.chunk_filter.is_match(&chunk_data).is_pass() {
                         return Some(ChunkId::new(arch_id, chunk_index));
@@ -343,21 +341,13 @@ impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunkFilterDat
                     Some((arch_index, arch_data)) => {
                         if self.arch_filter.is_match(&arch_data).is_pass() {
                             self.chunks = {
-                                let (borrow, archetype) = unsafe {
-                                    self.storage
-                                        .data(arch_index)
-                                        .unwrap()
-                                        .deref()
-                                        .get()
-                                        .deconstruct()
-                                };
+                                let chunks = unsafe { self.storage.data_unchecked(arch_index) };
                                 let data = ChunkFilterData {
-                                    archetype_data: archetype,
+                                    archetype_data: chunks,
                                 };
 
                                 Some((
                                     ArchetypeId::new(arch_index),
-                                    borrow,
                                     self.chunk_filter.collect(data).enumerate(),
                                 ))
                             };
