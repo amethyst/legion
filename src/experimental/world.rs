@@ -155,14 +155,99 @@ impl World {
         }
     }
 
+    /// Borrows component data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    ///
+    /// # Panics
+    ///
+    /// This function borrows all components of type `T` in the world. It may panic if
+    /// any other code is currently borrowing `T` mutably (such as in a query).
+    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<(Shared, Shared), T>> {
+        if !self.is_alive(entity) {
+            return None;
+        }
+
+        let location = self.entity_allocator.get_location(entity.index())?;
+        let (archetype_borrow, archetype) = unsafe {
+            self.archetypes
+                .data(location.archetype())?
+                .get()
+                .deconstruct()
+        };
+        let chunk = archetype.component_chunk(location.chunk())?;
+        let (slice_borrow, slice) = unsafe {
+            chunk
+                .components(ComponentTypeId::of::<T>())?
+                .data_slice::<T>()
+                .deconstruct()
+        };
+        let component = slice.get(location.component())?;
+
+        Some(Ref::new((archetype_borrow, slice_borrow), component))
+    }
+
+    /// Mutably borrows entity data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    ///
+    /// # Panics
+    ///
+    /// This function borrows all components of type `T` in the world. It may panic if
+    /// any other code is currently borrowing `T` (such as in a query).
+    pub fn get_component_mut<T: Component>(
+        &self,
+        entity: Entity,
+    ) -> Option<RefMut<(Shared, Exclusive), T>> {
+        if !self.is_alive(entity) {
+            return None;
+        }
+
+        let location = self.entity_allocator.get_location(entity.index())?;
+        let (archetype_borrow, archetype) = unsafe {
+            self.archetypes
+                .data(location.archetype())?
+                .get()
+                .deconstruct()
+        };
+        let chunk = archetype.component_chunk(location.chunk())?;
+        let (slice_borrow, slice) = unsafe {
+            chunk
+                .components(ComponentTypeId::of::<T>())?
+                .data_slice_mut::<T>()
+                .deconstruct()
+        };
+        let component = slice.get_mut(location.component())?;
+
+        Some(RefMut::new((archetype_borrow, slice_borrow), component))
+    }
+
+    /// Gets tag data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    pub fn get_tag<T: Tag>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
+        if !self.is_alive(entity) {
+            return None;
+        }
+
+        let location = self.entity_allocator.get_location(entity.index())?;
+        let (archetype_borrow, archetype) = unsafe {
+            self.archetypes
+                .data(location.archetype())?
+                .get()
+                .deconstruct()
+        };
+        let tags = archetype.tags(TagTypeId::of::<T>())?;
+        let tag = unsafe { tags.data_slice::<T>().get(location.chunk())? };
+
+        Some(Ref::new(archetype_borrow, tag))
+    }
+
     /// Determines if the given `Entity` is alive within this `World`.
     pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
-
-    /// Creates a random accessor for entity data stored within this world.
-    ///
-    /// With a random accessor, entity data can be retrieved via `Entity` ID.
-    /// Runtime borrow checking enforces safe component access.
-    pub fn random_access(&mut self) -> WorldRandomAccessor { WorldRandomAccessor { world: self } }
 
     fn find_or_create_archetype<T, C>(&mut self, tags: &mut T, components: &mut C) -> usize
     where
@@ -233,121 +318,6 @@ impl World {
         let (id, chunk_tags, _) = archetype_data.alloc_chunk();
         tags.write_tags(chunk_tags);
         id
-    }
-}
-
-/// Provides random access to the component data within a `World`.
-///
-/// Random accesses requires exclusive access to the world, and thus cannot occur
-/// at the same time as entity creation, deletion, mutation, or query iteration.
-///
-/// However, components can be accessed through a `WorldRandomAccessor` via a shared
-/// reference.
-///
-/// # Safety
-///     
-/// Component access is runtime borrow checked to ensure that safety is not breached.
-/// Currently, this check is performed per-component-type and per-chunk. e.g. You cannot
-/// access the same component type both mutably and immutably at the same time for two
-/// entities stored in the same chunk.
-pub struct WorldRandomAccessor<'a> {
-    world: &'a mut World,
-}
-
-impl<'a> WorldRandomAccessor<'a> {
-    /// Borrows component data for the given entity.
-    ///
-    /// Returns `Some(data)` if the entity was found and contains the specified data.
-    /// Otherwise `None` is returned.
-    ///
-    /// # Panics
-    ///
-    /// This function borrows all components of type `T` in the world. It may panic if
-    /// any other code is currently borrowing `T` mutably (such as in a query).
-    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<(Shared, Shared), T>> {
-        let world = &self.world;
-
-        if !world.is_alive(entity) {
-            return None;
-        }
-
-        let location = world.entity_allocator.get_location(entity.index())?;
-        let (archetype_borrow, archetype) = unsafe {
-            world
-                .archetypes
-                .data(location.archetype())?
-                .get()
-                .deconstruct()
-        };
-        let chunk = archetype.component_chunk(location.chunk())?;
-        let (slice_borrow, slice) = unsafe {
-            chunk
-                .components(ComponentTypeId::of::<T>())?
-                .data_slice::<T>()
-                .deconstruct()
-        };
-        let component = slice.get(location.component())?;
-
-        Some(Ref::new((archetype_borrow, slice_borrow), component))
-    }
-
-    /// Mutably borrows entity data for the given entity.
-    ///
-    /// Returns `Some(data)` if the entity was found and contains the specified data.
-    /// Otherwise `None` is returned.
-    pub fn get_component_mut<T: Component>(
-        &self,
-        entity: Entity,
-    ) -> Option<RefMut<(Shared, Exclusive), T>> {
-        let world = &self.world;
-
-        if !world.is_alive(entity) {
-            return None;
-        }
-
-        let location = world.entity_allocator.get_location(entity.index())?;
-        let (archetype_borrow, archetype) = unsafe {
-            world
-                .archetypes
-                .data(location.archetype())?
-                .get()
-                .deconstruct()
-        };
-        let chunk = archetype.component_chunk(location.chunk())?;
-        let (slice_borrow, slice) = unsafe {
-            chunk
-                .components(ComponentTypeId::of::<T>())?
-                .data_slice_mut::<T>()
-                .deconstruct()
-        };
-        let component = slice.get_mut(location.component())?;
-
-        Some(RefMut::new((archetype_borrow, slice_borrow), component))
-    }
-
-    /// Gets tag data for the given entity.
-    ///
-    /// Returns `Some(data)` if the entity was found and contains the specified data.
-    /// Otherwise `None` is returned.
-    pub fn get_tag<T: Tag>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
-        let world = &self.world;
-
-        if !world.is_alive(entity) {
-            return None;
-        }
-
-        let location = world.entity_allocator.get_location(entity.index())?;
-        let (archetype_borrow, archetype) = unsafe {
-            world
-                .archetypes
-                .data(location.archetype())?
-                .get()
-                .deconstruct()
-        };
-        let tags = archetype.tags(TagTypeId::of::<T>())?;
-        let tag = unsafe { tags.data_slice::<T>().get(location.chunk())? };
-
-        Some(Ref::new(archetype_borrow, tag))
     }
 }
 
@@ -669,11 +639,11 @@ mod tests {
             .iter()
             .enumerate()
         {
-            match world.random_access().get_component(*e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i).map(|(x, _)| x), None),
             }
-            match world.random_access().get_component(*e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i).map(|(_, x)| x), None),
             }
@@ -688,7 +658,7 @@ mod tests {
 
         let entity = *world.entity_allocator.allocation_buffer().get(0).unwrap();
 
-        assert!(world.random_access().get_component::<i32>(entity).is_none());
+        assert!(world.get_component::<i32>(entity).is_none());
     }
 
     #[test]
@@ -704,14 +674,8 @@ mod tests {
         world.insert(shared, components);
 
         for e in world.entity_allocator.allocation_buffer().to_vec().iter() {
-            assert_eq!(
-                &Static,
-                world.random_access().get_tag::<Static>(*e).unwrap().deref()
-            );
-            assert_eq!(
-                &Model(5),
-                world.random_access().get_tag::<Model>(*e).unwrap().deref()
-            );
+            assert_eq!(&Static, world.get_tag::<Static>(*e).unwrap().deref());
+            assert_eq!(&Model(5), world.get_tag::<Model>(*e).unwrap().deref());
         }
     }
 
@@ -723,7 +687,7 @@ mod tests {
 
         let entity = *world.entity_allocator.allocation_buffer().get(0).unwrap();
 
-        assert!(world.random_access().get_tag::<Model>(entity).is_none());
+        assert!(world.get_tag::<Model>(entity).is_none());
     }
 
     #[test]
@@ -739,12 +703,12 @@ mod tests {
         let entities = world.insert(shared, components).to_vec();
 
         for e in entities.iter() {
-            assert!(world.random_access().get_component::<Pos>(*e).is_some());
+            assert!(world.get_component::<Pos>(*e).is_some());
         }
 
         for e in entities.iter() {
             world.delete(*e);
-            assert!(world.random_access().get_component::<Pos>(*e).is_none());
+            assert!(world.get_component::<Pos>(*e).is_none());
         }
     }
 
@@ -764,11 +728,11 @@ mod tests {
         world.delete(last);
 
         for (i, e) in entities.iter().take(entities.len() - 1).enumerate() {
-            match world.random_access().get_component(*e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i).map(|(x, _)| x), None),
             }
-            match world.random_access().get_component(*e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i).map(|(_, x)| x), None),
             }
@@ -791,11 +755,11 @@ mod tests {
         world.delete(first);
 
         for (i, e) in entities.iter().skip(1).enumerate() {
-            match world.random_access().get_component(*e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i + 1).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i + 1).map(|(x, _)| x), None),
             }
-            match world.random_access().get_component(*e) {
+            match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i + 1).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i + 1).map(|(_, x)| x), None),
             }
