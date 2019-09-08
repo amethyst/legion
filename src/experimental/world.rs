@@ -134,7 +134,7 @@ impl World {
             let chunk = chunks.component_chunk_mut(location.chunk()).unwrap();
 
             // swap remove with last entity in chunk
-            if let Some(swapped) = chunk.swap_remove(location.component()) {
+            if let Some(swapped) = chunk.swap_remove(location.component(), true) {
                 // record swapped entity's new location
                 self.entity_allocator
                     .set_location(swapped.index(), location);
@@ -144,6 +144,17 @@ impl World {
         } else {
             false
         }
+    }
+
+    pub fn add_component<T: Component>(&mut self, entity: Entity, component: T) {
+        let location = self
+            .entity_allocator
+            .get_location(entity.index())
+            .expect("entity not found");
+
+        // find entity's chunk
+        let chunks = self.archetypes.data_mut(location.archetype()).unwrap();
+        let current_chunk = chunks.component_chunk_mut(location.chunk()).unwrap();
     }
 
     /// Borrows component data for the given entity.

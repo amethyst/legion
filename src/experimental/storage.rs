@@ -521,13 +521,13 @@ impl ComponentStorage {
         unsafe { &*self.component_info.get() }.get(component_type)
     }
 
-    /// Removes an entity from the chunk by swapping it with the last entry.ComponentStorage
+    /// Removes an entity from the chunk by swapping it with the last entry.
     ///
     /// Returns the ID of the entity which was swapped into the removed entity's position.
-    pub fn swap_remove(&mut self, index: usize) -> Option<Entity> {
+    pub fn swap_remove(&mut self, index: usize, drop: bool) -> Option<Entity> {
         self.entities.swap_remove(index);
         for (_, component) in unsafe { &mut *self.component_info.get() }.iter_mut() {
-            component.writer().swap_remove(index);
+            component.writer().swap_remove(index, drop);
         }
 
         if self.entities.len() > index {
@@ -535,6 +535,37 @@ impl ComponentStorage {
         } else {
             None
         }
+    }
+
+    /// Moves an entity from this chunk into a target chunk, moving all compatable components into
+    /// the target chunk. Any components left over will be dropped.
+    ///
+    /// Returns the ID of the entity which was swapped into the removed entity's position.
+    pub fn move_entity(&mut self, target: &mut ComponentStorage, index: usize) -> Option<Entity> {
+        let entity = unsafe { *self.entities.get_unchecked(index) };
+        target.entities.push(entity);
+
+        let self_components = unsafe { &mut *self.component_info.get() };
+        let target_components = unsafe { &mut *target.component_info.get() };
+
+        for (comp_type, accessor) in self_components.iter_mut() {
+            if let Some(target_accessor) = target_components.get_mut(*comp_type) {
+                // move the component into the target chunk
+                let (ptr, element_size, _) = accessor.data_raw();
+                unsafe {
+                    let component = ptr.as_ptr().add(element_size * index);
+                    target_accessor
+                        .writer()
+                        .push_raw(NonNull::new_unchecked(component), 1);
+                }
+            } else {
+                // drop the component rather than move it
+                unsafe { accessor.writer().drop_in_place(index) };
+            }
+        }
+
+        // remove the entity from this chunk
+        self.swap_remove(index, false)
     }
 
     /// Gets mutable references to the internal data of the chunk.
@@ -710,20 +741,33 @@ impl<'a> ComponentWriter<'a> {
     }
 
     /// Removes the component at the specified index by swapping it with the last component.
-    pub fn swap_remove(&mut self, index: usize) {
+    pub fn swap_remove(&mut self, index: usize, drop: bool) {
         unsafe {
             let size = self.accessor.element_size;
-            let count = *self.accessor.count.get();
             let to_remove = self.ptr.as_ptr().add(size * index);
-            if let Some(drop_fn) = self.accessor.drop_fn {
-                drop_fn(to_remove);
+            if drop {
+                if let Some(drop_fn) = self.accessor.drop_fn {
+                    drop_fn(to_remove);
+                }
             }
+
+            let count = *self.accessor.count.get();
             if index < count - 1 {
                 let swap_target = self.ptr.as_ptr().add(size * (count - 1));
                 std::ptr::copy_nonoverlapping(swap_target, to_remove, size);
             }
 
             *self.accessor.count.get() -= 1;
+        }
+    }
+
+    /// Drops the component stored at `index` without moving any other data or
+    /// altering the number of elements.
+    pub unsafe fn drop_in_place(&mut self, index: usize) {
+        if let Some(drop_fn) = self.accessor.drop_fn {
+            let size = self.accessor.element_size;
+            let to_remove = self.ptr.as_ptr().add(size * index);
+            drop_fn(to_remove);
         }
     }
 }
