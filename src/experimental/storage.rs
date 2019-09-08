@@ -34,13 +34,13 @@ impl TagTypeId {
 }
 
 /// A `Component` is per-entity data that can be attached to a single entity.
-pub trait Component: Copy + Send + Sync + 'static {}
+pub trait Component: Send + Sync + 'static {}
 
 /// A `Tag` is shared data that can be attached to multiple entities at once.
-pub trait Tag: Copy + Send + Sync + PartialEq + 'static {}
+pub trait Tag: Clone + Send + Sync + PartialEq + 'static {}
 
-impl<T: Copy + Send + Sync + 'static> Component for T {}
-impl<T: Copy + Send + Sync + PartialEq + 'static> Tag for T {}
+impl<T: Send + Sync + 'static> Component for T {}
+impl<T: Clone + Send + Sync + PartialEq + 'static> Tag for T {}
 
 /// Stores slices of `ComponentTypeId`, each of which identifies the type of components
 /// contained within the archetype of the same index.
@@ -676,6 +676,10 @@ impl<'a> ComponentWriter<'a> {
     ///
     /// Ensure the components pointed to by `components` are representative
     /// of the component types stored in the vec.
+    ///
+    /// This function will _copy_ all elements into the chunk. If the source is not `Copy`,
+    /// the caller must then `mem::forget` the source such that the destructor does not run
+    /// on the original data.
     pub unsafe fn push_raw(&mut self, components: NonNull<u8>, count: usize) {
         assert!((*self.accessor.count.get() + count) <= self.accessor.capacity);
         std::ptr::copy_nonoverlapping(
@@ -694,6 +698,10 @@ impl<'a> ComponentWriter<'a> {
     /// # Safety
     ///
     /// Ensure that the type `T` is representative of the component types stored in the vec.
+    ///
+    /// This function will _copy_ all elements of `T` into the chunk. If `T` is not `Copy`,
+    /// the caller must then `mem::forget` the source such that the destructor does not run
+    /// on the original data.
     pub unsafe fn push<T: Component>(&mut self, components: &[T]) {
         self.push_raw(
             NonNull::new_unchecked(components.as_ptr() as *mut u8),
@@ -766,6 +774,8 @@ impl TagStorage {
     ///
     /// Ensure the tag pointed to by `ptr` is representative
     /// of the tag types stored in the vec.
+    ///
+    /// `ptr` must not point to a location already within the vector.
     pub unsafe fn push_raw(&mut self, ptr: *const u8) {
         if self.len == self.capacity {
             self.grow();
@@ -790,6 +800,7 @@ impl TagStorage {
             "incompatible element data size"
         );
         self.push_raw(&value as *const T as *const u8);
+        std::mem::forget(value);
     }
 
     /// Gets a raw pointer to the start of the tag slice.

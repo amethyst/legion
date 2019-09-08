@@ -417,7 +417,9 @@ mod tuple_impls {
                             let entity = allocator.create_entity();
                             entities.push(entity);
                             $(
-                                $ty.push(&[$id]);
+                                let slice = [$id];
+                                $ty.push(&slice);
+                                std::mem::forget(slice);
                             )*
                             count += 1;
                         }
