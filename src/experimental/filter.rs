@@ -22,29 +22,34 @@ pub mod filter_fns {
 
     /// Creates an entity data filter which includes chunks that contain
     /// entity data components of type `T`.
-    pub fn component<T: Component>() -> EntityFilterTuple<ComponentFilter<T>, Passthrough> {
-        EntityFilterTuple::new(ComponentFilter::new(), Passthrough)
+    pub fn component<T: Component>(
+    ) -> EntityFilterTuple<ComponentFilter<T>, Passthrough, Passthrough> {
+        EntityFilterTuple::new(ComponentFilter::new(), Passthrough, Passthrough)
     }
 
     /// Creates a shared data filter which includes chunks that contain
     /// shared data components of type `T`.
-    pub fn tag<T: Tag>() -> EntityFilterTuple<TagFilter<T>, Passthrough> {
-        EntityFilterTuple::new(TagFilter::new(), Passthrough)
+    pub fn tag<T: Tag>() -> EntityFilterTuple<TagFilter<T>, Passthrough, Passthrough> {
+        EntityFilterTuple::new(TagFilter::new(), Passthrough, Passthrough)
     }
 
     /// Creates a shared data filter which includes chunks that contain
     /// specific shared data values.
     pub fn tag_value<'a, T: Tag>(
         data: &'a T,
-    ) -> EntityFilterTuple<TagFilter<T>, TagValueFilter<'a, T>> {
-        EntityFilterTuple::new(TagFilter::new(), TagValueFilter::new(data))
+    ) -> EntityFilterTuple<TagFilter<T>, TagValueFilter<'a, T>, Passthrough> {
+        EntityFilterTuple::new(TagFilter::new(), TagValueFilter::new(data), Passthrough)
     }
 
     /// Creates a filter which includes chunks for which entity data components
     /// of type `T` have changed since the filter was last executed.
     pub fn changed<T: Component>(
-    ) -> EntityFilterTuple<ComponentFilter<T>, ComponentChangedFilter<T>> {
-        EntityFilterTuple::new(ComponentFilter::new(), ComponentChangedFilter::new())
+    ) -> EntityFilterTuple<ComponentFilter<T>, Passthrough, ComponentChangedFilter<T>> {
+        EntityFilterTuple::new(
+            ComponentFilter::new(),
+            Passthrough,
+            ComponentChangedFilter::new(),
+        )
     }
 }
 
@@ -95,11 +100,18 @@ pub struct ArchetypeFilterData<'a> {
     pub tag_types: &'a TagTypes,
 }
 
+/// Input data for chunkset filters.
+#[derive(Copy, Clone)]
+pub struct ChunksetFilterData<'a> {
+    /// The component data in an archetype.
+    pub archetype_data: &'a ArchetypeData,
+}
+
 /// Input data for chunk filters.
 #[derive(Copy, Clone)]
 pub struct ChunkFilterData<'a> {
-    /// The component data in an archetype.
-    pub archetype_data: &'a ArchetypeData,
+    // The components in a set
+    pub chunks: &'a [ComponentStorage],
 }
 
 /// A marker trait for filters that are not no-ops.
@@ -108,13 +120,26 @@ pub trait ActiveFilter {}
 /// A type which combines both an archetype and a chunk filter.
 pub trait EntityFilter {
     type ArchetypeFilter: for<'a> Filter<ArchetypeFilterData<'a>>;
+    type ChunksetFilter: for<'a> Filter<ChunksetFilterData<'a>>;
     type ChunkFilter: for<'a> Filter<ChunkFilterData<'a>>;
 
     /// Gets mutable references to both inner filters.
-    fn filters(&mut self) -> (&mut Self::ArchetypeFilter, &mut Self::ChunkFilter);
+    fn filters(
+        &mut self,
+    ) -> (
+        &mut Self::ArchetypeFilter,
+        &mut Self::ChunksetFilter,
+        &mut Self::ChunkFilter,
+    );
 
     /// Converts self into both inner filters.
-    fn into_filters(self) -> (Self::ArchetypeFilter, Self::ChunkFilter);
+    fn into_filters(
+        self,
+    ) -> (
+        Self::ArchetypeFilter,
+        Self::ChunksetFilter,
+        Self::ChunkFilter,
+    );
 
     /// Gets an iterator over all matching archetype indexes.
     fn iter_archetype_indexes<'a, 'b>(
@@ -122,54 +147,75 @@ pub trait EntityFilter {
         storage: &'b Storage,
     ) -> FilterArchIter<'b, 'a, Self::ArchetypeFilter>;
 
-    /// Gets an iterator over all matching chunk indexes.
-    fn iter_chunk_indexes<'a, 'b>(
+    /// Gets an iterator over all matching chunkset indexes.
+    fn iter_chunkset_indexes<'a, 'b>(
         &'a mut self,
         archetype: &'b ArchetypeData,
-    ) -> FilterChunkIter<'b, 'a, Self::ChunkFilter>;
+    ) -> FilterChunkIter<'b, 'a, Self::ChunksetFilter>;
 
-    /// Gets an iterator over all matching archetypes and chunks.
+    /// Gets an iterator over all matching archetypes and chunksets.
     fn iter<'a, 'b>(
         &'a mut self,
         storage: &'b Storage,
-    ) -> FilterEntityIter<'b, 'a, Self::ArchetypeFilter, Self::ChunkFilter>;
+    ) -> FilterEntityIter<'b, 'a, Self::ArchetypeFilter, Self::ChunksetFilter>;
 }
 
 /// An EntityFilter which combined both an archetype filter and a chunk filter.
 #[derive(Debug)]
-pub struct EntityFilterTuple<A, C> {
+pub struct EntityFilterTuple<A, S, C> {
     pub arch_filter: A,
+    pub chunkset_filter: S,
     pub chunk_filter: C,
 }
 
-impl<A, C> EntityFilterTuple<A, C>
+impl<A, S, C> EntityFilterTuple<A, S, C>
 where
     A: for<'a> Filter<ArchetypeFilterData<'a>>,
+    S: for<'a> Filter<ChunksetFilterData<'a>>,
     C: for<'a> Filter<ChunkFilterData<'a>>,
 {
     /// Creates a new entity filter.
-    pub fn new(arch_filter: A, chunk_filter: C) -> Self {
+    pub fn new(arch_filter: A, chunkset_filter: S, chunk_filter: C) -> Self {
         Self {
             arch_filter,
+            chunkset_filter,
             chunk_filter,
         }
     }
 }
 
-impl<A, C> EntityFilter for EntityFilterTuple<A, C>
+impl<A, S, C> EntityFilter for EntityFilterTuple<A, S, C>
 where
     A: for<'a> Filter<ArchetypeFilterData<'a>>,
+    S: for<'a> Filter<ChunksetFilterData<'a>>,
     C: for<'a> Filter<ChunkFilterData<'a>>,
 {
     type ArchetypeFilter = A;
+    type ChunksetFilter = S;
     type ChunkFilter = C;
 
-    fn filters(&mut self) -> (&mut Self::ArchetypeFilter, &mut Self::ChunkFilter) {
-        (&mut self.arch_filter, &mut self.chunk_filter)
+    fn filters(
+        &mut self,
+    ) -> (
+        &mut Self::ArchetypeFilter,
+        &mut Self::ChunksetFilter,
+        &mut Self::ChunkFilter,
+    ) {
+        (
+            &mut self.arch_filter,
+            &mut self.chunkset_filter,
+            &mut self.chunk_filter,
+        )
     }
 
-    fn into_filters(self) -> (Self::ArchetypeFilter, Self::ChunkFilter) {
-        (self.arch_filter, self.chunk_filter)
+    fn into_filters(
+        self,
+    ) -> (
+        Self::ArchetypeFilter,
+        Self::ChunksetFilter,
+        Self::ChunkFilter,
+    ) {
+        (self.arch_filter, self.chunkset_filter, self.chunk_filter)
     }
 
     fn iter_archetype_indexes<'a, 'b>(
@@ -188,22 +234,22 @@ where
         }
     }
 
-    fn iter_chunk_indexes<'a, 'b>(
+    fn iter_chunkset_indexes<'a, 'b>(
         &'a mut self,
         archetype: &'b ArchetypeData,
-    ) -> FilterChunkIter<'b, 'a, C> {
-        let data = ChunkFilterData {
+    ) -> FilterChunkIter<'b, 'a, S> {
+        let data = ChunksetFilterData {
             archetype_data: archetype,
         };
 
-        let iter = self.chunk_filter.collect(data);
+        let iter = self.chunkset_filter.collect(data);
         FilterChunkIter {
             chunks: iter.enumerate(),
-            filter: &mut self.chunk_filter,
+            filter: &mut self.chunkset_filter,
         }
     }
 
-    fn iter<'a, 'b>(&'a mut self, storage: &'b Storage) -> FilterEntityIter<'b, 'a, A, C> {
+    fn iter<'a, 'b>(&'a mut self, storage: &'b Storage) -> FilterEntityIter<'b, 'a, A, S> {
         let data = ArchetypeFilterData {
             component_types: storage.component_types(),
             tag_types: storage.tag_types(),
@@ -213,56 +259,64 @@ where
         FilterEntityIter {
             storage,
             arch_filter: &mut self.arch_filter,
-            chunk_filter: &mut self.chunk_filter,
+            chunk_filter: &mut self.chunkset_filter,
             archetypes: iter,
             chunks: None,
         }
     }
 }
 
-impl<A, C> std::ops::Not for EntityFilterTuple<A, C>
+impl<A, S, C> std::ops::Not for EntityFilterTuple<A, S, C>
 where
     A: std::ops::Not,
+    S: std::ops::Not,
     C: std::ops::Not,
 {
-    type Output = EntityFilterTuple<A::Output, C::Output>;
+    type Output = EntityFilterTuple<A::Output, S::Output, C::Output>;
 
     #[inline]
     fn not(self) -> Self::Output {
         EntityFilterTuple {
             arch_filter: !self.arch_filter,
+            chunkset_filter: !self.chunkset_filter,
             chunk_filter: !self.chunk_filter,
         }
     }
 }
 
-impl<'a, A1, C1, A2, C2> std::ops::BitAnd<EntityFilterTuple<A2, C2>> for EntityFilterTuple<A1, C1>
+impl<'a, A1, S1, C1, A2, S2, C2> std::ops::BitAnd<EntityFilterTuple<A2, S2, C2>>
+    for EntityFilterTuple<A1, S1, C1>
 where
     A1: std::ops::BitAnd<A2>,
+    S1: std::ops::BitAnd<S2>,
     C1: std::ops::BitAnd<C2>,
 {
-    type Output = EntityFilterTuple<A1::Output, C1::Output>;
+    type Output = EntityFilterTuple<A1::Output, S1::Output, C1::Output>;
 
     #[inline]
-    fn bitand(self, rhs: EntityFilterTuple<A2, C2>) -> Self::Output {
+    fn bitand(self, rhs: EntityFilterTuple<A2, S2, C2>) -> Self::Output {
         EntityFilterTuple {
             arch_filter: self.arch_filter & rhs.arch_filter,
+            chunkset_filter: self.chunkset_filter & rhs.chunkset_filter,
             chunk_filter: self.chunk_filter & rhs.chunk_filter,
         }
     }
 }
 
-impl<'a, A1, C1, A2, C2> std::ops::BitOr<EntityFilterTuple<A2, C2>> for EntityFilterTuple<A1, C1>
+impl<'a, A1, S1, C1, A2, S2, C2> std::ops::BitOr<EntityFilterTuple<A2, S2, C2>>
+    for EntityFilterTuple<A1, S1, C1>
 where
     A1: std::ops::BitOr<A2>,
+    S1: std::ops::BitOr<S2>,
     C1: std::ops::BitOr<C2>,
 {
-    type Output = EntityFilterTuple<A1::Output, C1::Output>;
+    type Output = EntityFilterTuple<A1::Output, S1::Output, C1::Output>;
 
     #[inline]
-    fn bitor(self, rhs: EntityFilterTuple<A2, C2>) -> Self::Output {
+    fn bitor(self, rhs: EntityFilterTuple<A2, S2, C2>) -> Self::Output {
         EntityFilterTuple {
             arch_filter: self.arch_filter | rhs.arch_filter,
+            chunkset_filter: self.chunkset_filter | rhs.chunkset_filter,
             chunk_filter: self.chunk_filter | rhs.chunk_filter,
         }
     }
@@ -289,12 +343,12 @@ impl<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> Iterator for FilterArchIter<'a,
 }
 
 /// An iterator which yields the index of chuinks that match a filter.
-pub struct FilterChunkIter<'a, 'b, F: Filter<ChunkFilterData<'a>>> {
+pub struct FilterChunkIter<'a, 'b, F: Filter<ChunksetFilterData<'a>>> {
     filter: &'b mut F,
     chunks: Enumerate<F::Iter>,
 }
 
-impl<'a, 'b, F: Filter<ChunkFilterData<'a>>> Iterator for FilterChunkIter<'a, 'b, F> {
+impl<'a, 'b, F: Filter<ChunksetFilterData<'a>>> Iterator for FilterChunkIter<'a, 'b, F> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -313,7 +367,7 @@ pub struct FilterEntityIter<
     'a,
     'b,
     Arch: Filter<ArchetypeFilterData<'a>>,
-    Chunk: Filter<ChunkFilterData<'a>>,
+    Chunk: Filter<ChunksetFilterData<'a>>,
 > {
     storage: &'a Storage,
     arch_filter: &'b mut Arch,
@@ -322,17 +376,17 @@ pub struct FilterEntityIter<
     chunks: Option<(ArchetypeId, Enumerate<Chunk::Iter>)>,
 }
 
-impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunkFilterData<'a>>> Iterator
+impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunksetFilterData<'a>>> Iterator
     for FilterEntityIter<'a, 'b, Arch, Chunk>
 {
-    type Item = ChunkId;
+    type Item = (ArchetypeId, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some((arch_id, ref mut chunks)) = self.chunks {
                 for (chunk_index, chunk_data) in chunks {
                     if self.chunk_filter.is_match(&chunk_data).is_pass() {
-                        return Some(ChunkId::new(arch_id, chunk_index));
+                        return Some((arch_id, chunk_index));
                     }
                 }
             }
@@ -341,15 +395,13 @@ impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunkFilterDat
                     Some((arch_index, arch_data)) => {
                         if self.arch_filter.is_match(&arch_data).is_pass() {
                             self.chunks = {
-                                let chunks = unsafe { self.storage.data_unchecked(arch_index) };
-                                let data = ChunkFilterData {
-                                    archetype_data: chunks,
+                                let archetype =
+                                    unsafe { self.storage.archetypes().get_unchecked(arch_index) };
+                                let data = ChunksetFilterData {
+                                    archetype_data: archetype,
                                 };
 
-                                Some((
-                                    ArchetypeId::new(arch_index),
-                                    self.chunk_filter.collect(data).enumerate(),
-                                ))
+                                Some((archetype.id(), self.chunk_filter.collect(data).enumerate()))
                             };
                             break;
                         }
@@ -370,6 +422,16 @@ impl<'a> Filter<ArchetypeFilterData<'a>> for Passthrough {
 
     #[inline]
     fn collect(&self, _: ArchetypeFilterData<'a>) -> Self::Iter { std::iter::repeat(()) }
+
+    #[inline]
+    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
+}
+
+impl<'a> Filter<ChunksetFilterData<'a>> for Passthrough {
+    type Iter = Repeat<()>;
+
+    #[inline]
+    fn collect(&self, _: ChunksetFilterData<'a>) -> Self::Iter { std::iter::repeat(()) }
 
     #[inline]
     fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
@@ -847,10 +909,10 @@ impl<'a, T: Tag> TagValueFilter<'a, T> {
 
 impl<'a, T> ActiveFilter for TagValueFilter<'a, T> {}
 
-impl<'a, 'b, T: Tag> Filter<ChunkFilterData<'a>> for TagValueFilter<'b, T> {
+impl<'a, 'b, T: Tag> Filter<ChunksetFilterData<'a>> for TagValueFilter<'b, T> {
     type Iter = Iter<'a, T>;
 
-    fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {
+    fn collect(&self, source: ChunksetFilterData<'a>) -> Self::Iter {
         unsafe {
             source
                 .archetype_data
@@ -933,9 +995,7 @@ impl<T: Component> ActiveFilter for ComponentChangedFilter<T> {}
 impl<'a, T: Component> Filter<ChunkFilterData<'a>> for ComponentChangedFilter<T> {
     type Iter = Iter<'a, ComponentStorage>;
 
-    fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {
-        source.archetype_data.iter_component_chunks()
-    }
+    fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter { source.chunks.iter() }
 
     #[inline]
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {

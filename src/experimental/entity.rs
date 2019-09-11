@@ -30,20 +30,29 @@ impl Display for Entity {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct EntityLocation {
     archetype_index: usize,
+    set_index: usize,
     chunk_index: usize,
     component_index: usize,
 }
 
 impl EntityLocation {
-    pub(crate) fn new(archetype_index: usize, chunk_index: usize, component_index: usize) -> Self {
+    pub(crate) fn new(
+        archetype_index: usize,
+        set_index: usize,
+        chunk_index: usize,
+        component_index: usize,
+    ) -> Self {
         EntityLocation {
             archetype_index,
+            set_index,
             chunk_index,
             component_index,
         }
     }
 
     pub(crate) fn archetype(&self) -> usize { self.archetype_index }
+
+    pub(crate) fn set(&self) -> usize { self.set_index }
 
     pub(crate) fn chunk(&self) -> usize { self.chunk_index }
 
@@ -95,7 +104,7 @@ impl EntityBlock {
             len,
             versions: Vec::with_capacity(len),
             free: Vec::new(),
-            locations: std::iter::repeat(EntityLocation::new(0, 0, 0))
+            locations: std::iter::repeat(EntityLocation::new(0, 0, 0, 0))
                 .take(len)
                 .collect(),
         }

@@ -8,6 +8,7 @@ use crate::experimental::entity::Entity;
 use crate::experimental::filter::And;
 use crate::experimental::filter::ArchetypeFilterData;
 use crate::experimental::filter::ChunkFilterData;
+use crate::experimental::filter::ChunksetFilterData;
 use crate::experimental::filter::ComponentFilter;
 use crate::experimental::filter::EntityFilter;
 use crate::experimental::filter::EntityFilterTuple;
@@ -95,7 +96,7 @@ impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
 pub struct Read<T: Component>(PhantomData<T>);
 
 impl<'a, T: Component> DefaultFilter for Read<T> {
-    type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough>;
+    type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough, Passthrough>;
 
     fn filter() -> Self::Filter { super::filter::filter_fns::component() }
 }
@@ -130,7 +131,7 @@ impl<T: Component> ViewElement for Read<T> {
 pub struct Write<T: Component>(PhantomData<T>);
 
 impl<'a, T: Component> DefaultFilter for Write<T> {
-    type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough>;
+    type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough, Passthrough>;
 
     fn filter() -> Self::Filter { super::filter::filter_fns::component() }
 }
@@ -169,7 +170,7 @@ impl<T: Component> ViewElement for Write<T> {
 pub struct Tagged<T: Tag>(PhantomData<T>);
 
 impl<'a, T: Tag> DefaultFilter for Tagged<T> {
-    type Filter = EntityFilterTuple<TagFilter<T>, Passthrough>;
+    type Filter = EntityFilterTuple<TagFilter<T>, Passthrough, Passthrough>;
 
     fn filter() -> Self::Filter { super::filter::filter_fns::tag() }
 }
@@ -211,7 +212,11 @@ impl<T: Tag> ViewElement for Tagged<T> {
 macro_rules! impl_view_tuple {
     ( $( $ty: ident ),* ) => {
         impl<$( $ty: ViewElement + DefaultFilter ),*> DefaultFilter for ($( $ty, )*) {
-            type Filter = EntityFilterTuple<And<($( <$ty::Filter as EntityFilter>::ArchetypeFilter, )*)>, And<($( <$ty::Filter as EntityFilter>::ChunkFilter, )*)>>;
+            type Filter = EntityFilterTuple<
+                And<($( <$ty::Filter as EntityFilter>::ArchetypeFilter, )*)>,
+                And<($( <$ty::Filter as EntityFilter>::ChunksetFilter, )*)>,
+                And<($( <$ty::Filter as EntityFilter>::ChunkFilter, )*)>,
+            >;
 
             fn filter() -> Self::Filter {
                 #![allow(non_snake_case)]
@@ -219,6 +224,7 @@ macro_rules! impl_view_tuple {
                 EntityFilterTuple::new(
                     And { filters: ($( $ty.0, )*) },
                     And { filters: ($( $ty.1, )*) },
+                    And { filters: ($( $ty.2, )*) },
                 )
             }
         }
@@ -275,9 +281,14 @@ pub struct Chunk<'a, V: for<'b> View<'b>> {
 }
 
 impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
-    pub fn new(archetype: &'a ArchetypeData, index: usize) -> Self {
+    pub fn new(archetype: &'a ArchetypeData, set: usize, index: usize) -> Self {
         Self {
-            components: archetype.component_chunk(index).unwrap(),
+            components: unsafe {
+                archetype
+                    .chunksets()
+                    .get_unchecked(set)
+                    .get_unchecked(index)
+            },
             archetype,
             index,
             view: PhantomData,
@@ -380,14 +391,17 @@ pub struct ChunkViewIter<
     'filter,
     V: for<'a> View<'a>,
     Arch: Filter<ArchetypeFilterData<'data>>,
+    Chunkset: Filter<ChunksetFilterData<'data>>,
     Chunk: Filter<ChunkFilterData<'data>>,
 > {
     _view: PhantomData<V>,
     storage: &'data Storage,
     arch_filter: &'filter mut Arch,
+    chunkset_filter: &'filter mut Chunkset,
     chunk_filter: &'filter mut Chunk,
     archetypes: Enumerate<Arch::Iter>,
-    frontier: Option<(&'data ArchetypeData, Take<Enumerate<Chunk::Iter>>)>,
+    set_frontier: Option<(&'data ArchetypeData, Take<Enumerate<Chunkset::Iter>>)>,
+    chunk_frontier: Option<(&'data ArchetypeData, usize, Take<Enumerate<Chunk::Iter>>)>,
 }
 
 impl<
@@ -395,33 +409,37 @@ impl<
         'filter,
         V: for<'a> View<'a>,
         ArchFilter: Filter<ArchetypeFilterData<'data>>,
+        ChunksetFilter: Filter<ChunksetFilterData<'data>>,
         ChunkFilter: Filter<ChunkFilterData<'data>>,
-    > Iterator for ChunkViewIter<'data, 'filter, V, ArchFilter, ChunkFilter>
+    > ChunkViewIter<'data, 'filter, V, ArchFilter, ChunksetFilter, ChunkFilter>
 {
-    type Item = Chunk<'data, V>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn next_set(&mut self) -> Option<(&'data ArchetypeData, usize)> {
         loop {
-            if let Some((ref arch, ref mut chunks)) = self.frontier {
-                for (chunk_index, chunk_data) in chunks {
-                    if self.chunk_filter.is_match(&chunk_data).is_pass() {
-                        return Some(Chunk::new(arch, chunk_index));
+            // if we are looping through an archetype, find the next set
+            if let Some((ref arch, ref mut chunks)) = self.set_frontier {
+                for (set_index, filter_data) in chunks {
+                    if self.chunkset_filter.is_match(&filter_data).is_pass() {
+                        return Some((arch, set_index));
                     }
                 }
             }
+
+            // we have completed the current set, find the next one
             loop {
                 match self.archetypes.next() {
                     Some((arch_index, arch_data)) => {
                         if self.arch_filter.is_match(&arch_data).is_pass() {
-                            self.frontier = {
-                                let chunks = unsafe { self.storage.data_unchecked(arch_index) };
-                                let data = ChunkFilterData {
+                            // we have found another set
+                            self.set_frontier = {
+                                let chunks =
+                                    unsafe { self.storage.archetypes().get_unchecked(arch_index) };
+                                let data = ChunksetFilterData {
                                     archetype_data: chunks,
                                 };
 
                                 Some((
                                     chunks,
-                                    self.chunk_filter
+                                    self.chunkset_filter
                                         .collect(data)
                                         .enumerate()
                                         .take(chunks.len()),
@@ -430,8 +448,49 @@ impl<
                             break;
                         }
                     }
+                    // there are no more sets
                     None => return None,
                 }
+            }
+        }
+    }
+}
+
+impl<
+        'data,
+        'filter,
+        V: for<'a> View<'a>,
+        ArchFilter: Filter<ArchetypeFilterData<'data>>,
+        ChunkFilter: Filter<ChunkFilterData<'data>>,
+        ChunksetFilter: Filter<ChunksetFilterData<'data>>,
+    > Iterator for ChunkViewIter<'data, 'filter, V, ArchFilter, ChunksetFilter, ChunkFilter>
+{
+    type Item = Chunk<'data, V>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // if we are looping through a set, then yield the next chunk
+            if let Some((ref arch, set_index, ref mut set)) = self.chunk_frontier {
+                for (chunk_index, filter_data) in set {
+                    if self.chunk_filter.is_match(&filter_data).is_pass() {
+                        return Some(Chunk::new(arch, set_index, chunk_index));
+                    }
+                }
+            }
+
+            // we have completed the set, find the next
+            if let Some((ref arch, set_index)) = self.next_set() {
+                let chunks = unsafe { arch.chunksets().get_unchecked(set_index) };
+                self.chunk_frontier = Some((
+                    arch,
+                    set_index,
+                    self.chunk_filter
+                        .collect(ChunkFilterData { chunks })
+                        .enumerate()
+                        .take(chunks.len()),
+                ))
+            } else {
+                return None;
             }
         }
     }
@@ -653,8 +712,8 @@ where
     pub fn iter_chunks<'a, 'data>(
         &'a mut self,
         world: &'data World,
-    ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunkFilter> {
-        let (arch_filter, chunk_filter) = self.filter.filters();
+    ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
+        let (arch_filter, chunkset_filter, chunk_filter) = self.filter.filters();
         let storage = world.storage();
         let archetypes = arch_filter
             .collect(ArchetypeFilterData {
@@ -665,9 +724,11 @@ where
         ChunkViewIter {
             storage,
             arch_filter,
+            chunkset_filter,
             chunk_filter,
             archetypes,
-            frontier: None,
+            set_frontier: None,
+            chunk_frontier: None,
             _view: PhantomData,
         }
     }
@@ -676,8 +737,11 @@ where
     pub fn iter_entities<'a, 'data>(
         &'a mut self,
         world: &'data World,
-    ) -> ChunkEntityIter<'data, V, ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunkFilter>>
-    {
+    ) -> ChunkEntityIter<
+        'data,
+        V,
+        ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+    > {
         ChunkEntityIter {
             iter: self.iter_chunks(world),
             frontier: None,
@@ -689,8 +753,11 @@ where
     pub fn iter<'a, 'data>(
         &'a mut self,
         world: &'data World,
-    ) -> ChunkDataIter<'data, V, ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunkFilter>>
-    {
+    ) -> ChunkDataIter<
+        'data,
+        V,
+        ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+    > {
         ChunkDataIter {
             iter: self.iter_chunks(world),
             frontier: None,
