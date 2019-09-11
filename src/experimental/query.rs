@@ -185,7 +185,8 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
     ) -> Self::Iter {
         let data = unsafe {
             archetype
-                .tags(TagTypeId::of::<T>())
+                .tags()
+                .get(TagTypeId::of::<T>())
                 .unwrap()
                 .data_slice::<T>()
                 .get_unchecked(chunk_index)
@@ -307,7 +308,8 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
     /// Get a tag value.
     pub fn tag<T: Tag>(&self) -> Option<&T> {
         self.archetype
-            .tags(TagTypeId::of::<T>())
+            .tags()
+            .get(TagTypeId::of::<T>())
             .map(|tags| unsafe { tags.data_slice::<T>() })
             .map(|slice| unsafe { slice.get_unchecked(self.index) })
     }
@@ -653,7 +655,7 @@ where
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunkFilter> {
         let (arch_filter, chunk_filter) = self.filter.filters();
-        let storage = &world.archetypes;
+        let storage = world.storage();
         let archetypes = arch_filter
             .collect(ArchetypeFilterData {
                 component_types: storage.component_types(),

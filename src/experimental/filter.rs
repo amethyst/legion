@@ -854,7 +854,8 @@ impl<'a, 'b, T: Tag> Filter<ChunkFilterData<'a>> for TagValueFilter<'b, T> {
         unsafe {
             source
                 .archetype_data
-                .tags(TagTypeId::of::<T>())
+                .tags()
+                .get(TagTypeId::of::<T>())
                 .unwrap()
                 .data_slice::<T>()
                 .iter()

@@ -10,17 +10,25 @@ use crate::experimental::filter::ArchetypeFilterData;
 use crate::experimental::filter::ChunkFilterData;
 use crate::experimental::filter::Filter;
 use crate::experimental::filter::FilterResult;
+use crate::experimental::storage::ArchetypeData;
 use crate::experimental::storage::ArchetypeDescription;
 use crate::experimental::storage::Component;
+use crate::experimental::storage::ComponentMeta;
 use crate::experimental::storage::ComponentStorage;
 use crate::experimental::storage::ComponentTypeId;
+use crate::experimental::storage::SliceVecIter;
 use crate::experimental::storage::Storage;
 use crate::experimental::storage::Tag;
+use crate::experimental::storage::TagMeta;
 use crate::experimental::storage::TagTypeId;
 use crate::experimental::storage::Tags;
 use parking_lot::Mutex;
+use std::cell::UnsafeCell;
+use std::iter::Enumerate;
 use std::iter::Peekable;
+use std::iter::Repeat;
 use std::ops::Deref;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 /// The `Universe` is a factory for creating `World`s.
@@ -53,17 +61,21 @@ impl Default for Universe {
 
 /// Contains queryable collections of data associated with `Entity`s.
 pub struct World {
-    pub(crate) archetypes: Storage,
+    archetypes: UnsafeCell<Storage>,
     entity_allocator: EntityAllocator,
 }
 
 impl World {
     fn new(allocator: EntityAllocator) -> Self {
         Self {
-            archetypes: Storage::default(),
+            archetypes: UnsafeCell::new(Storage::default()),
             entity_allocator: allocator,
         }
     }
+
+    pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.archetypes.get() } }
+
+    pub(crate) fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.archetypes.get() } }
 
     /// Inserts new entities into the world.
     ///
@@ -91,7 +103,7 @@ impl World {
     /// ```
     pub fn insert<T, C>(&mut self, mut tags: T, components: C) -> &[Entity]
     where
-        T: TagSet,
+        T: TagSet + TagLayout + for<'a> Filter<ChunkFilterData<'a>>,
         C: IntoComponentSource,
     {
         // find or create archetype
@@ -106,7 +118,7 @@ impl World {
             let chunk_id = self.find_or_create_chunk(archetype_id, &mut tags);
 
             // get chunk component storage
-            let chunks = unsafe { self.archetypes.data_unchecked_mut(archetype_id) };
+            let chunks = unsafe { (&mut *self.archetypes.get()).data_unchecked_mut(archetype_id) };
             let component_storage = chunks.component_chunk_mut(chunk_id).unwrap();
 
             // insert as many components as we can into the chunk
@@ -130,7 +142,7 @@ impl World {
     pub fn delete(&mut self, entity: Entity) -> bool {
         if let Some(location) = self.entity_allocator.delete_entity(entity) {
             // find entity's chunk
-            let chunks = self.archetypes.data_mut(location.archetype()).unwrap();
+            let chunks = self.storage_mut().data_mut(location.archetype()).unwrap();
             let chunk = chunks.component_chunk_mut(location.chunk()).unwrap();
 
             // swap remove with last entity in chunk
@@ -146,15 +158,198 @@ impl World {
         }
     }
 
-    pub fn add_component<T: Component>(&mut self, entity: Entity, component: T) {
+    fn find_chunk_delta(
+        &mut self,
+        source_location: EntityLocation,
+        add_components: &[(ComponentTypeId, ComponentMeta)],
+        remove_components: &[ComponentTypeId],
+        add_tags: &[(TagTypeId, TagMeta, *const u8)],
+        remove_tags: &[TagTypeId],
+    ) -> (usize, usize) {
+        let archetype = {
+            let result = {
+                let source_archetype = self.storage().data(source_location.archetype()).unwrap();
+
+                // find target chunk
+                let mut component_layout = DynamicComponentLayout {
+                    existing: source_archetype.description().components(),
+                    add: add_components,
+                    remove: remove_components,
+                };
+
+                let mut tag_layout = DynamicTagLayout {
+                    storage: self.storage(),
+                    archetype: source_location.archetype(),
+                    chunk: source_location.chunk(),
+                    existing: source_archetype.description().tags(),
+                    add: add_tags,
+                    remove: remove_tags,
+                };
+
+                let archetype = self.find_archetype(&mut tag_layout, &mut component_layout);
+                if let Some(archetype) = archetype.as_ref() {
+                    if let Some(chunk) = self.find_chunk(*archetype, &mut tag_layout) {
+                        // fast path: chunk already exists
+                        return (*archetype, chunk);
+                    }
+
+                    Ok(*archetype)
+                } else {
+                    let mut description = ArchetypeDescription::default();
+                    component_layout.tailor_archetype(&mut description);
+                    tag_layout.tailor_archetype(&mut description);
+
+                    Err(description)
+                }
+            };
+
+            match result {
+                Ok(arch) => arch,
+                Err(desc) => {
+                    let (index, _) = self.storage_mut().alloc_archetype(desc);
+                    index
+                }
+            }
+        };
+
+        // slow path: create new chunk
+        let source_archetype = self.storage().data(source_location.archetype()).unwrap();
+        let mut tags = source_archetype.tags().tag_set(source_location.chunk());
+        for type_id in remove_tags.iter() {
+            tags.remove(*type_id);
+        }
+        for (type_id, meta, ptr) in add_tags.iter() {
+            tags.push(*type_id, *meta, *ptr);
+        }
+
+        let chunk = self.create_chunk(archetype, &tags);
+
+        (archetype, chunk)
+    }
+
+    fn move_entity(
+        &mut self,
+        entity: Entity,
+        add_components: &[(ComponentTypeId, ComponentMeta)],
+        remove_components: &[ComponentTypeId],
+        add_tags: &[(TagTypeId, TagMeta, *const u8)],
+        remove_tags: &[TagTypeId],
+    ) -> &mut ComponentStorage {
         let location = self
             .entity_allocator
             .get_location(entity.index())
             .expect("entity not found");
 
-        // find entity's chunk
-        let chunks = self.archetypes.data_mut(location.archetype()).unwrap();
+        // find or create the target chunk
+        let (target_arch_index, target_chunk_index) = self.find_chunk_delta(
+            location,
+            add_components,
+            remove_components,
+            add_tags,
+            remove_tags,
+        );
+
+        // Safety Note:
+        // It is only safe for us to have 2 &mut references to storage here because
+        // we know we are only going to be modifying two chunks that are at different
+        // indexes.
+
+        // fetch entity's chunk
+        let chunks = unsafe { &mut *self.archetypes.get() }
+            .data_mut(location.archetype())
+            .unwrap();
         let current_chunk = chunks.component_chunk_mut(location.chunk()).unwrap();
+
+        // fetch target chunk
+        let chunks = unsafe { &mut *self.archetypes.get() }
+            .data_mut(target_arch_index)
+            .unwrap();
+        let target_chunk = chunks.component_chunk_mut(target_chunk_index).unwrap();
+
+        // move existing data over into new chunk
+        if let Some(swapped) = current_chunk.move_entity(target_chunk, location.component()) {
+            // update location of any entity that was moved into the previous location
+            self.entity_allocator
+                .set_location(swapped.index(), location);
+        }
+
+        // record the entity's new location
+        self.entity_allocator.set_location(
+            entity.index(),
+            EntityLocation::new(
+                target_arch_index,
+                target_chunk_index,
+                target_chunk.len() - 1,
+            ),
+        );
+
+        target_chunk
+    }
+
+    /// Adds a component to an entity, or set's its value if the component is
+    /// already present.
+    pub fn add_component<T: Component>(&mut self, entity: Entity, component: T) {
+        if let Some(mut comp) = self.get_component_mut(entity) {
+            *comp = component;
+            return;
+        }
+
+        // move the entity into a suitable chunk
+        let target_chunk = self.move_entity(
+            entity,
+            &[(ComponentTypeId::of::<T>(), ComponentMeta::of::<T>())],
+            &[],
+            &[],
+            &[],
+        );
+
+        // push new component into chunk
+        let (_, components) = target_chunk.write();
+        unsafe {
+            let components = &mut *components.get();
+            components
+                .get_mut(ComponentTypeId::of::<T>())
+                .unwrap()
+                .writer()
+                .push(&[component]);
+        }
+    }
+
+    /// Removes a component from an entity.
+    pub fn remove_component<T: Component>(&mut self, entity: Entity) {
+        if self.get_component::<T>(entity).is_some() {
+            // move the entity into a suitable chunk
+            self.move_entity(entity, &[], &[ComponentTypeId::of::<T>()], &[], &[]);
+        }
+    }
+
+    /// Adds a tag to an entity, or set's its value if the tag is
+    /// already present.
+    pub fn add_tag<T: Tag>(&mut self, entity: Entity, tag: T) {
+        if self.get_tag::<T>(entity).is_some() {
+            self.remove_tag::<T>(entity);
+        }
+
+        // move the entity into a suitable chunk
+        self.move_entity(
+            entity,
+            &[],
+            &[],
+            &[(
+                TagTypeId::of::<T>(),
+                TagMeta::of::<T>(),
+                &tag as *const _ as *const u8,
+            )],
+            &[],
+        );
+    }
+
+    /// Removes a tag from an entity.
+    pub fn remove_tag<T: Tag>(&mut self, entity: Entity) {
+        if self.get_tag::<T>(entity).is_some() {
+            // move the entity into a suitable chunk
+            self.move_entity(entity, &[], &[], &[], &[TagTypeId::of::<T>()]);
+        }
     }
 
     /// Borrows component data for the given entity.
@@ -172,7 +367,7 @@ impl World {
         }
 
         let location = self.entity_allocator.get_location(entity.index())?;
-        let chunks = self.archetypes.data(location.archetype())?;
+        let chunks = self.storage().data(location.archetype())?;
         let chunk = chunks.component_chunk(location.chunk())?;
         let (slice_borrow, slice) = unsafe {
             chunk
@@ -200,7 +395,7 @@ impl World {
         }
 
         let location = self.entity_allocator.get_location(entity.index())?;
-        let chunks = self.archetypes.data(location.archetype())?;
+        let chunks = self.storage().data(location.archetype())?;
         let chunk = chunks.component_chunk(location.chunk())?;
         let (slice_borrow, slice) = unsafe {
             chunk
@@ -223,82 +418,109 @@ impl World {
         }
 
         let location = self.entity_allocator.get_location(entity.index())?;
-        let chunks = self.archetypes.data(location.archetype())?;
-        let tags = chunks.tags(TagTypeId::of::<T>())?;
+        let chunks = self.storage().data(location.archetype())?;
+        let tags = chunks.tags().get(TagTypeId::of::<T>())?;
         unsafe { tags.data_slice::<T>().get(location.chunk()) }
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
     pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
+    fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<usize>
+    where
+        T: TagLayout,
+        C: ComponentLayout,
+    {
+        // search for an archetype with an exact match for the desired component layout
+        let archetype_data = ArchetypeFilterData {
+            component_types: self.storage().component_types(),
+            tag_types: self.storage().tag_types(),
+        };
+
+        let tag_iter = tags.collect(archetype_data);
+        let tag_matches =
+            tag_iter.map(|x| <T as Filter<ArchetypeFilterData<'_>>>::is_match(tags, &x));
+        let component_iter = components.collect(archetype_data);
+        let component_matches = component_iter.map(|x| components.is_match(&x));
+        tag_matches
+            .zip(component_matches)
+            .enumerate()
+            .filter(|(_, (t, c))| t.is_pass() && c.is_pass())
+            .map(|(i, _)| i)
+            .next()
+    }
+
+    fn create_archetype<T, C>(&mut self, tags: &T, components: &C) -> usize
+    where
+        T: TagLayout,
+        C: ComponentLayout,
+    {
+        let mut description = ArchetypeDescription::default();
+        tags.tailor_archetype(&mut description);
+        components.tailor_archetype(&mut description);
+
+        let (index, _) = self.storage_mut().alloc_archetype(description);
+        index
+    }
+
     fn find_or_create_archetype<T, C>(&mut self, tags: &mut T, components: &mut C) -> usize
     where
         T: TagLayout,
         C: ComponentLayout,
     {
-        {
-            // search for an archetype with an exact match for the desired component layout
-            let archetype_data = ArchetypeFilterData {
-                component_types: self.archetypes.component_types(),
-                tag_types: self.archetypes.tag_types(),
-            };
+        if let Some(i) = self.find_archetype(tags, components) {
+            i
+        } else {
+            self.create_archetype(tags, components)
+        }
+    }
 
-            let tag_iter = tags.collect(archetype_data);
-            let tag_matches =
-                tag_iter.map(|x| <T as Filter<ArchetypeFilterData<'_>>>::is_match(tags, &x));
-            let component_iter = components.collect(archetype_data);
-            let component_matches = component_iter.map(|x| components.is_match(&x));
-            if let Some(i) = tag_matches
-                .zip(component_matches)
-                .enumerate()
-                .filter(|(_, (t, c))| t.is_pass() && c.is_pass())
-                .map(|(i, _)| i)
-                .next()
-            {
-                return i;
-            };
+    fn find_chunk<T>(&self, archetype: usize, tags: &mut T) -> Option<usize>
+    where
+        T: for<'a> Filter<ChunkFilterData<'a>>,
+    {
+        // fetch the archetype, we can already assume that the archetype index is valid
+        let archetype_data = unsafe { self.storage().data_unchecked(archetype) };
+
+        // find a chunk with the correct tags
+        let chunk_filter_data = ChunkFilterData {
+            archetype_data: archetype_data.deref(),
+        };
+
+        let chunk_iter = tags.collect(chunk_filter_data);
+        if let Some(i) = chunk_iter
+            .map(|x| <T as Filter<ChunkFilterData<'_>>>::is_match(tags, &x))
+            .zip(archetype_data.iter_component_chunks())
+            .enumerate()
+            .filter(|(_, (matches, components))| matches.is_pass() && !components.is_full())
+            .map(|(i, _)| i)
+            .next()
+        {
+            return Some(i);
         }
 
-        // create a new archetype
-        let mut description = ArchetypeDescription::default();
-        tags.tailor_archetype(&mut description);
-        components.tailor_archetype(&mut description);
+        None
+    }
 
-        let (index, _) = self.archetypes.alloc_archetype(&description);
-        index
+    fn create_chunk<T>(&mut self, archetype: usize, tags: &T) -> usize
+    where
+        T: TagSet,
+    {
+        let archetype_data = unsafe { self.storage_mut().data_unchecked_mut(archetype) };
+        let (id, chunk_tags, _) = archetype_data.alloc_chunk();
+        tags.write_tags(chunk_tags);
+        id
     }
 
     fn find_or_create_chunk<T>(&mut self, archetype: usize, tags: &mut T) -> usize
     where
-        T: TagSet,
+        T: TagSet + for<'a> Filter<ChunkFilterData<'a>>,
     {
-        // fetch the archetype, we can already assume that the archetype index is valid
-        let archetype_data = unsafe { self.archetypes.data_unchecked_mut(archetype) };
-
-        {
-            // find a chunk with the correct tags
-            let chunk_filter_data = ChunkFilterData {
-                archetype_data: archetype_data.deref(),
-            };
-
-            let chunk_iter = tags.collect(chunk_filter_data);
-            let index = chunk_iter
-                .map(|x| <T as Filter<ChunkFilterData<'_>>>::is_match(tags, &x))
-                .zip(archetype_data.iter_component_chunks())
-                .enumerate()
-                .filter(|(_, (matches, components))| matches.is_pass() && !components.is_full())
-                .map(|(i, _)| i)
-                .next();
-
-            if let Some(i) = index {
-                return i;
-            }
+        if let Some(i) = self.find_chunk(archetype, tags) {
+            i
+        } else {
+            self.create_chunk(archetype, tags)
         }
-
-        // allocate a new chunk
-        let (id, chunk_tags, _) = archetype_data.alloc_chunk();
-        tags.write_tags(chunk_tags);
-        id
     }
 }
 
@@ -315,7 +537,7 @@ pub trait TagLayout: Sized + for<'a> Filter<ArchetypeFilterData<'a>> {
 }
 
 /// A set of tag values to be attached to an entity.
-pub trait TagSet: TagLayout + for<'a> Filter<ChunkFilterData<'a>> {
+pub trait TagSet {
     /// Writes the tags in this set to a new chunk.
     fn write_tags(&self, tags: &mut Tags);
 }
@@ -518,12 +740,14 @@ mod tuple_impls {
                         $(
                             unsafe {
                                 source.archetype_data
-                                    .tags(TagTypeId::of::<$ty>())
+                                    .tags()
+                                    .get(TagTypeId::of::<$ty>())
                                     .unwrap()
                                     .data_slice::<$ty>()
                                     .iter()
                             },
                         )*
+
                     );
 
                     itertools::multizip(iters)
@@ -557,6 +781,155 @@ mod tuple_impls {
     impl_data_tuple!(A => a, B => b, C => c);
     impl_data_tuple!(A => a, B => b, C => c, D => d);
     impl_data_tuple!(A => a, B => b, C => c, D => d, E => e);
+}
+
+struct DynamicComponentLayout<'a> {
+    existing: &'a [(ComponentTypeId, ComponentMeta)],
+    add: &'a [(ComponentTypeId, ComponentMeta)],
+    remove: &'a [ComponentTypeId],
+}
+
+impl<'a> ComponentLayout for DynamicComponentLayout<'a> {
+    fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
+        // copy components from existing archetype into new
+        // except for those in `remove`
+        let components = self
+            .existing
+            .iter()
+            .filter(|(t, _)| !self.remove.contains(t));
+
+        for (comp_type, meta) in components {
+            archetype.register_component_raw(*comp_type, *meta);
+        }
+
+        // append components from `add`
+        for (comp_type, meta) in self.add.iter() {
+            archetype.register_component_raw(*comp_type, *meta);
+        }
+    }
+}
+
+impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicComponentLayout<'a> {
+    type Iter = SliceVecIter<'b, ComponentTypeId>;
+
+    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter {
+        source.component_types.iter()
+    }
+
+    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+        Some(
+            item.len() == (self.existing.len() + self.add.len() - self.remove.len())
+                && item.iter().all(|t| {
+                    // all types are not in remove
+                    !self.remove.contains(t)
+                    // any are either in existing or add
+                        && (self.existing.iter().any(|(x, _)| x == t)
+                            || self.add.iter().any(|(x, _)| x == t))
+                }),
+        )
+    }
+}
+
+struct DynamicTagLayout<'a> {
+    storage: &'a Storage,
+    archetype: usize,
+    chunk: usize,
+    existing: &'a [(TagTypeId, TagMeta)],
+    add: &'a [(TagTypeId, TagMeta, *const u8)],
+    remove: &'a [TagTypeId],
+}
+
+unsafe impl<'a> Send for DynamicTagLayout<'a> {}
+
+unsafe impl<'a> Sync for DynamicTagLayout<'a> {}
+
+impl<'a> TagLayout for DynamicTagLayout<'a> {
+    fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
+        // copy tags from existing archetype into new
+        // except for those in `remove`
+        let tags = self
+            .existing
+            .iter()
+            .filter(|(t, _)| !self.remove.contains(t));
+
+        for (tag_type, meta) in tags {
+            archetype.register_tag_raw(*tag_type, *meta);
+        }
+
+        // append tag from `add`
+        for (tag_type, meta, _) in self.add.iter() {
+            archetype.register_tag_raw(*tag_type, *meta);
+        }
+    }
+}
+
+impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
+    type Iter = SliceVecIter<'b, TagTypeId>;
+
+    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter { source.tag_types.iter() }
+
+    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+        Some(
+            item.len() == (self.existing.len() + self.add.len() - self.remove.len())
+                && item.iter().all(|t| {
+                    // all types are not in remove
+                    !self.remove.contains(t)
+                    // any are either in existing or add
+                        && (self.existing.iter().any(|(x, _)| x == t)
+                            || self.add.iter().any(|(x, _, _)| x == t))
+                }),
+        )
+    }
+}
+
+impl<'a, 'b> Filter<ChunkFilterData<'b>> for DynamicTagLayout<'a> {
+    type Iter = Enumerate<Repeat<&'b ArchetypeData>>;
+
+    fn collect(&self, source: ChunkFilterData<'b>) -> Self::Iter {
+        std::iter::repeat(source.archetype_data).enumerate()
+    }
+
+    fn is_match(&mut self, (chunk_index, arch): &<Self::Iter as Iterator>::Item) -> Option<bool> {
+        for (type_id, meta) in self.existing {
+            if self.remove.contains(type_id) {
+                continue;
+            }
+
+            unsafe {
+                // find the value of the tag in the source chunk
+                let (slice_ptr, element_size, _) = self
+                    .storage
+                    .data(self.archetype)
+                    .unwrap()
+                    .tags()
+                    .get(*type_id)
+                    .unwrap()
+                    .data_raw();
+                let current = slice_ptr.as_ptr().add(self.chunk * element_size);
+
+                // find the value of the tag in the candidate chunk
+                let (slice_ptr, element_size, _) = arch.tags().get(*type_id).unwrap().data_raw();
+                let candidate = slice_ptr.as_ptr().add(chunk_index * element_size);
+
+                if !meta.equals(current, candidate) {
+                    return Some(false);
+                }
+            }
+        }
+
+        for (type_id, meta, ptr) in self.add {
+            unsafe {
+                let (slice_ptr, element_size, _) = arch.tags().get(*type_id).unwrap().data_raw();
+                let candidate = slice_ptr.as_ptr().add(chunk_index * element_size);
+
+                if !meta.equals(*ptr, candidate) {
+                    return Some(false);
+                }
+            }
+        }
+
+        Some(true)
+    }
 }
 
 #[cfg(test)]
@@ -746,6 +1119,103 @@ mod tests {
                 Some(x) => assert_eq!(components.get(i + 1).map(|(_, x)| x), Some(&x as &Rot)),
                 None => assert_eq!(components.get(i + 1).map(|(_, x)| x), None),
             }
+        }
+    }
+
+    #[test]
+    fn add_component() {
+        let mut world = create();
+
+        let components = vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ];
+
+        let entities = world.insert((Static,), components.clone()).to_vec();
+
+        for (i, e) in entities.iter().enumerate() {
+            world.add_component(*e, Scale(2., 2., 2.));
+            assert_eq!(
+                components.get(i).unwrap().0,
+                *world.get_component(*e).unwrap()
+            );
+            assert_eq!(
+                components.get(i).unwrap().1,
+                *world.get_component(*e).unwrap()
+            );
+            assert_eq!(Scale(2., 2., 2.), *world.get_component(*e).unwrap());
+        }
+    }
+
+    #[test]
+    fn remove_component() {
+        let mut world = create();
+
+        let components = vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ];
+
+        let entities = world.insert((Static,), components.clone()).to_vec();
+
+        for (i, e) in entities.iter().enumerate() {
+            world.remove_component::<Rot>(*e);
+            assert_eq!(
+                components.get(i).unwrap().0,
+                *world.get_component(*e).unwrap()
+            );
+            assert!(world.get_component::<Rot>(*e).is_none());
+        }
+    }
+
+    #[test]
+    fn add_tag() {
+        let mut world = create();
+
+        let components = vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ];
+
+        let entities = world.insert((Static,), components.clone()).to_vec();
+
+        for (i, e) in entities.iter().enumerate() {
+            world.add_tag(*e, Model(2));
+            assert_eq!(
+                components.get(i).unwrap().0,
+                *world.get_component(*e).unwrap()
+            );
+            assert_eq!(
+                components.get(i).unwrap().1,
+                *world.get_component(*e).unwrap()
+            );
+            assert_eq!(Static, *world.get_tag(*e).unwrap());
+            assert_eq!(Model(2), *world.get_tag(*e).unwrap());
+        }
+    }
+
+    #[test]
+    fn remove_tag() {
+        let mut world = create();
+
+        let components = vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ];
+
+        let entities = world.insert((Static,), components.clone()).to_vec();
+
+        for (i, e) in entities.iter().enumerate() {
+            world.remove_tag::<Static>(*e);
+            assert_eq!(
+                components.get(i).unwrap().0,
+                *world.get_component(*e).unwrap()
+            );
+            assert_eq!(
+                components.get(i).unwrap().1,
+                *world.get_component(*e).unwrap()
+            );
+            assert!(world.get_tag::<Static>(*e).is_none());
         }
     }
 }

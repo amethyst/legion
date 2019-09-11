@@ -2,6 +2,7 @@ use crate::experimental::borrow::Exclusive;
 use crate::experimental::borrow::Shared;
 use crate::experimental::borrow::{AtomicRefCell, Ref, RefMap, RefMapMut, RefMut};
 use crate::experimental::entity::Entity;
+use crate::experimental::world::TagSet;
 use derivative::Derivative;
 use smallvec::Drain;
 use smallvec::SmallVec;
@@ -146,7 +147,7 @@ impl Storage {
     ///
     /// Returns the index of the newly created archetype and an exclusive reference to the
     /// achetype's data.
-    pub fn alloc_archetype(&mut self, desc: &ArchetypeDescription) -> (usize, &mut ArchetypeData) {
+    pub fn alloc_archetype(&mut self, desc: ArchetypeDescription) -> (usize, &mut ArchetypeData) {
         self.component_types
             .0
             .push(desc.components.iter().map(|(type_id, _)| *type_id));
@@ -203,7 +204,32 @@ pub struct TagMeta {
     size: usize,
     align: usize,
     drop_fn: Option<(fn(*mut u8))>,
-    eq_fn: Option<fn(*mut u8, *mut u8) -> bool>,
+    eq_fn: fn(*const u8, *const u8) -> bool,
+    clone_fn: fn(*const u8, *mut u8),
+}
+
+impl TagMeta {
+    /// Gets the tag meta of tag type `T`.
+    pub fn of<T: Tag>() -> Self {
+        TagMeta {
+            size: size_of::<T>(),
+            align: std::mem::align_of::<T>(),
+            drop_fn: Some(|ptr| unsafe { std::ptr::drop_in_place(ptr as *mut T) }),
+            eq_fn: |a, b| unsafe { *(a as *const T) == *(b as *const T) },
+            clone_fn: |src, dst| unsafe {
+                let clone = (&*(src as *const T)).clone();
+                std::ptr::write(dst as *mut T, clone);
+            },
+        }
+    }
+
+    pub(crate) fn equals(&self, a: *const u8, b: *const u8) -> bool { (self.eq_fn)(a, b) }
+
+    pub(crate) fn clone(&self, src: *const u8, dst: *mut u8) { (self.clone_fn)(src, dst) }
+
+    pub(crate) fn layout(&self) -> std::alloc::Layout {
+        unsafe { std::alloc::Layout::from_size_align_unchecked(self.size, self.align) }
+    }
 }
 
 /// Stores metadata describing the type of a component.
@@ -212,6 +238,17 @@ pub struct ComponentMeta {
     size: usize,
     align: usize,
     drop_fn: Option<(fn(*mut u8))>,
+}
+
+impl ComponentMeta {
+    /// Gets the component meta of component type `T`.
+    pub fn of<T: Component>() -> Self {
+        ComponentMeta {
+            size: size_of::<T>(),
+            align: std::mem::align_of::<T>(),
+            drop_fn: Some(|ptr| unsafe { std::ptr::drop_in_place(ptr as *mut T) }),
+        }
+    }
 }
 
 /// Describes the layout of an archetype, including what components
@@ -223,6 +260,12 @@ pub struct ArchetypeDescription {
 }
 
 impl ArchetypeDescription {
+    /// Gets a slice of the tags in the description.
+    pub fn tags(&self) -> &[(TagTypeId, TagMeta)] { &self.tags }
+
+    /// Gets a slice of the components in the description.
+    pub fn components(&self) -> &[(ComponentTypeId, ComponentMeta)] { &self.components }
+
     /// Adds a tag to the description.
     pub fn register_tag_raw(&mut self, type_id: TagTypeId, type_meta: TagMeta) {
         self.tags.push((type_id, type_meta));
@@ -230,17 +273,7 @@ impl ArchetypeDescription {
 
     /// Adds a tag to the description.
     pub fn register_tag<T: Tag>(&mut self) {
-        unsafe {
-            self.register_tag_raw(
-                TagTypeId(TypeId::of::<T>()),
-                TagMeta {
-                    size: size_of::<T>(),
-                    align: std::mem::align_of::<T>(),
-                    drop_fn: Some(|ptr| std::ptr::drop_in_place(ptr as *mut T)),
-                    eq_fn: Some(|a, b| *(a as *const T) == *(b as *const T)),
-                },
-            );
-        }
+        self.register_tag_raw(TagTypeId(TypeId::of::<T>()), TagMeta::of::<T>());
     }
 
     /// Adds a component to the description.
@@ -250,16 +283,7 @@ impl ArchetypeDescription {
 
     /// Adds a component to the description.
     pub fn register_component<T: Component>(&mut self) {
-        unsafe {
-            self.register_component_raw(
-                ComponentTypeId(TypeId::of::<T>()),
-                ComponentMeta {
-                    size: size_of::<T>(),
-                    align: std::mem::align_of::<T>(),
-                    drop_fn: Some(|ptr| std::ptr::drop_in_place(ptr as *mut T)),
-                },
-            );
-        }
+        self.register_component_raw(ComponentTypeId(TypeId::of::<T>()), ComponentMeta::of::<T>());
     }
 }
 
@@ -302,19 +326,113 @@ impl Tags {
             .ok()
             .map(move |i| unsafe { &mut self.0.get_unchecked_mut(i).1 })
     }
+
+    pub(crate) fn tag_set(&self, chunk: usize) -> DynamicTagSet {
+        let mut tags = DynamicTagSet { tags: Vec::new() };
+
+        unsafe {
+            for (type_id, storage) in self.0.iter() {
+                let (ptr, _, count) = storage.data_raw();
+                if count <= chunk {
+                    panic!("chunk index out of bounds");
+                }
+                tags.push(*type_id, *storage.element(), ptr.as_ptr());
+            }
+        }
+
+        tags
+    }
+}
+
+pub(crate) struct DynamicTagSet {
+    // the pointer here is to heap allocated memory owned by the tag set
+    tags: Vec<(TagTypeId, TagMeta, *mut u8)>,
+}
+
+unsafe impl Send for DynamicTagSet {}
+
+unsafe impl Sync for DynamicTagSet {}
+
+impl DynamicTagSet {
+    pub fn push(&mut self, type_id: TagTypeId, meta: TagMeta, value: *const u8) {
+        // we clone the value here and take ownership of the copy
+        unsafe {
+            let copy = std::alloc::alloc(meta.layout());
+            meta.clone(value, copy);
+            self.tags.push((type_id, meta, copy));
+        }
+    }
+
+    pub fn remove(&mut self, type_id: TagTypeId) {
+        if let Some((i, _)) = self
+            .tags
+            .iter()
+            .enumerate()
+            .find(|(_, (t, _, _))| *t == type_id)
+        {
+            let (_, meta, ptr) = self.tags.remove(i);
+            unsafe {
+                // drop and dealloc the copy as we own this memory
+                if let Some(drop_fn) = meta.drop_fn {
+                    drop_fn(ptr);
+                }
+                std::alloc::dealloc(ptr, meta.layout());
+            }
+        }
+    }
+}
+
+impl TagSet for DynamicTagSet {
+    fn write_tags(&self, tags: &mut Tags) {
+        for (type_id, meta, ptr) in self.tags.iter() {
+            let storage = tags.get_mut(*type_id).unwrap();
+            unsafe {
+                if meta.drop_fn.is_some() {
+                    // clone the value into temp storage then move it into the chunk
+                    // we can dealloc the copy without dropping because the value
+                    // is considered moved and will be dropped by the tag storage later
+                    let copy = std::alloc::alloc(meta.layout());
+                    meta.clone(*ptr, copy);
+                    storage.push_raw(copy);
+                    std::alloc::dealloc(copy, meta.layout());
+                } else {
+                    // copy the value directly into the tag storage
+                    // if the value has no drop fn, then it is safe for us to make
+                    // copies of the data without explicit clones
+                    storage.push_raw(*ptr)
+                }
+            }
+        }
+    }
+}
+
+impl Drop for DynamicTagSet {
+    fn drop(&mut self) {
+        // we own all of the vales in the set, so we need to drop and dealloc them
+        for (_, meta, ptr) in self.tags.drain(..) {
+            unsafe {
+                let layout = std::alloc::Layout::from_size_align_unchecked(meta.size, meta.align);
+                if let Some(drop_fn) = meta.drop_fn {
+                    drop_fn(ptr);
+                }
+                std::alloc::dealloc(ptr, layout);
+            }
+        }
+    }
 }
 
 /// Stores entity data in chunks. All entities within an archetype have the same data layout
 /// (component and tag types).
 pub struct ArchetypeData {
     id: ArchetypeId,
+    desc: ArchetypeDescription,
     tags: Tags,
     component_layout: ComponentStorageLayout,
     component_chunks: Vec<ComponentStorage>,
 }
 
 impl ArchetypeData {
-    fn new(id: ArchetypeId, desc: &ArchetypeDescription) -> Self {
+    fn new(id: ArchetypeId, desc: ArchetypeDescription) -> Self {
         // create tag storage
         let tags = desc
             .tags
@@ -348,6 +466,7 @@ impl ArchetypeData {
                 .expect("invalid component data size/alignment");
 
         ArchetypeData {
+            desc,
             id,
             tags: Tags::new(tags),
             component_layout: ComponentStorageLayout {
@@ -377,8 +496,8 @@ impl ArchetypeData {
     /// Determines whether this archetype has any chunks.
     pub fn is_empty(&self) -> bool { self.len() < 1 }
 
-    /// Gets the tag storage for the specified tag type.
-    pub fn tags(&self, tag_type: TagTypeId) -> Option<&TagStorage> { self.tags.get(tag_type) }
+    /// Gets the tag storage for all chunks in the archetype.
+    pub fn tags(&self) -> &Tags { &self.tags }
 
     /// Iterates though all chunks.
     pub fn iter_component_chunks(&self) -> std::slice::Iter<ComponentStorage> {
@@ -394,18 +513,27 @@ impl ArchetypeData {
     pub fn component_chunk_mut(&mut self, chunk: usize) -> Option<&mut ComponentStorage> {
         self.component_chunks.get_mut(chunk)
     }
+
+    /// Gets a description of the component types in the archetype.
+    pub fn description(&self) -> &ArchetypeDescription { &self.desc }
 }
 
 fn align_up(addr: usize, align: usize) -> usize { (addr + (align - 1)) & align.wrapping_neg() }
 
 /// Describes the data layout for a chunk.
-struct ComponentStorageLayout {
+pub struct ComponentStorageLayout {
     capacity: usize,
     alloc_layout: std::alloc::Layout,
     data_layout: Vec<(ComponentTypeId, usize, ComponentMeta)>,
 }
 
 impl ComponentStorageLayout {
+    /// The maximum number of entities that can be stored in each chunk.
+    pub fn capacity(&self) -> usize { self.capacity }
+
+    /// The components in each chunk.
+    pub fn components(&self) -> &[(ComponentTypeId, usize, ComponentMeta)] { &self.data_layout }
+
     fn alloc_storage(&self, id: ChunkId) -> ComponentStorage {
         unsafe {
             let data_storage = std::alloc::alloc(self.alloc_layout);
@@ -542,6 +670,7 @@ impl ComponentStorage {
     ///
     /// Returns the ID of the entity which was swapped into the removed entity's position.
     pub fn move_entity(&mut self, target: &mut ComponentStorage, index: usize) -> Option<Entity> {
+        debug_assert!(index < self.len());
         let entity = unsafe { *self.entities.get_unchecked(index) };
         target.entities.push(entity);
 
@@ -806,13 +935,16 @@ impl TagStorage {
         }
     }
 
+    /// Gets the element metadata.
+    pub fn element(&self) -> &TagMeta { &self.element }
+
     /// Gets the number of tags contained within the vector.
     pub fn len(&self) -> usize { self.len }
 
     /// Determines if the vector is empty.
     pub fn is_empty(&self) -> bool { self.len() < 1 }
 
-    /// Pushes a new tag onto the end of the vector.ComponentStorage
+    /// Pushes a new tag onto the end of the vector.
     ///
     /// # Safety
     ///
@@ -820,6 +952,11 @@ impl TagStorage {
     /// of the tag types stored in the vec.
     ///
     /// `ptr` must not point to a location already within the vector.
+    ///
+    /// The value at `ptr` is _copied_ into the tag vector. If the value
+    /// is not `Copy`, then the caller must ensure that the original value
+    /// is forgotten with `mem::forget` such that the finalizer is not called
+    /// twice.
     pub unsafe fn push_raw(&mut self, ptr: *const u8) {
         if self.len == self.capacity {
             self.grow();
@@ -833,7 +970,7 @@ impl TagStorage {
         self.len += 1;
     }
 
-    /// Pushes a new tag onto the end of the vector.ComponentStorage
+    /// Pushes a new tag onto the end of the vector.
     ///
     /// # Safety
     ///
@@ -850,11 +987,6 @@ impl TagStorage {
     /// Gets a raw pointer to the start of the tag slice.
     ///
     /// Returns a tuple containing `(pointer, element_size, count)`.
-    ///
-    /// # Safety
-    ///
-    /// Access to the tag data within the slice is runtime borrow checked.
-    /// This call will panic if borrowing rules are broken.
     pub unsafe fn data_raw(&self) -> (NonNull<u8>, usize, usize) {
         (self.ptr, self.element.size, self.len)
     }
@@ -952,7 +1084,7 @@ mod test {
         desc.register_tag::<usize>();
         desc.register_component::<isize>();
 
-        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(desc);
         let (_, tags, components) = data.alloc_chunk();
 
         unsafe { tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize) };
@@ -978,7 +1110,7 @@ mod test {
         desc.register_component::<usize>();
         desc.register_component::<ZeroSize>();
 
-        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(desc);
         let (_, _, components) = data.alloc_chunk();
 
         let entities = [
@@ -1050,7 +1182,7 @@ mod test {
         desc.register_tag::<isize>();
         desc.register_tag::<ZeroSize>();
 
-        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(desc);
 
         let tag_values = [(0isize, ZeroSize), (1isize, ZeroSize), (2isize, ZeroSize)];
 
@@ -1062,7 +1194,8 @@ mod test {
 
         unsafe {
             let tags1 = data
-                .tags(TagTypeId::of::<isize>())
+                .tags()
+                .get(TagTypeId::of::<isize>())
                 .unwrap()
                 .data_slice::<isize>();
             assert_eq!(tags1.len(), tag_values.len());
@@ -1071,7 +1204,8 @@ mod test {
             }
 
             let tags2 = data
-                .tags(TagTypeId::of::<ZeroSize>())
+                .tags()
+                .get(TagTypeId::of::<ZeroSize>())
                 .unwrap()
                 .data_slice::<ZeroSize>();
             assert_eq!(tags2.len(), tag_values.len());
@@ -1089,7 +1223,7 @@ mod test {
         desc.register_tag::<ZeroSize>();
         desc.register_component::<isize>();
 
-        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(desc);
         let (_, tags, components) = data.alloc_chunk();
 
         unsafe {
@@ -1118,7 +1252,7 @@ mod test {
         desc.register_tag::<usize>();
         desc.register_component::<ZeroSize>();
 
-        let (_arch_id, data) = archetypes.alloc_archetype(&desc);
+        let (_arch_id, data) = archetypes.alloc_archetype(desc);
         let (_, tags, components) = data.alloc_chunk();
 
         unsafe { tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize) };
