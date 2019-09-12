@@ -42,11 +42,11 @@ struct Model(usize);
 struct Static;
 
 // Create a world to store our entities
-let universe = Universe::new(None);
+let universe = Universe::new();
 let mut world = universe.create_world();
 
 // Create entities with `Position` and `Velocity` data
-world.insert_from(
+world.insert(
     (),
     (0..999).map(|_| (Position { x: 0.0, y: 0.0 }, Velocity { dx: 0.0, dy: 0.0 }))
 );
@@ -54,7 +54,7 @@ world.insert_from(
 // Create entities with `Position` data and a shared `Model` data, tagged as `Static`
 // Shared data values are shared across many entities,
 // and enable further batch processing and filtering use cases
-let entities: &[Entity] = world.insert_from(
+let entities: &[Entity] = world.insert(
     (Model(5), Static),
     (0..999).map(|_| (Position { x: 0.0, y: 0.0 },))
 );
@@ -63,7 +63,7 @@ let entities: &[Entity] = world.insert_from(
 let query = <(Write<Position>, Read<Velocity>)>::query();
 
 // Iterate through all entities that match the query in the world
-for (pos, vel) in query.iter(&world) {
+for (mut pos, vel) in query.iter(&world) {
     pos.x += vel.dx;
     pos.y += vel.dy;
 }
@@ -82,7 +82,7 @@ Additional data type filters:
 ```rust
 // It is possible to specify that entities must contain data beyond that being fetched
 let query = Read::<Position>::query()
-    .filter(entity_data::<Velocity>());
+    .filter(component::<Velocity>());
 for position in query.iter(&world) {
     // these entities also have `Velocity`
 }
@@ -93,7 +93,7 @@ Filter boolean operations:
 ```rust
 // Filters can be combined with boolean operators
 let query = Read::<Position>::query()
-    .filter(shared_data::<Static>() | !entity_data::<Velocity>());
+    .filter(tag::<Static>() | !component::<Velocity>());
 for position in query.iter(&world) {
     // these entities are also either marked as `Static`, or do *not* have a `Velocity`
 }
@@ -104,7 +104,7 @@ Filter by shared data value:
 ```rust
 // Filters can filter by specific shared data values
 let query = Read::<Position>::query()
-    .filter(shared_data_value(&Model(3)));
+    .filter(tag_value(&Model(3)));
 for position in query.iter(&world) {
     // these entities all have shared data value `Model(3)`
 }
@@ -128,7 +128,7 @@ Entities can be loaded and initialized in a background `World` on separate threa
 when ready, merged into the main `World` near instantaneously.
 
 ```rust
-let universe = Universe::new(None);
+let universe = Universe::new();
 let mut world_a = universe.create_world();
 let mut world_b = universe.create_world();
 
@@ -149,14 +149,14 @@ fn render_instanced(model: &Model, transforms: &[Transform]) {
 }
 
 let query = Read::<Transform>::query()
-    .filter(shared_data::<Model>());
+    .filter(tag::<Model>());
 
 for chunk in query.iter_chunks(&world) {
     // get the chunk's model
-    let model: &Model = chunk.shared_data().unwrap();
+    let model: &Model = chunk.tag().unwrap();
 
     // get a (runtime borrow checked) slice of transforms
-    let transforms = chunk.data::<Transform>().unwrap();
+    let transforms = chunk.components::<Transform>().unwrap();
 
     // give the model and transform slice to our renderer
     render_instanced(model, &transforms);
