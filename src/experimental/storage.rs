@@ -675,8 +675,8 @@ impl Chunkset {
                 first += 1;
             }
 
-            // find the last chunk that is not full
-            while last > first && !slice[last].is_empty() {
+            // find the last chunk that is not empty
+            while last > first && slice[last].is_empty() {
                 last -= 1;
             }
 
