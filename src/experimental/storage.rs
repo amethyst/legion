@@ -2,6 +2,7 @@ use crate::experimental::borrow::Exclusive;
 use crate::experimental::borrow::Shared;
 use crate::experimental::borrow::{AtomicRefCell, Ref, RefMap, RefMapMut, RefMut};
 use crate::experimental::entity::Entity;
+use crate::experimental::entity::EntityLocation;
 use crate::experimental::world::TagSet;
 use crate::experimental::world::WorldId;
 use derivative::Derivative;
@@ -14,6 +15,8 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::mem::size_of;
 use std::num::Wrapping;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::ptr::NonNull;
 use std::slice::Iter;
 use std::slice::IterMut;
@@ -430,7 +433,7 @@ pub struct ArchetypeData {
     desc: ArchetypeDescription,
     tags: Tags,
     component_layout: ComponentStorageLayout,
-    chunk_sets: Vec<Vec<ComponentStorage>>,
+    chunk_sets: Vec<Chunkset>,
 }
 
 impl ArchetypeData {
@@ -483,11 +486,11 @@ impl ArchetypeData {
     /// Gets the unique ID of this archetype.
     pub fn id(&self) -> ArchetypeId { self.id }
 
-    /// Allocates a new chunk set. Returns the index of the new set and a
-    /// mutable reference to the tags collection which needs to be initialized
-    /// with the new chunk set's tag values.
+    /// Allocates a new chunk set. Returns the index of the new set.
+    ///
+    /// `initialize` is expected to push the new chunkset's tag values onto the tags collection.
     pub(crate) fn alloc_chunk_set<F: FnMut(&mut Tags)>(&mut self, mut initialize: F) -> usize {
-        self.chunk_sets.push(Vec::new());
+        self.chunk_sets.push(Chunkset::default());
         initialize(&mut self.tags);
         self.tags.validate(self.chunk_sets.len());
         self.chunk_sets.len() - 1
@@ -496,7 +499,7 @@ impl ArchetypeData {
     /// Finds a chunk with space free for at least one entity, creating one if needed.
     pub(crate) fn get_free_chunk(&mut self, set_index: usize) -> usize {
         let count = {
-            let chunks = self.chunk_sets.get_mut(set_index).unwrap();
+            let chunks = &mut self.chunk_sets[set_index];
             let len = chunks.len();
             for (i, chunk) in chunks.iter_mut().enumerate() {
                 if !chunk.is_full() {
@@ -523,13 +526,30 @@ impl ArchetypeData {
     pub fn tags(&self) -> &Tags { &self.tags }
 
     /// Gets a slice of chunksets.
-    pub fn chunksets(&self) -> &[Vec<ComponentStorage>] { &self.chunk_sets }
+    pub fn chunksets(&self) -> &[Chunkset] { &self.chunk_sets }
 
     /// Gets a mutable slice of chunksets.
-    pub fn chunksets_mut(&mut self) -> &mut [Vec<ComponentStorage>] { &mut self.chunk_sets }
+    pub fn chunksets_mut(&mut self) -> &mut [Chunkset] { &mut self.chunk_sets }
 
     /// Gets a description of the component types in the archetype.
     pub fn description(&self) -> &ArchetypeDescription { &self.desc }
+
+    pub(crate) fn defrag<F: FnMut(Entity, EntityLocation)>(
+        &mut self,
+        budget: &mut usize,
+        mut on_moved: F,
+    ) -> bool {
+        let arch_index = self.id.index();
+        for (i, chunkset) in self.chunk_sets.iter_mut().enumerate() {
+            if !chunkset.defrag(budget, |e, chunk, component| {
+                on_moved(e, EntityLocation::new(arch_index, i, chunk, component));
+            }) {
+                return false;
+            }
+        }
+
+        true
+    }
 }
 
 fn align_up(addr: usize, align: usize) -> usize { (addr + (align - 1)) & align.wrapping_neg() }
@@ -579,6 +599,117 @@ impl ComponentStorageLayout {
             component_layout: self.alloc_layout,
             component_info: UnsafeCell::new(Components::new(storage_info)),
             component_data: None,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Chunkset {
+    chunks: Vec<ComponentStorage>,
+}
+
+impl Deref for Chunkset {
+    type Target = [ComponentStorage];
+
+    fn deref(&self) -> &Self::Target { self.chunks.as_slice() }
+}
+
+impl DerefMut for Chunkset {
+    fn deref_mut(&mut self) -> &mut Self::Target { self.chunks.as_mut_slice() }
+}
+
+impl Chunkset {
+    /// Pushes a new chunk into the set.
+    pub fn push(&mut self, chunk: ComponentStorage) { self.chunks.push(chunk); }
+
+    /// Gets a slice reference to occupied chunks.
+    pub fn occupied(&self) -> &[ComponentStorage] {
+        let mut len = self.chunks.len();
+        while len > 0 {
+            if unsafe { !self.chunks.get_unchecked(len - 1).is_empty() } {
+                break;
+            }
+            len -= 1;
+        }
+        let (some, _) = self.chunks.as_slice().split_at(len);
+        some
+    }
+
+    /// Gets a mutable slice reference to occupied chunks.
+    pub fn occupied_mut(&mut self) -> &mut [ComponentStorage] {
+        let mut len = self.chunks.len();
+        while len > 0 {
+            if unsafe { !self.chunks.get_unchecked(len - 1).is_empty() } {
+                break;
+            }
+            len -= 1;
+        }
+        let (some, _) = self.chunks.as_mut_slice().split_at_mut(len);
+        some
+    }
+
+    /// Defragments all chunks within the chunkset.
+    ///
+    /// This will compact entities down into lower index chunks, preferring to fill one
+    /// chunk before moving on to the next.
+    ///
+    /// `budget` determines the maximum number of entities that can be moved, and is decremented
+    /// as this function moves entities.
+    ///
+    /// `on_moved` is called when an entity is moved, with the entity's ID, new chunk index,
+    /// new component index.
+    ///
+    /// Returns whether or not the chunkset has been full defragmented.
+    fn defrag<F: FnMut(Entity, usize, usize)>(
+        &mut self,
+        budget: &mut usize,
+        mut on_moved: F,
+    ) -> bool {
+        let slice = self.occupied_mut();
+        let mut first = 0;
+        let mut last = slice.len() - 1;
+
+        loop {
+            // find the first chunk that is not full
+            while first < last && slice[first].is_full() {
+                first += 1;
+            }
+
+            // find the last chunk that is not full
+            while last > first && !slice[last].is_empty() {
+                last -= 1;
+            }
+
+            // exit if the cursors meet; the chunkset is defragmented
+            if first == last {
+                return true;
+            }
+
+            // get mut references to both chunks
+            let (with_first, with_last) = slice.split_at_mut(last);
+            let target = &mut with_first[first];
+            let source = &mut with_last[0];
+
+            // move as many entities as we can from the last chunk into the first
+            loop {
+                if *budget == 0 {
+                    return false;
+                }
+
+                *budget -= 1;
+
+                // move the last entity
+                let swapped = source.move_entity(target, source.len() - 1);
+                assert!(swapped.is_none());
+
+                // notify move
+                on_moved(*target.entities.last().unwrap(), first, target.len() - 1);
+
+                // exit if we cant move any more
+                if target.is_full() || source.is_empty() {
+                    break;
+                }
+            }
         }
     }
 }

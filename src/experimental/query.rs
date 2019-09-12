@@ -480,7 +480,7 @@ impl<
 
             // we have completed the set, find the next
             if let Some((ref arch, set_index)) = self.next_set() {
-                let chunks = unsafe { arch.chunksets().get_unchecked(set_index) };
+                let chunks = unsafe { arch.chunksets().get_unchecked(set_index) }.occupied();
                 self.chunk_frontier = Some((
                     arch,
                     set_index,

@@ -74,6 +74,7 @@ pub struct World {
     id: WorldId,
     storage: UnsafeCell<Storage>,
     entity_allocator: EntityAllocator,
+    defrag_progress: usize,
 }
 
 impl World {
@@ -82,6 +83,7 @@ impl World {
             id,
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: allocator,
+            defrag_progress: 0,
         }
     }
 
@@ -486,6 +488,33 @@ impl World {
 
     /// Determines if the given `Entity` is alive within this `World`.
     pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
+
+    /// Iteratively defragments the world's internal memory.
+    ///
+    /// This compacts entities into fewer more continuous chunks.
+    ///
+    /// `budget` describes the maximum number of entities that can be moved
+    /// in one call. Subsequent calls to `defrag` will resume progress from the
+    /// previous call.
+    pub fn defrag(&mut self, budget: Option<usize>) {
+        let archetypes = unsafe { &mut *self.storage.get() }.archetypes_mut();
+        let mut budget = budget.unwrap_or(std::usize::MAX);
+        let start = self.defrag_progress;
+        while self.defrag_progress < archetypes.len() {
+            // defragment the next archetype
+            if (&mut archetypes[self.defrag_progress]).defrag(&mut budget, |e, location| {
+                self.entity_allocator.set_location(e.index(), location);
+            }) {
+                // increment the index, looping it once we get to the end
+                self.defrag_progress = (self.defrag_progress + 1) % archetypes.len();
+            }
+
+            // stop once we run out of budget or reach back to where we started
+            if budget == 0 || self.defrag_progress == start {
+                break;
+            }
+        }
+    }
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<usize>
     where
