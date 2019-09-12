@@ -9,7 +9,6 @@ use crate::experimental::entity::EntityLocation;
 use crate::experimental::filter::ArchetypeFilterData;
 use crate::experimental::filter::ChunksetFilterData;
 use crate::experimental::filter::Filter;
-use crate::experimental::filter::FilterResult;
 use crate::experimental::storage::ArchetypeData;
 use crate::experimental::storage::ArchetypeDescription;
 use crate::experimental::storage::Component;
@@ -27,6 +26,7 @@ use std::cell::UnsafeCell;
 use std::iter::Enumerate;
 use std::iter::Peekable;
 use std::iter::Repeat;
+use std::iter::Take;
 use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
@@ -45,9 +45,7 @@ pub struct Universe {
 
 impl Universe {
     /// Creates a new `Universe`.
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Creates a new `World` within this `Unvierse`.
     ///
@@ -89,18 +87,12 @@ impl World {
         }
     }
 
-    pub(crate) fn storage(&self) -> &Storage {
-        unsafe { &*self.storage.get() }
-    }
+    pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
 
-    pub(crate) fn storage_mut(&mut self) -> &mut Storage {
-        unsafe { &mut *self.storage.get() }
-    }
+    pub(crate) fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
 
     /// Gets the unique ID of this world.
-    pub fn id(&self) -> WorldId {
-        self.id
-    }
+    pub fn id(&self) -> WorldId { self.id }
 
     /// Inserts new entities into the world.
     ///
@@ -495,9 +487,7 @@ impl World {
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
-    pub fn is_alive(&self, entity: Entity) -> bool {
-        self.entity_allocator.is_alive(entity)
-    }
+    pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
     /// Iteratively defragments the world's internal memory.
     ///
@@ -536,14 +526,8 @@ impl World {
                 component_types: self.storage().component_types(),
                 tag_types: self.storage().tag_types(),
             };
-            let iter = desc.collect(archetype_data);
-            let matches = iter.map(|x| desc.is_match(&x));
-            if let Some(arch_index) = matches
-                .enumerate()
-                .filter(|(_, x)| x.is_pass())
-                .map(|(i, _)| i)
-                .next()
-            {
+            let matches = desc.matches(archetype_data).matching_indices().next();
+            if let Some(arch_index) = matches {
                 // similar archetype already exists, merge
                 self.storage_mut()
                     .archetypes_mut()
@@ -568,15 +552,12 @@ impl World {
             tag_types: self.storage().tag_types(),
         };
 
-        let tag_iter = tags.collect(archetype_data);
-        let tag_matches =
-            tag_iter.map(|x| <T as Filter<ArchetypeFilterData<'_>>>::is_match(tags, &x));
-        let component_iter = components.collect(archetype_data);
-        let component_matches = component_iter.map(|x| components.is_match(&x));
-        tag_matches
-            .zip(component_matches)
+        // zip the two filters together - find the first index that matches both
+        tags.matches(archetype_data)
+            .zip(components.matches(archetype_data))
             .enumerate()
-            .filter(|(_, (t, c))| t.is_pass() && c.is_pass())
+            .take(self.storage().archetypes().len())
+            .filter(|(_, (a, b))| *a && *b)
             .map(|(i, _)| i)
             .next()
     }
@@ -618,15 +599,7 @@ impl World {
             archetype_data: archetype_data.deref(),
         };
 
-        let chunk_iter = tags.collect(chunk_filter_data);
-        if let Some(i) = chunk_iter
-            .map(|x| <T as Filter<ChunksetFilterData<'_>>>::is_match(tags, &x))
-            .zip(archetype_data.chunksets().iter())
-            .enumerate()
-            .filter(|(_, (matches, _))| matches.is_pass())
-            .map(|(i, _)| i)
-            .next()
-        {
+        if let Some(i) = tags.matches(chunk_filter_data).matching_indices().next() {
             return Some(i);
         }
 
@@ -999,9 +972,7 @@ impl<'a> TagLayout for DynamicTagLayout<'a> {
 impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
     type Iter = SliceVecIter<'b, TagTypeId>;
 
-    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter {
-        source.tag_types.iter()
-    }
+    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter { source.tag_types.iter() }
 
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
@@ -1018,10 +989,12 @@ impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
 }
 
 impl<'a, 'b> Filter<ChunksetFilterData<'b>> for DynamicTagLayout<'a> {
-    type Iter = Enumerate<Repeat<&'b ArchetypeData>>;
+    type Iter = Take<Enumerate<Repeat<&'b ArchetypeData>>>;
 
     fn collect(&self, source: ChunksetFilterData<'b>) -> Self::Iter {
-        std::iter::repeat(source.archetype_data).enumerate()
+        std::iter::repeat(source.archetype_data)
+            .enumerate()
+            .take(source.archetype_data.len())
     }
 
     fn is_match(&mut self, (chunk_index, arch): &<Self::Iter as Iterator>::Item) -> Option<bool> {
@@ -1093,9 +1066,7 @@ mod tests {
     }
 
     #[test]
-    fn create_universe() {
-        Universe::default();
-    }
+    fn create_universe() { Universe::default(); }
 
     #[test]
     fn create_world() {

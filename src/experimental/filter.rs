@@ -13,6 +13,7 @@ use crate::experimental::storage::TagTypes;
 use std::collections::HashMap;
 use std::iter::Enumerate;
 use std::iter::Repeat;
+use std::iter::Take;
 use std::marker::PhantomData;
 use std::slice::Iter;
 
@@ -81,7 +82,7 @@ impl FilterResult for Option<bool> {
 }
 
 /// A streaming iterator of bools.
-pub trait Filter<T: Copy>: Send + Sync {
+pub trait Filter<T: Copy>: Send + Sync + Sized {
     type Iter: Iterator + Send + Sync;
 
     /// Pulls iterator data out of the source.
@@ -89,6 +90,40 @@ pub trait Filter<T: Copy>: Send + Sync {
 
     /// Determines if an element of `Self::Iter` matches the filter conditions.
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool>;
+
+    /// Creates an iterator which yields bools for each element in the source
+    /// which indicate if the element matches the filter.
+    fn matches(&mut self, source: T) -> FilterIter<Self, T> {
+        FilterIter {
+            elements: self.collect(source),
+            filter: self,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+/// An iterator over the elements matching a filter.
+pub struct FilterIter<'a, F: Filter<T>, T: Copy> {
+    elements: <F as Filter<T>>::Iter,
+    filter: &'a mut F,
+    _phantom: PhantomData<T>,
+}
+
+impl<'a, F: Filter<T>, T: Copy> Iterator for FilterIter<'a, F, T> {
+    type Item = bool;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.elements
+            .next()
+            .map(|x| self.filter.is_match(&x).is_pass())
+    }
+}
+
+impl<'a, F: Filter<T>, T: Copy + 'a> FilterIter<'a, F, T> {
+    /// Finds the indices of all elements matching the filter.
+    pub fn matching_indices(self) -> impl Iterator<Item = usize> + 'a {
+        self.enumerate().filter(|(_, x)| *x).map(|(i, _)| i)
+    }
 }
 
 /// Input data for archetype filters.
@@ -418,30 +453,36 @@ impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunksetFilter
 pub struct Passthrough;
 
 impl<'a> Filter<ArchetypeFilterData<'a>> for Passthrough {
-    type Iter = Repeat<()>;
+    type Iter = Take<Repeat<()>>;
 
     #[inline]
-    fn collect(&self, _: ArchetypeFilterData<'a>) -> Self::Iter { std::iter::repeat(()) }
+    fn collect(&self, arch: ArchetypeFilterData<'a>) -> Self::Iter {
+        std::iter::repeat(()).take(arch.component_types.len())
+    }
 
     #[inline]
     fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<'a> Filter<ChunksetFilterData<'a>> for Passthrough {
-    type Iter = Repeat<()>;
+    type Iter = Take<Repeat<()>>;
 
     #[inline]
-    fn collect(&self, _: ChunksetFilterData<'a>) -> Self::Iter { std::iter::repeat(()) }
+    fn collect(&self, sets: ChunksetFilterData<'a>) -> Self::Iter {
+        std::iter::repeat(()).take(sets.archetype_data.len())
+    }
 
     #[inline]
     fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<'a> Filter<ChunkFilterData<'a>> for Passthrough {
-    type Iter = Repeat<()>;
+    type Iter = Take<Repeat<()>>;
 
     #[inline]
-    fn collect(&self, _: ChunkFilterData<'a>) -> Self::Iter { std::iter::repeat(()) }
+    fn collect(&self, chunk: ChunkFilterData<'a>) -> Self::Iter {
+        std::iter::repeat(()).take(chunk.chunks.len())
+    }
 
     #[inline]
     fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
