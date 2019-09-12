@@ -45,7 +45,9 @@ pub struct Universe {
 
 impl Universe {
     /// Creates a new `Universe`.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Creates a new `World` within this `Unvierse`.
     ///
@@ -87,12 +89,18 @@ impl World {
         }
     }
 
-    pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
+    pub(crate) fn storage(&self) -> &Storage {
+        unsafe { &*self.storage.get() }
+    }
 
-    pub(crate) fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
+    pub(crate) fn storage_mut(&mut self) -> &mut Storage {
+        unsafe { &mut *self.storage.get() }
+    }
 
     /// Gets the unique ID of this world.
-    pub fn id(&self) -> WorldId { self.id }
+    pub fn id(&self) -> WorldId {
+        self.id
+    }
 
     /// Inserts new entities into the world.
     ///
@@ -487,7 +495,9 @@ impl World {
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
-    pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
+    pub fn is_alive(&self, entity: Entity) -> bool {
+        self.entity_allocator.is_alive(entity)
+    }
 
     /// Iteratively defragments the world's internal memory.
     ///
@@ -512,6 +522,37 @@ impl World {
             // stop once we run out of budget or reach back to where we started
             if budget == 0 || self.defrag_progress == start {
                 break;
+            }
+        }
+    }
+
+    pub fn merge(&mut self, world: World) {
+        self.entity_allocator.merge(world.entity_allocator);
+
+        for archetype in unsafe { &mut *world.storage.get() }.drain(..) {
+            // use the description as an archetype filter
+            let mut desc = archetype.description().clone();
+            let archetype_data = ArchetypeFilterData {
+                component_types: self.storage().component_types(),
+                tag_types: self.storage().tag_types(),
+            };
+            let iter = desc.collect(archetype_data);
+            let matches = iter.map(|x| desc.is_match(&x));
+            if let Some(arch_index) = matches
+                .enumerate()
+                .filter(|(_, x)| x.is_pass())
+                .map(|(i, _)| i)
+                .next()
+            {
+                // similar archetype already exists, merge
+                self.storage_mut()
+                    .archetypes_mut()
+                    .get_mut(arch_index)
+                    .unwrap()
+                    .merge(archetype);
+            } else {
+                // archetype does not already exist, append
+                self.storage_mut().push(archetype);
             }
         }
     }
@@ -958,7 +999,9 @@ impl<'a> TagLayout for DynamicTagLayout<'a> {
 impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
     type Iter = SliceVecIter<'b, TagTypeId>;
 
-    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter { source.tag_types.iter() }
+    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter {
+        source.tag_types.iter()
+    }
 
     fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
@@ -1050,7 +1093,9 @@ mod tests {
     }
 
     #[test]
-    fn create_universe() { Universe::default(); }
+    fn create_universe() {
+        Universe::default();
+    }
 
     #[test]
     fn create_world() {
