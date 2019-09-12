@@ -1,32 +1,33 @@
-use crate::experimental::borrow::Exclusive;
-use crate::experimental::borrow::Ref;
-use crate::experimental::borrow::RefMut;
-use crate::experimental::borrow::Shared;
-use crate::experimental::entity::BlockAllocator;
-use crate::experimental::entity::Entity;
-use crate::experimental::entity::EntityAllocator;
-use crate::experimental::entity::EntityLocation;
-use crate::experimental::filter::ArchetypeFilterData;
-use crate::experimental::filter::ChunksetFilterData;
-use crate::experimental::filter::Filter;
-use crate::experimental::storage::ArchetypeData;
-use crate::experimental::storage::ArchetypeDescription;
-use crate::experimental::storage::Component;
-use crate::experimental::storage::ComponentMeta;
-use crate::experimental::storage::ComponentStorage;
-use crate::experimental::storage::ComponentTypeId;
-use crate::experimental::storage::SliceVecIter;
-use crate::experimental::storage::Storage;
-use crate::experimental::storage::Tag;
-use crate::experimental::storage::TagMeta;
-use crate::experimental::storage::TagTypeId;
-use crate::experimental::storage::Tags;
+use crate::borrow::Exclusive;
+use crate::borrow::Ref;
+use crate::borrow::RefMut;
+use crate::borrow::Shared;
+use crate::entity::BlockAllocator;
+use crate::entity::Entity;
+use crate::entity::EntityAllocator;
+use crate::entity::EntityLocation;
+use crate::filter::ArchetypeFilterData;
+use crate::filter::ChunksetFilterData;
+use crate::filter::Filter;
+use crate::storage::ArchetypeData;
+use crate::storage::ArchetypeDescription;
+use crate::storage::Component;
+use crate::storage::ComponentMeta;
+use crate::storage::ComponentStorage;
+use crate::storage::ComponentTypeId;
+use crate::storage::SliceVecIter;
+use crate::storage::Storage;
+use crate::storage::Tag;
+use crate::storage::TagMeta;
+use crate::storage::TagTypeId;
+use crate::storage::Tags;
 use parking_lot::Mutex;
 use std::cell::UnsafeCell;
 use std::iter::Enumerate;
 use std::iter::Peekable;
 use std::iter::Repeat;
 use std::iter::Take;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
@@ -77,6 +78,10 @@ pub struct World {
     defrag_progress: usize,
 }
 
+unsafe impl Send for World {}
+
+unsafe impl Sync for World {}
+
 impl World {
     fn new(id: WorldId, allocator: EntityAllocator) -> Self {
         Self {
@@ -101,7 +106,7 @@ impl World {
     /// Inserting entity tuples:
     ///
     /// ```
-    /// # use legion::experimental::prelude::*;
+    /// # use legion::prelude::*;
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
     /// # struct Position(f32);
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -543,8 +548,8 @@ impl World {
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<usize>
     where
-        T: TagLayout,
-        C: ComponentLayout,
+        T: for<'a> Filter<ArchetypeFilterData<'a>>,
+        C: for<'a> Filter<ArchetypeFilterData<'a>>,
     {
         // search for an archetype with an exact match for the desired component layout
         let archetype_data = ArchetypeFilterData {
@@ -580,7 +585,7 @@ impl World {
         T: TagLayout,
         C: ComponentLayout,
     {
-        if let Some(i) = self.find_archetype(tags, components) {
+        if let Some(i) = self.find_archetype(tags.get_filter(), components.get_filter()) {
             i
         } else {
             self.create_archetype(tags, components)
@@ -631,13 +636,25 @@ impl World {
 }
 
 /// Describes the types of a set of components attached to an entity.
-pub trait ComponentLayout: Sized + for<'a> Filter<ArchetypeFilterData<'a>> {
+pub trait ComponentLayout: Sized {
+    /// A filter type which filters archetypes to an exact match with this layout.
+    type Filter: for<'a> Filter<ArchetypeFilterData<'a>>;
+
+    /// Gets the archetype filter for this layout.
+    fn get_filter(&mut self) -> &mut Self::Filter;
+
     /// Modifies an archetype description to include the components described by this layout.
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription);
 }
 
 /// Describes the types of a set of tags attached to an entity.
-pub trait TagLayout: Sized + for<'a> Filter<ArchetypeFilterData<'a>> {
+pub trait TagLayout: Sized {
+    /// A filter type which filters archetypes to an exact match with this layout.
+    type Filter: for<'a> Filter<ArchetypeFilterData<'a>>;
+
+    /// Gets the archetype filter for this layout.
+    fn get_filter(&mut self) -> &mut Self::Filter;
+
     /// Modifies an archetype description to include the tags described by this layout.
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription);
 }
@@ -672,6 +689,7 @@ where
     I: Iterator<Item = T>,
 {
     iter: Peekable<I>,
+    filter: ComponentTupleFilter<T>,
 }
 
 impl<T, I> From<I> for ComponentTupleSet<T, I>
@@ -682,6 +700,9 @@ where
     fn from(iter: I) -> Self {
         ComponentTupleSet {
             iter: iter.peekable(),
+            filter: ComponentTupleFilter {
+                _phantom: PhantomData,
+            },
         }
     }
 }
@@ -696,16 +717,23 @@ where
     fn into(self) -> Self::Source {
         ComponentTupleSet {
             iter: self.into_iter().peekable(),
+            filter: ComponentTupleFilter {
+                _phantom: PhantomData,
+            },
         }
     }
 }
 
+pub struct ComponentTupleFilter<T> {
+    _phantom: PhantomData<T>,
+}
+
 mod tuple_impls {
     use super::*;
-    use crate::experimental::storage::Component;
-    use crate::experimental::storage::ComponentTypeId;
-    use crate::experimental::storage::SliceVecIter;
-    use crate::experimental::storage::Tag;
+    use crate::storage::Component;
+    use crate::storage::ComponentTypeId;
+    use crate::storage::SliceVecIter;
+    use crate::storage::Tag;
     use itertools::Zip;
     use std::iter::Repeat;
     use std::iter::Take;
@@ -719,9 +747,15 @@ mod tuple_impls {
         ( @COMPONENT_SOURCE $( $ty: ident => $id: ident ),* ) => {
             impl<I, $( $ty ),*> ComponentLayout for ComponentTupleSet<($( $ty, )*), I>
             where
-                I: Iterator<Item = ($( $ty, )*)> + Sync + Send,
+                I: Iterator<Item = ($( $ty, )*)>,
                 $( $ty: Component ),*
             {
+                type Filter = ComponentTupleFilter<($( $ty, )*)>;
+
+                fn get_filter(&mut self) -> &mut Self::Filter {
+                    &mut self.filter
+                }
+
                 fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
                     #![allow(unused_variables)]
                     $(
@@ -732,7 +766,7 @@ mod tuple_impls {
 
             impl<I, $( $ty ),*> ComponentSource for ComponentTupleSet<($( $ty, )*), I>
             where
-                I: Iterator<Item = ($( $ty, )*)> + Sync + Send,
+                I: Iterator<Item = ($( $ty, )*)>,
                 $( $ty: Component ),*
             {
                 fn is_empty(&mut self) -> bool {
@@ -768,9 +802,8 @@ mod tuple_impls {
                 }
             }
 
-            impl<'a, I, $( $ty ),*> Filter<ArchetypeFilterData<'a>> for ComponentTupleSet<($( $ty, )*), I>
+            impl<'a, $( $ty ),*> Filter<ArchetypeFilterData<'a>> for ComponentTupleFilter<($( $ty, )*)>
             where
-                I: Iterator<Item = ($( $ty, )*)> + Sync + Send,
                 $( $ty: Component ),*
             {
                 type Iter = SliceVecIter<'a, ComponentTypeId>;
@@ -810,6 +843,12 @@ mod tuple_impls {
             where
                 $( $ty: Tag ),*
             {
+                type Filter = Self;
+
+                fn get_filter(&mut self) -> &mut Self {
+                    self
+                }
+
                 fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
                     #![allow(unused_variables)]
                     $(
@@ -896,6 +935,10 @@ struct DynamicComponentLayout<'a> {
 }
 
 impl<'a> ComponentLayout for DynamicComponentLayout<'a> {
+    type Filter = Self;
+
+    fn get_filter(&mut self) -> &mut Self::Filter { self }
+
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy components from existing archetype into new
         // except for those in `remove`
@@ -950,6 +993,10 @@ unsafe impl<'a> Send for DynamicTagLayout<'a> {}
 unsafe impl<'a> Sync for DynamicTagLayout<'a> {}
 
 impl<'a> TagLayout for DynamicTagLayout<'a> {
+    type Filter = Self;
+
+    fn get_filter(&mut self) -> &mut Self::Filter { self }
+
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy tags from existing archetype into new
         // except for those in `remove`

@@ -33,10 +33,10 @@ fn data(n: usize) -> Vec<(Position, Orientation, Scale, Transform)> {
 }
 
 fn setup(data: Vec<(Position, Orientation, Scale, Transform)>) -> World {
-    let universe = Universe::new(None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
-    world.insert_from((), data);
+    world.insert((), data);
 
     world
 }
@@ -59,7 +59,7 @@ fn ideal(data: &mut Vec<(Position, Orientation, Scale, Transform)>) {
 }
 
 fn sequential(world: &World) {
-    for (pos, orient, scale, trans) in <(
+    for (pos, orient, scale, mut trans) in <(
         Read<Position>,
         Read<Orientation>,
         Read<Scale>,
@@ -78,16 +78,16 @@ fn par_for_each(world: &World) {
         Read<Scale>,
         Write<Transform>,
     )>::query()
-    .par_for_each(&world, |(pos, orient, scale, trans)| {
+    .par_for_each(&world, |(pos, orient, scale, mut trans)| {
         trans.0 = process(&pos.0, &orient.0, &scale.0);
     });
 }
 
 fn bench_transform(c: &mut Criterion) {
     c.bench(
-        "update transform",
+        "update transform (experimental)",
         ParameterizedBenchmark::new(
-            "sequential ideal",
+            "ideal sequential",
             |b, n| {
                 let mut data = data(*n);
                 b.iter(|| ideal(&mut data));

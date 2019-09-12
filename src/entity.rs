@@ -252,7 +252,7 @@ impl Drop for EntityAllocator {
 
 #[cfg(test)]
 mod tests {
-    use crate::experimental::entity::*;
+    use crate::entity::*;
     use std::collections::HashSet;
 
     #[test]

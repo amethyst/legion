@@ -1,8 +1,5 @@
 use criterion::*;
 use itertools::*;
-use legion::storage::DynamicSingleEntitySource;
-use legion::storage::DynamicTagSet;
-use std::sync::Arc;
 
 use legion::prelude::*;
 
@@ -35,7 +32,7 @@ struct Rotation(f32);
 
 fn create_entities(
     world: &mut World,
-    variants: &mut [Box<FnMut(&mut DynamicTagSet, &mut DynamicSingleEntitySource)>],
+    variants: &mut [Box<dyn FnMut(Entity, &mut World)>],
     num_components: usize,
     count: usize,
 ) {
@@ -45,14 +42,11 @@ fn create_entities(
         .chunks(num_components);
 
     for initializers in (&components).into_iter().take(count) {
-        let entity = world.insert_from((), Some((A(0.0),)))[0];
-        world.mutate_entity(entity, |e| {
-            for i in initializers {
-                let init = variants.get_mut(i).unwrap();
-                let (tags, components) = e.deconstruct();
-                init(tags, components);
-            }
-        });
+        let entity = world.insert((), Some((A(0.0),)))[0];
+        for i in initializers {
+            let init = variants.get_mut(i).unwrap();
+            init(entity, world);
+        }
     }
 }
 
@@ -60,16 +54,16 @@ fn add_background_entities(world: &mut World, count: usize) {
     create_entities(
         world,
         &mut [
-            Box::new(|_, c| c.add_component(A(0.0))),
-            Box::new(|_, c| c.add_component(B(0.0))),
-            Box::new(|_, c| c.add_component(C(0.0))),
-            Box::new(|t, _| t.set_tag(Arc::new(Tag(0.0)))),
-            Box::new(|_, c| c.add_component(D(0.0))),
-            Box::new(|t, _| t.set_tag(Arc::new(Tag(1.0)))),
-            Box::new(|_, c| c.add_component(E(0.0))),
-            Box::new(|t, _| t.set_tag(Arc::new(Tag(2.0)))),
-            Box::new(|_, c| c.add_component(F(0.0))),
-            Box::new(|t, _| t.set_tag(Arc::new(Tag(3.0)))),
+            Box::new(|e, w| w.add_component(e, A(0.0))),
+            Box::new(|e, w| w.add_component(e, B(0.0))),
+            Box::new(|e, w| w.add_component(e, C(0.0))),
+            Box::new(|e, w| w.add_tag(e, Tag(0.0))),
+            Box::new(|e, w| w.add_component(e, D(0.0))),
+            Box::new(|e, w| w.add_tag(e, Tag(1.0))),
+            Box::new(|e, w| w.add_component(e, E(0.0))),
+            Box::new(|e, w| w.add_tag(e, Tag(2.0))),
+            Box::new(|e, w| w.add_component(e, F(0.0))),
+            Box::new(|e, w| w.add_tag(e, Tag(3.0))),
         ],
         5,
         count,
@@ -77,10 +71,10 @@ fn add_background_entities(world: &mut World, count: usize) {
 }
 
 fn setup(n: usize) -> World {
-    let universe = Universe::new(None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
-    world.insert_from((), (0..n).map(|_| (Position(0.), Rotation(0.))));
+    world.insert((), (0..n).map(|_| (Position(0.), Rotation(0.))));
 
     world
 }
@@ -92,7 +86,7 @@ fn bench_create_delete(c: &mut Criterion) {
             let mut world = setup(0);
             b.iter(|| {
                 let entities = world
-                    .insert_from((), (0..*count).map(|_| (Position(0.),)))
+                    .insert((), (0..*count).map(|_| (Position(0.),)))
                     .to_vec();
 
                 for e in entities {
@@ -112,7 +106,7 @@ fn bench_iter_simple(c: &mut Criterion) {
         let mut query = <(Read<Position>, Write<Rotation>)>::query();
 
         b.iter(|| {
-            for (pos, rot) in query.iter(&world) {
+            for (pos, mut rot) in query.iter(&world) {
                 rot.0 = pos.0;
             }
         });
@@ -125,8 +119,8 @@ fn bench_iter_complex(c: &mut Criterion) {
         add_background_entities(&mut world, 10000);
 
         for i in 0..200 {
-            world.insert_from(
-                (Tag(i as f32),).as_tags(),
+            world.insert(
+                (Tag(i as f32),),
                 (0..2000).map(|_| (Position(0.), Rotation(0.))),
             );
         }
@@ -135,7 +129,7 @@ fn bench_iter_complex(c: &mut Criterion) {
             .filter(!component::<A>() & tag_value(&Tag(2.0)));
 
         b.iter(|| {
-            for (pos, rot) in query.iter(&world) {
+            for (pos, mut rot) in query.iter(&world) {
                 rot.0 = pos.0;
             }
         });
@@ -168,8 +162,8 @@ fn bench_iter_chunks_complex(c: &mut Criterion) {
         add_background_entities(&mut world, 10000);
 
         for i in 0..200 {
-            world.insert_from(
-                (Tag(i as f32),).as_tags(),
+            world.insert(
+                (Tag(i as f32),),
                 (0..10000).map(|_| (Position(0.), Rotation(0.))),
             );
         }
