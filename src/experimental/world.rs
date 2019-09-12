@@ -28,6 +28,7 @@ use std::iter::Enumerate;
 use std::iter::Peekable;
 use std::iter::Repeat;
 use std::ops::Deref;
+use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -196,7 +197,7 @@ impl World {
         source_location: EntityLocation,
         add_components: &[(ComponentTypeId, ComponentMeta)],
         remove_components: &[ComponentTypeId],
-        add_tags: &[(TagTypeId, TagMeta, *const u8)],
+        add_tags: &[(TagTypeId, TagMeta, NonNull<u8>)],
         remove_tags: &[TagTypeId],
     ) -> (usize, usize) {
         let archetype = {
@@ -273,7 +274,7 @@ impl World {
         entity: Entity,
         add_components: &[(ComponentTypeId, ComponentMeta)],
         remove_components: &[ComponentTypeId],
-        add_tags: &[(TagTypeId, TagMeta, *const u8)],
+        add_tags: &[(TagTypeId, TagMeta, NonNull<u8>)],
         remove_tags: &[TagTypeId],
     ) -> &mut ComponentStorage {
         let location = self
@@ -392,7 +393,7 @@ impl World {
             &[(
                 TagTypeId::of::<T>(),
                 TagMeta::of::<T>(),
-                &tag as *const _ as *const u8,
+                NonNull::new(&tag as *const _ as *mut u8).unwrap(),
             )],
             &[],
         );
@@ -897,7 +898,7 @@ struct DynamicTagLayout<'a> {
     archetype: usize,
     chunk: usize,
     existing: &'a [(TagTypeId, TagMeta)],
-    add: &'a [(TagTypeId, TagMeta, *const u8)],
+    add: &'a [(TagTypeId, TagMeta, NonNull<u8>)],
     remove: &'a [TagTypeId],
 }
 
@@ -985,7 +986,7 @@ impl<'a, 'b> Filter<ChunksetFilterData<'b>> for DynamicTagLayout<'a> {
                 let (slice_ptr, element_size, _) = arch.tags().get(*type_id).unwrap().data_raw();
                 let candidate = slice_ptr.as_ptr().add(chunk_index * element_size);
 
-                if !meta.equals(*ptr, candidate) {
+                if !meta.equals(ptr.as_ptr(), candidate) {
                     return Some(false);
                 }
             }

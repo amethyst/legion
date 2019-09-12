@@ -9,6 +9,7 @@ use smallvec::Drain;
 use smallvec::SmallVec;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::mem::size_of;
@@ -336,10 +337,8 @@ impl Tags {
         unsafe {
             for (type_id, storage) in self.0.iter() {
                 let (ptr, _, count) = storage.data_raw();
-                if count <= chunk {
-                    panic!("chunk index out of bounds");
-                }
-                tags.push(*type_id, *storage.element(), ptr.as_ptr());
+                debug_assert!(chunk < count, "chunk index out of bounds");
+                tags.push(*type_id, *storage.element(), ptr);
             }
         }
 
@@ -349,7 +348,7 @@ impl Tags {
 
 pub(crate) struct DynamicTagSet {
     // the pointer here is to heap allocated memory owned by the tag set
-    tags: Vec<(TagTypeId, TagMeta, *mut u8)>,
+    tags: Vec<(TagTypeId, TagMeta, NonNull<u8>)>,
 }
 
 unsafe impl Send for DynamicTagSet {}
@@ -357,12 +356,12 @@ unsafe impl Send for DynamicTagSet {}
 unsafe impl Sync for DynamicTagSet {}
 
 impl DynamicTagSet {
-    pub fn push(&mut self, type_id: TagTypeId, meta: TagMeta, value: *const u8) {
+    pub fn push(&mut self, type_id: TagTypeId, meta: TagMeta, value: NonNull<u8>) {
         // we clone the value here and take ownership of the copy
         unsafe {
             let copy = std::alloc::alloc(meta.layout());
-            meta.clone(value, copy);
-            self.tags.push((type_id, meta, copy));
+            meta.clone(value.as_ptr(), copy);
+            self.tags.push((type_id, meta, NonNull::new(copy).unwrap()));
         }
     }
 
@@ -377,9 +376,9 @@ impl DynamicTagSet {
             unsafe {
                 // drop and dealloc the copy as we own this memory
                 if let Some(drop_fn) = meta.drop_fn {
-                    drop_fn(ptr);
+                    drop_fn(ptr.as_ptr());
                 }
-                std::alloc::dealloc(ptr, meta.layout());
+                std::alloc::dealloc(ptr.as_ptr(), meta.layout());
             }
         }
     }
@@ -395,14 +394,14 @@ impl TagSet for DynamicTagSet {
                     // we can dealloc the copy without dropping because the value
                     // is considered moved and will be dropped by the tag storage later
                     let copy = std::alloc::alloc(meta.layout());
-                    meta.clone(*ptr, copy);
+                    meta.clone(ptr.as_ptr(), copy);
                     storage.push_raw(copy);
                     std::alloc::dealloc(copy, meta.layout());
                 } else {
                     // copy the value directly into the tag storage
                     // if the value has no drop fn, then it is safe for us to make
                     // copies of the data without explicit clones
-                    storage.push_raw(*ptr)
+                    storage.push_raw(ptr.as_ptr())
                 }
             }
         }
@@ -416,9 +415,9 @@ impl Drop for DynamicTagSet {
             unsafe {
                 let layout = std::alloc::Layout::from_size_align_unchecked(meta.size, meta.align);
                 if let Some(drop_fn) = meta.drop_fn {
-                    drop_fn(ptr);
+                    drop_fn(ptr.as_ptr());
                 }
-                std::alloc::dealloc(ptr, layout);
+                std::alloc::dealloc(ptr.as_ptr(), layout);
             }
         }
     }
@@ -550,36 +549,36 @@ impl ComponentStorageLayout {
     pub fn components(&self) -> &[(ComponentTypeId, usize, ComponentMeta)] { &self.data_layout }
 
     fn alloc_storage(&self, id: ChunkId) -> ComponentStorage {
-        unsafe {
-            let data_storage = std::alloc::alloc(self.alloc_layout);
-            let storage_info = self
+        let storage_info = self
+            .data_layout
+            .iter()
+            .map(|(ty, _, meta)| {
+                (
+                    *ty,
+                    ComponentAccessor {
+                        ptr: AtomicRefCell::new(meta.align as *mut u8),
+                        capacity: self.capacity,
+                        count: UnsafeCell::new(0),
+                        element_size: meta.size,
+                        drop_fn: meta.drop_fn,
+                        version: UnsafeCell::new(Wrapping(0)),
+                    },
+                )
+            })
+            .collect();
+
+        ComponentStorage {
+            id,
+            capacity: self.capacity,
+            entities: Vec::with_capacity(self.capacity),
+            component_offsets: self
                 .data_layout
                 .iter()
-                .map(|(ty, offset, meta)| {
-                    (
-                        *ty,
-                        ComponentAccessor {
-                            ptr: AtomicRefCell::new(NonNull::new_unchecked(
-                                data_storage.add(*offset),
-                            )),
-                            capacity: self.capacity,
-                            count: UnsafeCell::new(0),
-                            element_size: meta.size,
-                            drop_fn: meta.drop_fn,
-                            version: UnsafeCell::new(Wrapping(0)),
-                        },
-                    )
-                })
-                .collect();
-
-            ComponentStorage {
-                id,
-                capacity: self.capacity,
-                entities: Vec::with_capacity(self.capacity),
-                component_layout: self.alloc_layout,
-                component_info: UnsafeCell::new(Components::new(storage_info)),
-                component_data: NonNull::new_unchecked(data_storage),
-            }
+                .map(|(ty, offset, _)| (*ty, *offset))
+                .collect(),
+            component_layout: self.alloc_layout,
+            component_info: UnsafeCell::new(Components::new(storage_info)),
+            component_data: None,
         }
     }
 }
@@ -640,8 +639,9 @@ pub struct ComponentStorage {
     capacity: usize,
     entities: Vec<Entity>,
     component_layout: std::alloc::Layout,
+    component_offsets: HashMap<ComponentTypeId, usize>,
     component_info: UnsafeCell<Components>,
-    component_data: NonNull<u8>,
+    component_data: Option<NonNull<u8>>,
 }
 
 impl ComponentStorage {
@@ -658,7 +658,10 @@ impl ComponentStorage {
     pub fn is_full(&self) -> bool { self.len() >= self.capacity }
 
     /// Determines if the chunk is empty.
-    pub fn is_empty(&self) -> bool { self.entities.len() < 1 }
+    pub fn is_empty(&self) -> bool { self.entities.len() == 0 }
+
+    /// Determines if the internal memory for this chunk has been allocated.
+    pub fn is_allocated(&self) -> bool { self.component_data.is_some() }
 
     /// Gets a slice reference containing the IDs of all entities stored in the chunk.
     pub fn entities(&self) -> &[Entity] { self.entities.as_slice() }
@@ -680,6 +683,10 @@ impl ComponentStorage {
         if self.entities.len() > index {
             Some(*self.entities.get(index).unwrap())
         } else {
+            if self.is_empty() {
+                self.free();
+            }
+
             None
         }
     }
@@ -690,6 +697,10 @@ impl ComponentStorage {
     /// Returns the ID of the entity which was swapped into the removed entity's position.
     pub fn move_entity(&mut self, target: &mut ComponentStorage, index: usize) -> Option<Entity> {
         debug_assert!(index < self.len());
+        if !target.is_allocated() {
+            target.allocate();
+        }
+
         let entity = unsafe { *self.entities.get_unchecked(index) };
         target.entities.push(entity);
 
@@ -701,7 +712,7 @@ impl ComponentStorage {
                 // move the component into the target chunk
                 let (ptr, element_size, _) = accessor.data_raw();
                 unsafe {
-                    let component = ptr.as_ptr().add(element_size * index);
+                    let component = ptr.add(element_size * index);
                     target_accessor
                         .writer()
                         .push_raw(NonNull::new_unchecked(component), 1);
@@ -718,7 +729,46 @@ impl ComponentStorage {
 
     /// Gets mutable references to the internal data of the chunk.
     pub fn write(&mut self) -> (&mut Vec<Entity>, &UnsafeCell<Components>) {
+        if !self.is_allocated() {
+            self.allocate();
+        }
         (&mut self.entities, &self.component_info)
+    }
+
+    fn free(&mut self) {
+        debug_assert!(self.is_allocated());
+        debug_assert_eq!(0, self.len());
+
+        self.entities.shrink_to_fit();
+
+        // Safety Note:
+        // accessors are left with pointers pointing to invalid memory (although aligned properly)
+        // the slices returned from these accessors will be empty though, so no code
+        // should ever dereference these pointers
+
+        // free component memory
+        unsafe {
+            let ptr = self.component_data.take().unwrap();
+            std::alloc::dealloc(ptr.as_ptr(), self.component_layout);
+        }
+    }
+
+    fn allocate(&mut self) {
+        debug_assert!(!self.is_allocated());
+
+        self.entities.reserve_exact(self.capacity);
+
+        unsafe {
+            // allocating backing store
+            let ptr = std::alloc::alloc(self.component_layout);
+            self.component_data = Some(NonNull::new_unchecked(ptr));
+
+            // update accessor pointers
+            for (type_id, component) in (&mut *self.component_info.get()).iter_mut() {
+                let offset = self.component_offsets.get(type_id).unwrap();
+                *component.ptr.get_mut() = ptr.add(*offset);
+            }
+        }
     }
 }
 
@@ -728,21 +778,23 @@ unsafe impl Send for ComponentStorage {}
 
 impl Drop for ComponentStorage {
     fn drop(&mut self) {
-        // run the drop functions of all components
-        for (_, info) in unsafe { &mut *self.component_info.get() }.drain() {
-            if let Some(drop_fn) = info.drop_fn {
-                let ptr = info.ptr.get_mut().as_ptr();
-                for i in 0..self.len() {
-                    unsafe {
-                        drop_fn(ptr.add(info.element_size * i));
+        if let Some(ptr) = self.component_data {
+            // run the drop functions of all components
+            for (_, info) in unsafe { &mut *self.component_info.get() }.drain() {
+                if let Some(drop_fn) = info.drop_fn {
+                    let ptr = info.ptr.get_mut();
+                    for i in 0..self.len() {
+                        unsafe {
+                            drop_fn(ptr.add(info.element_size * i));
+                        }
                     }
                 }
             }
-        }
 
-        // free the chunk's memory
-        unsafe {
-            std::alloc::dealloc(self.component_data.as_ptr(), self.component_layout);
+            // free the chunk's memory
+            unsafe {
+                std::alloc::dealloc(ptr.as_ptr(), self.component_layout);
+            }
         }
     }
 }
@@ -750,7 +802,7 @@ impl Drop for ComponentStorage {
 /// Provides raw access to component data slices.
 #[repr(align(64))]
 pub struct ComponentAccessor {
-    ptr: AtomicRefCell<NonNull<u8>>,
+    ptr: AtomicRefCell<*mut u8>,
     element_size: usize,
     count: UnsafeCell<usize>,
     capacity: usize,
@@ -770,7 +822,7 @@ impl ComponentAccessor {
     ///
     /// Access to the component data within the slice is runtime borrow checked.
     /// This call will panic if borrowing rules are broken.
-    pub fn data_raw(&self) -> (Ref<Shared, NonNull<u8>>, usize, usize) {
+    pub fn data_raw(&self) -> (Ref<Shared, *mut u8>, usize, usize) {
         (self.ptr.get(), self.element_size, unsafe {
             *self.count.get()
         })
@@ -784,7 +836,7 @@ impl ComponentAccessor {
     ///
     /// Access to the component data within the slice is runtime borrow checked.
     /// This call will panic if borrowing rules are broken.
-    pub fn data_raw_mut(&self) -> (RefMut<Exclusive, NonNull<u8>>, usize, usize) {
+    pub fn data_raw_mut(&self) -> (RefMut<Exclusive, *mut u8>, usize, usize) {
         // this version increment is not thread safe
         // - but the pointer `get_mut` ensures exclusive access at runtime
         let ptr = self.ptr.get_mut();
@@ -802,7 +854,7 @@ impl ComponentAccessor {
     /// This call will panic if borrowing rules are broken.
     pub unsafe fn data_slice<T>(&self) -> RefMap<Shared, &[T]> {
         let (ptr, _size, count) = self.data_raw();
-        ptr.map_into(|ptr| std::slice::from_raw_parts(ptr.as_ptr() as *const T, count))
+        ptr.map_into(|ptr| std::slice::from_raw_parts(*ptr as *const _ as *const T, count))
     }
 
     /// Gets a mutable reference to the slice of components.
@@ -815,7 +867,7 @@ impl ComponentAccessor {
     /// This call will panic if borrowing rules are broken.
     pub unsafe fn data_slice_mut<T>(&self) -> RefMapMut<Exclusive, &mut [T]> {
         let (ptr, _size, count) = self.data_raw_mut();
-        ptr.map_into(|ptr| std::slice::from_raw_parts_mut(ptr.as_ptr() as *mut T, count))
+        ptr.map_into(|ptr| std::slice::from_raw_parts_mut(*ptr as *mut _ as *mut T, count))
     }
 
     /// Creates a writer for pushing components into or removing from the vec.
@@ -826,7 +878,8 @@ impl Debug for ComponentAccessor {
     fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
         write!(
             f,
-            "ComponentAccessor {{ element_size: {}, count: {}, capacity: {}, version: {} }}",
+            "ComponentAccessor {{ ptr: {:?}, element_size: {}, count: {}, capacity: {}, version: {} }}",
+            *self.ptr.get(),
             self.element_size,
             unsafe { *self.count.get() },
             self.capacity,
@@ -838,7 +891,7 @@ impl Debug for ComponentAccessor {
 /// Provides methods adding or removing components from a component vec.
 pub struct ComponentWriter<'a> {
     accessor: &'a ComponentAccessor,
-    ptr: RefMut<'a, Exclusive<'a>, NonNull<u8>>,
+    ptr: RefMut<'a, Exclusive<'a>, *mut u8>,
 }
 
 impl<'a> ComponentWriter<'a> {
@@ -860,11 +913,10 @@ impl<'a> ComponentWriter<'a> {
     /// the caller must then `mem::forget` the source such that the destructor does not run
     /// on the original data.
     pub unsafe fn push_raw(&mut self, components: NonNull<u8>, count: usize) {
-        assert!((*self.accessor.count.get() + count) <= self.accessor.capacity);
+        debug_assert!((*self.accessor.count.get() + count) <= self.accessor.capacity);
         std::ptr::copy_nonoverlapping(
             components.as_ptr(),
             self.ptr
-                .as_ptr()
                 .add(*self.accessor.count.get() * self.accessor.element_size),
             count * self.accessor.element_size,
         );
@@ -892,7 +944,7 @@ impl<'a> ComponentWriter<'a> {
     pub fn swap_remove(&mut self, index: usize, drop: bool) {
         unsafe {
             let size = self.accessor.element_size;
-            let to_remove = self.ptr.as_ptr().add(size * index);
+            let to_remove = self.ptr.add(size * index);
             if drop {
                 if let Some(drop_fn) = self.accessor.drop_fn {
                     drop_fn(to_remove);
@@ -901,7 +953,7 @@ impl<'a> ComponentWriter<'a> {
 
             let count = *self.accessor.count.get();
             if index < count - 1 {
-                let swap_target = self.ptr.as_ptr().add(size * (count - 1));
+                let swap_target = self.ptr.add(size * (count - 1));
                 std::ptr::copy_nonoverlapping(swap_target, to_remove, size);
             }
 
@@ -914,7 +966,7 @@ impl<'a> ComponentWriter<'a> {
     pub unsafe fn drop_in_place(&mut self, index: usize) {
         if let Some(drop_fn) = self.accessor.drop_fn {
             let size = self.accessor.element_size;
-            let to_remove = self.ptr.as_ptr().add(size * index);
+            let to_remove = self.ptr.add(size * index);
             drop_fn(to_remove);
         }
     }
@@ -1125,6 +1177,75 @@ mod test {
                 .writer()
                 .push(&[1usize]);
         }
+    }
+
+    #[test]
+    pub fn create_lazy_allocated() {
+        let mut archetypes = Storage::new(WorldId::default());
+
+        let mut desc = ArchetypeDescription::default();
+        desc.register_tag::<usize>();
+        desc.register_component::<isize>();
+
+        let (_arch_id, data) = archetypes.alloc_archetype(desc);
+        let set = data.alloc_chunk_set(|tags| unsafe {
+            tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize)
+        });
+
+        let chunk_index = data.get_free_chunk(set);
+        let chunk = data
+            .chunksets_mut()
+            .get_mut(set)
+            .unwrap()
+            .get_mut(chunk_index)
+            .unwrap();
+
+        assert!(!chunk.is_allocated());
+
+        chunk.write();
+
+        assert!(chunk.is_allocated());
+    }
+
+    #[test]
+    pub fn create_free_when_empty() {
+        let mut archetypes = Storage::new(WorldId::default());
+
+        let mut desc = ArchetypeDescription::default();
+        desc.register_tag::<usize>();
+        desc.register_component::<isize>();
+
+        let (_arch_id, data) = archetypes.alloc_archetype(desc);
+        let set = data.alloc_chunk_set(|tags| unsafe {
+            tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize)
+        });
+
+        let chunk_index = data.get_free_chunk(set);
+        let chunk = data
+            .chunksets_mut()
+            .get_mut(set)
+            .unwrap()
+            .get_mut(chunk_index)
+            .unwrap();
+
+        assert!(!chunk.is_allocated());
+
+        let (chunk_entities, chunk_components) = chunk.write();
+
+        chunk_entities.push(Entity::new(1, Wrapping(0)));
+        unsafe {
+            (&mut *chunk_components.get())
+                .get_mut(ComponentTypeId::of::<isize>())
+                .unwrap()
+                .writer()
+                .push(&[1usize]);
+        }
+
+        assert!(chunk.is_allocated());
+
+        chunk.swap_remove(0, true);
+
+        assert!(!chunk.is_allocated());
     }
 
     #[test]
