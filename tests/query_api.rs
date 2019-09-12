@@ -34,7 +34,7 @@ struct Static;
 //         ),
 //     >,
 // ) {
-//     let universe = Universe::new(None);
+//     let universe = Universe::new(None, None);
 //     let mut world = universe.create_world();
 //     let mut expected: HashMap<
 //         Entity,
