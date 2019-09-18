@@ -507,9 +507,11 @@ impl World {
         let start = self.defrag_progress;
         while self.defrag_progress < archetypes.len() {
             // defragment the next archetype
-            if (&mut archetypes[self.defrag_progress]).defrag(&mut budget, |e, location| {
-                self.entity_allocator.set_location(e.index(), location);
-            }) {
+            let complete =
+                (&mut archetypes[self.defrag_progress]).defrag(&mut budget, |e, location| {
+                    self.entity_allocator.set_location(e.index(), location);
+                });
+            if complete {
                 // increment the index, looping it once we get to the end
                 self.defrag_progress = (self.defrag_progress + 1) % archetypes.len();
             }

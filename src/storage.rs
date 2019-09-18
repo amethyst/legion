@@ -249,6 +249,8 @@ impl TagMeta {
     pub(crate) fn layout(&self) -> std::alloc::Layout {
         unsafe { std::alloc::Layout::from_size_align_unchecked(self.size, self.align) }
     }
+
+    pub(crate) fn is_zero_sized(&self) -> bool { self.size == 0 }
 }
 
 /// Stores metadata describing the type of a component.
@@ -399,9 +401,14 @@ impl DynamicTagSet {
     pub fn push(&mut self, type_id: TagTypeId, meta: TagMeta, value: NonNull<u8>) {
         // we clone the value here and take ownership of the copy
         unsafe {
-            let copy = std::alloc::alloc(meta.layout());
-            meta.clone(value.as_ptr(), copy);
-            self.tags.push((type_id, meta, NonNull::new(copy).unwrap()));
+            if meta.is_zero_sized() {
+                self.tags
+                    .push((type_id, meta, NonNull::new(meta.align as *mut u8).unwrap()));
+            } else {
+                let copy = std::alloc::alloc(meta.layout());
+                meta.clone(value.as_ptr(), copy);
+                self.tags.push((type_id, meta, NonNull::new(copy).unwrap()));
+            }
         }
     }
 
@@ -418,7 +425,10 @@ impl DynamicTagSet {
                 if let Some(drop_fn) = meta.drop_fn {
                     drop_fn(ptr.as_ptr());
                 }
-                std::alloc::dealloc(ptr.as_ptr(), meta.layout());
+
+                if !meta.is_zero_sized() {
+                    std::alloc::dealloc(ptr.as_ptr(), meta.layout());
+                }
             }
         }
     }
@@ -429,7 +439,7 @@ impl TagSet for DynamicTagSet {
         for (type_id, meta, ptr) in self.tags.iter() {
             let storage = tags.get_mut(*type_id).unwrap();
             unsafe {
-                if meta.drop_fn.is_some() {
+                if meta.drop_fn.is_some() && !meta.is_zero_sized() {
                     // clone the value into temp storage then move it into the chunk
                     // we can dealloc the copy without dropping because the value
                     // is considered moved and will be dropped by the tag storage later
@@ -457,7 +467,9 @@ impl Drop for DynamicTagSet {
                 if let Some(drop_fn) = meta.drop_fn {
                     drop_fn(ptr.as_ptr());
                 }
-                std::alloc::dealloc(ptr.as_ptr(), layout);
+                if !meta.is_zero_sized() {
+                    std::alloc::dealloc(ptr.as_ptr(), layout);
+                }
             }
         }
     }
@@ -615,9 +627,10 @@ impl ArchetypeData {
     ) -> bool {
         let arch_index = self.id.index();
         for (i, chunkset) in self.chunk_sets.iter_mut().enumerate() {
-            if !chunkset.defrag(budget, |e, chunk, component| {
+            let complete = chunkset.defrag(budget, |e, chunk, component| {
                 on_moved(e, EntityLocation::new(arch_index, i, chunk, component));
-            }) {
+            });
+            if !complete {
                 return false;
             }
         }

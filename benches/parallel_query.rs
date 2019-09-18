@@ -47,13 +47,13 @@ fn data(n: usize) -> Vec<Variants> {
     v
 }
 
-fn setup(data: &Vec<Variants>) -> World {
-    let universe = Universe::new(None, None);
+fn setup(data: &[Variants]) -> World {
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
-    for (i, group) in &data.into_iter().group_by(|x| index(**x)) {
+    for (i, group) in &data.iter().group_by(|x| index(**x)) {
         match i {
-            0 => world.insert_from(
+            0 => world.insert(
                 (),
                 group.map(|x| {
                     if let Variants::AB(a, b) = x {
@@ -63,7 +63,7 @@ fn setup(data: &Vec<Variants>) -> World {
                     }
                 }),
             ),
-            _ => world.insert_from(
+            _ => world.insert(
                 (),
                 group.map(|x| {
                     if let Variants::AC(a, c) = x {
@@ -79,7 +79,7 @@ fn setup(data: &Vec<Variants>) -> World {
     world
 }
 
-fn setup_ideal(data: &Vec<Variants>) -> (Vec<(A, B)>, Vec<(A, C)>) {
+fn setup_ideal(data: &[Variants]) -> (Vec<(A, B)>, Vec<(A, C)>) {
     let mut ab = Vec::<(A, B)>::new();
     let mut ac = Vec::<(A, C)>::new();
 
@@ -104,11 +104,11 @@ fn ideal(ab: &mut Vec<(A, B)>, ac: &mut Vec<(A, C)>) {
 }
 
 fn sequential(world: &World) {
-    for (b, a) in <(Write<B>, Read<A>)>::query().iter(&world) {
+    for (mut b, a) in <(Write<B>, Read<A>)>::query().iter(&world) {
         b.0 = a.0;
     }
 
-    for (c, a) in <(Write<C>, Read<A>)>::query().iter(&world) {
+    for (mut c, a) in <(Write<C>, Read<A>)>::query().iter(&world) {
         c.0 = a.0;
     }
 }
@@ -116,12 +116,12 @@ fn sequential(world: &World) {
 fn parallel(world: &World) {
     join(
         || {
-            for (b, a) in <(Write<B>, Read<A>)>::query().iter(&world) {
+            for (mut b, a) in <(Write<B>, Read<A>)>::query().iter(&world) {
                 b.0 = a.0;
             }
         },
         || {
-            for (c, a) in <(Write<C>, Read<A>)>::query().iter(&world) {
+            for (mut c, a) in <(Write<C>, Read<A>)>::query().iter(&world) {
                 c.0 = a.0;
             }
         },
@@ -131,12 +131,12 @@ fn parallel(world: &World) {
 fn par_for_each(world: &World) {
     join(
         || {
-            <(Write<B>, Read<A>)>::query().par_for_each(&world, |(b, a)| {
+            <(Write<B>, Read<A>)>::query().par_for_each(&world, |(mut b, a)| {
                 b.0 = a.0;
             });
         },
         || {
-            <(Write<C>, Read<A>)>::query().par_for_each(&world, |(c, a)| {
+            <(Write<C>, Read<A>)>::query().par_for_each(&world, |(mut c, a)| {
                 c.0 = a.0;
             });
         },
