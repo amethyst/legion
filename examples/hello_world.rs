@@ -7,11 +7,11 @@ struct Vel(f32, f32, f32);
 
 fn main() {
     // create world
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     // create entities
-    world.insert_from(
+    world.insert(
         (),
         vec![
             (Pos(1., 2., 3.), Vel(1., 2., 3.)),
@@ -23,7 +23,7 @@ fn main() {
 
     // update positions
     let mut query = <(Write<Pos>, Read<Vel>)>::query();
-    for (pos, vel) in query.iter(&world) {
+    for (mut pos, vel) in query.iter(&world) {
         pos.0 += vel.0;
         pos.1 += vel.1;
         pos.2 += vel.2;
@@ -31,7 +31,7 @@ fn main() {
 
     // update positions in parallel
     let mut query = <(Write<Pos>, Read<Vel>)>::query();
-    query.par_for_each(&world, |(pos, vel)| {
+    query.par_for_each(&world, |(mut pos, vel)| {
         pos.0 += vel.0;
         pos.1 += vel.1;
         pos.2 += vel.2;

@@ -1,7 +1,9 @@
 use legion::prelude::*;
 use rayon::prelude::*;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 // use std::iter::FromIterator;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -95,7 +97,7 @@ struct Static;
 
 #[test]
 fn query_read_entity_data() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -106,11 +108,7 @@ fn query_read_entity_data() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -120,7 +118,7 @@ fn query_read_entity_data() {
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
 
@@ -129,7 +127,7 @@ fn query_read_entity_data() {
 
 #[test]
 fn query_cached_read_entity_data() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -140,11 +138,7 @@ fn query_cached_read_entity_data() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -154,7 +148,7 @@ fn query_cached_read_entity_data() {
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
 
@@ -163,7 +157,7 @@ fn query_cached_read_entity_data() {
 
 #[test]
 fn query_read_entity_data_par() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -174,11 +168,7 @@ fn query_read_entity_data_par() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -188,7 +178,7 @@ fn query_read_entity_data_par() {
     let mut query = Read::<Pos>::query();
     query.par_iter_chunks(&world).for_each(|mut chunk| {
         for (entity, pos) in chunk.iter_entities() {
-            assert_eq!(&expected.get(&entity).unwrap().0, pos);
+            assert_eq!(expected.get(&entity).unwrap().0, *pos);
             count.fetch_add(1, Ordering::SeqCst);
         }
     });
@@ -198,7 +188,7 @@ fn query_read_entity_data_par() {
 
 #[test]
 fn query_read_entity_data_par_foreach() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -209,11 +199,7 @@ fn query_read_entity_data_par_foreach() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -230,7 +216,7 @@ fn query_read_entity_data_par_foreach() {
 
 #[test]
 fn query_read_entity_data_tuple() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -241,11 +227,7 @@ fn query_read_entity_data_tuple() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -255,8 +237,8 @@ fn query_read_entity_data_tuple() {
 
     let mut count = 0;
     for (entity, (pos, rot)) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
-        assert_eq!(&expected.get(&entity).unwrap().1, rot);
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
+        assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
     }
 
@@ -265,7 +247,7 @@ fn query_read_entity_data_tuple() {
 
 #[test]
 fn query_write_entity_data() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -276,11 +258,7 @@ fn query_write_entity_data() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -289,8 +267,8 @@ fn query_write_entity_data() {
     let mut query = Write::<Pos>::query();
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+    for (entity, mut pos) in query.iter_entities(&world) {
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
 
         pos.0 = 0.0;
@@ -301,7 +279,7 @@ fn query_write_entity_data() {
 
 #[test]
 fn query_write_entity_data_tuple() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -312,11 +290,7 @@ fn query_write_entity_data_tuple() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -325,9 +299,9 @@ fn query_write_entity_data_tuple() {
     let mut query = <(Write<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, rot)) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
-        assert_eq!(&expected.get(&entity).unwrap().1, rot);
+    for (entity, (mut pos, mut rot)) in query.iter_entities(&world) {
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
+        assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
 
         pos.0 = 0.0;
@@ -339,7 +313,7 @@ fn query_write_entity_data_tuple() {
 
 #[test]
 fn query_mixed_entity_data_tuple() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -350,11 +324,7 @@ fn query_mixed_entity_data_tuple() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -363,9 +333,9 @@ fn query_mixed_entity_data_tuple() {
     let mut query = <(Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, rot)) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
-        assert_eq!(&expected.get(&entity).unwrap().1, rot);
+    for (entity, (pos, mut rot)) in query.iter_entities(&world) {
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
+        assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
 
         rot.0 = 0.0;
@@ -376,7 +346,7 @@ fn query_mixed_entity_data_tuple() {
 
 #[test]
 fn query_partial_match() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -387,11 +357,7 @@ fn query_partial_match() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -400,9 +366,9 @@ fn query_partial_match() {
     let mut query = <(Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, rot)) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
-        assert_eq!(&expected.get(&entity).unwrap().1, rot);
+    for (entity, (pos, mut rot)) in query.iter_entities(&world) {
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
+        assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
 
         rot.0 = 0.0;
@@ -413,7 +379,7 @@ fn query_partial_match() {
 
 #[test]
 fn query_read_shared_data() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -422,13 +388,13 @@ fn query_read_shared_data() {
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
     ];
 
-    world.insert_from(shared.as_tags(), components.clone());
+    world.insert(shared, components.clone());
 
     let mut query = Tagged::<Static>::query();
 
     let mut count = 0;
     for marker in query.iter(&world) {
-        assert_eq!(&Static, marker);
+        assert_eq!(Static, *marker);
         count += 1;
     }
 
@@ -437,7 +403,7 @@ fn query_read_shared_data() {
 
 #[test]
 fn query_on_changed_first() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -448,11 +414,7 @@ fn query_on_changed_first() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -462,7 +424,7 @@ fn query_on_changed_first() {
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
 
@@ -471,7 +433,7 @@ fn query_on_changed_first() {
 
 #[test]
 fn query_on_changed_no_changes() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -482,11 +444,7 @@ fn query_on_changed_no_changes() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -496,7 +454,7 @@ fn query_on_changed_no_changes() {
 
     let mut count = 0;
     for (entity, pos) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
 
@@ -504,7 +462,7 @@ fn query_on_changed_no_changes() {
 
     count = 0;
     for (entity, pos) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
 
@@ -513,7 +471,7 @@ fn query_on_changed_no_changes() {
 
 #[test]
 fn query_on_changed_self_changes() {
-    let universe = Universe::new(None, None);
+    let universe = Universe::new();
     let mut world = universe.create_world();
 
     let shared = (Static, Model(5));
@@ -524,11 +482,7 @@ fn query_on_changed_self_changes() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world
-        .insert_from(shared.as_tags(), components.clone())
-        .iter()
-        .enumerate()
-    {
+    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
@@ -537,8 +491,8 @@ fn query_on_changed_self_changes() {
     let mut query = Write::<Pos>::query().filter(changed::<Pos>());
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities(&world) {
-        assert_eq!(&expected.get(&entity).unwrap().0, pos);
+    for (entity, mut pos) in query.iter_entities(&world) {
+        assert_eq!(expected.get(&entity).unwrap().0, *pos);
         *pos = Pos(1., 1., 1.);
         count += 1;
     }
@@ -547,7 +501,7 @@ fn query_on_changed_self_changes() {
 
     count = 0;
     for pos in query.iter(&world) {
-        assert_eq!(&Pos(1., 1., 1.), pos);
+        assert_eq!(Pos(1., 1., 1.), *pos);
         count += 1;
     }
 

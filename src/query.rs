@@ -1,33 +1,52 @@
-use fnv::FnvHashMap;
-use itertools::multizip;
+use crate::borrow::Exclusive;
+use crate::borrow::RefIter;
+use crate::borrow::RefIterMut;
+use crate::borrow::RefMap;
+use crate::borrow::RefMapMut;
+use crate::borrow::Shared;
+use crate::entity::Entity;
+use crate::filter::And;
+use crate::filter::ArchetypeFilterData;
+use crate::filter::ChunkFilterData;
+use crate::filter::ChunksetFilterData;
+use crate::filter::ComponentFilter;
+use crate::filter::EntityFilter;
+use crate::filter::EntityFilterTuple;
+use crate::filter::Filter;
+use crate::filter::FilterResult;
+use crate::filter::Passthrough;
+use crate::filter::TagFilter;
+use crate::storage::ArchetypeData;
+use crate::storage::Component;
+use crate::storage::ComponentStorage;
+use crate::storage::ComponentTypeId;
+use crate::storage::Storage;
+use crate::storage::Tag;
+use crate::storage::TagTypeId;
+use crate::world::World;
+use std::any::TypeId;
+use std::iter::Enumerate;
 use std::iter::Repeat;
 use std::iter::Take;
 use std::marker::PhantomData;
 use std::slice::Iter;
 use std::slice::IterMut;
 
-#[cfg(feature = "rayon")]
+#[cfg(feature = "par-iter")]
 use rayon::prelude::*;
 
-use crate::*;
-
-/// A type which can construct a default entity filter.
-pub trait DefaultFilter {
-    /// The type of entity filter constructed.
-    type Filter: Filter;
-
-    /// constructs an entity filter.
-    fn filter() -> Self::Filter;
-}
-
 /// A type which can fetch a strongly-typed view of the data contained
-/// within a `Chunk`.
+/// within a chunk.
 pub trait View<'a>: Sized + Send + Sync + 'static {
     /// The iterator over the chunk data.
     type Iter: Iterator + 'a;
 
     /// Pulls data out of a chunk.
-    fn fetch(chunk: &'a Chunk) -> Self::Iter;
+    fn fetch(
+        archetype: &'a ArchetypeData,
+        chunk: &'a ComponentStorage,
+        chunk_index: usize,
+    ) -> Self::Iter;
 
     /// Validates that the view does not break any component borrowing rules.
     fn validate() -> bool;
@@ -39,6 +58,15 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
     fn writes<T: Component>() -> bool;
 }
 
+/// A type which can construct a default entity filter.
+pub trait DefaultFilter {
+    /// The type of entity filter constructed.
+    type Filter: EntityFilter;
+
+    /// constructs an entity filter.
+    fn filter() -> Self::Filter;
+}
+
 #[doc(hidden)]
 pub trait ViewElement {
     type Component;
@@ -47,123 +75,134 @@ pub trait ViewElement {
 /// Converts a `View` into a `Query`.
 pub trait IntoQuery: DefaultFilter + for<'a> View<'a> {
     /// Converts the `View` type into a `Query`.
-    fn query() -> QueryDef<Self, <Self as DefaultFilter>::Filter>;
+    fn query() -> Query<Self, <Self as DefaultFilter>::Filter>;
 }
 
 impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
-    fn query() -> QueryDef<Self, <Self as DefaultFilter>::Filter> {
+    fn query() -> Query<Self, <Self as DefaultFilter>::Filter> {
         if !Self::validate() {
             panic!("invalid view, please ensure the view contains no duplicate component types");
         }
 
-        QueryDef {
+        Query {
             view: PhantomData,
             filter: Self::filter(),
         }
     }
 }
 
-/// Reads a single entity data component type from a `Chunk`.
+/// Reads a single entity data component type from a chunk.
 #[derive(Debug)]
 pub struct Read<T: Component>(PhantomData<T>);
 
-impl<T: Component> DefaultFilter for Read<T> {
-    type Filter = ComponentFilter<T>;
+impl<'a, T: Component> DefaultFilter for Read<T> {
+    type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough, Passthrough>;
 
-    fn filter() -> Self::Filter {
-        ComponentFilter::new()
-    }
+    fn filter() -> Self::Filter { super::filter::filter_fns::component() }
 }
 
 impl<'a, T: Component> View<'a> for Read<T> {
-    type Iter = BorrowedIter<'a, Iter<'a, T>>;
+    type Iter = RefIter<'a, Shared<'a>, T, Iter<'a, T>>;
 
-    fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        chunk.components().unwrap().into_iter()
+    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
+        let (slice_borrow, slice) = unsafe {
+            chunk
+                .components(ComponentTypeId::of::<T>())
+                .unwrap()
+                .data_slice::<T>()
+                .deconstruct()
+        };
+        RefIter::new(slice_borrow, slice.iter())
     }
 
-    fn validate() -> bool {
-        true
-    }
+    fn validate() -> bool { true }
 
-    fn reads<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
-    fn writes<D: Component>() -> bool {
-        false
-    }
+    fn writes<D: Component>() -> bool { false }
 }
 
 impl<T: Component> ViewElement for Read<T> {
     type Component = T;
 }
 
-/// Writes to a single entity data component type in a `Chunk`.
+/// Writes to a single entity data component type from a chunk.
 #[derive(Debug)]
 pub struct Write<T: Component>(PhantomData<T>);
 
-impl<T: Component> DefaultFilter for Write<T> {
-    type Filter = ComponentFilter<T>;
-    fn filter() -> Self::Filter {
-        ComponentFilter::new()
-    }
+impl<'a, T: Component> DefaultFilter for Write<T> {
+    type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough, Passthrough>;
+
+    fn filter() -> Self::Filter { super::filter::filter_fns::component() }
 }
 
 impl<'a, T: Component> View<'a> for Write<T> {
-    type Iter = BorrowedIter<'a, IterMut<'a, T>>;
+    type Iter = RefIterMut<'a, Exclusive<'a>, T, IterMut<'a, T>>;
 
-    fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        chunk.components_mut().unwrap().into_iter()
+    #[inline]
+    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
+        let (slice_borrow, slice) = unsafe {
+            chunk
+                .components(ComponentTypeId::of::<T>())
+                .unwrap()
+                .data_slice_mut::<T>()
+                .deconstruct()
+        };
+        RefIterMut::new(slice_borrow, slice.iter_mut())
     }
 
-    fn validate() -> bool {
-        true
-    }
+    #[inline]
+    fn validate() -> bool { true }
 
-    fn reads<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    #[inline]
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
-    fn writes<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    #[inline]
+    fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 }
 
 impl<T: Component> ViewElement for Write<T> {
     type Component = T;
 }
 
-/// Reads a single shared data component type in a `Chunk`.
+/// Reads a single shared data component type in a chunk.
 #[derive(Debug)]
 pub struct Tagged<T: Tag>(PhantomData<T>);
 
-impl<T: Tag> DefaultFilter for Tagged<T> {
-    type Filter = TagFilter<T>;
-    fn filter() -> Self::Filter {
-        TagFilter::new()
-    }
+impl<'a, T: Tag> DefaultFilter for Tagged<T> {
+    type Filter = EntityFilterTuple<TagFilter<T>, Passthrough, Passthrough>;
+
+    fn filter() -> Self::Filter { super::filter::filter_fns::tag() }
 }
 
 impl<'a, T: Tag> View<'a> for Tagged<T> {
     type Iter = Take<Repeat<&'a T>>;
 
-    fn fetch(chunk: &'a Chunk) -> Self::Iter {
-        let data: &T = chunk.tag().unwrap();
+    #[inline]
+    fn fetch(
+        archetype: &'a ArchetypeData,
+        chunk: &'a ComponentStorage,
+        chunk_index: usize,
+    ) -> Self::Iter {
+        let data = unsafe {
+            archetype
+                .tags()
+                .get(TagTypeId::of::<T>())
+                .unwrap()
+                .data_slice::<T>()
+                .get_unchecked(chunk_index)
+        };
         std::iter::repeat(data).take(chunk.len())
     }
 
-    fn validate() -> bool {
-        true
-    }
+    #[inline]
+    fn validate() -> bool { true }
 
-    fn reads<D: Component>() -> bool {
-        false
-    }
+    #[inline]
+    fn reads<D: Component>() -> bool { false }
 
-    fn writes<D: Component>() -> bool {
-        false
-    }
+    #[inline]
+    fn writes<D: Component>() -> bool { false }
 }
 
 impl<T: Tag> ViewElement for Tagged<T> {
@@ -173,20 +212,33 @@ impl<T: Tag> ViewElement for Tagged<T> {
 macro_rules! impl_view_tuple {
     ( $( $ty: ident ),* ) => {
         impl<$( $ty: ViewElement + DefaultFilter ),*> DefaultFilter for ($( $ty, )*) {
-            type Filter = And<($( $ty::Filter, )*)>;
+            type Filter = EntityFilterTuple<
+                And<($( <$ty::Filter as EntityFilter>::ArchetypeFilter, )*)>,
+                And<($( <$ty::Filter as EntityFilter>::ChunksetFilter, )*)>,
+                And<($( <$ty::Filter as EntityFilter>::ChunkFilter, )*)>,
+            >;
 
             fn filter() -> Self::Filter {
-                And {
-                    filters: ($( $ty::filter(), )*)
-                }
+                #![allow(non_snake_case)]
+                $( let $ty = $ty::filter().into_filters(); )*
+                EntityFilterTuple::new(
+                    And { filters: ($( $ty.0, )*) },
+                    And { filters: ($( $ty.1, )*) },
+                    And { filters: ($( $ty.2, )*) },
+                )
             }
         }
 
         impl<'a, $( $ty: ViewElement + View<'a> ),* > View<'a> for ($( $ty, )*) {
             type Iter = itertools::Zip<($( $ty::Iter, )*)>;
 
-            fn fetch(chunk: &'a Chunk) -> Self::Iter {
-                multizip(($( $ty::fetch(chunk), )*))
+            #[inline]
+            fn fetch(
+                archetype: &'a ArchetypeData,
+                chunk: &'a ComponentStorage,
+                chunk_index: usize,
+            ) -> Self::Iter {
+                itertools::multizip(($( $ty::fetch(archetype.clone(), chunk.clone(), chunk_index), )*))
             }
 
             fn validate() -> bool {
@@ -218,635 +270,227 @@ impl_view_tuple!(A, B);
 impl_view_tuple!(A, B, C);
 impl_view_tuple!(A, B, C, D);
 impl_view_tuple!(A, B, C, D, E);
-
-trait FilterResult {
-    fn coalesce_and(self, other: Self) -> Self;
-    fn coalesce_or(self, other: Self) -> Self;
-    fn is_pass(&self) -> bool;
-}
-
-impl FilterResult for Option<bool> {
-    #[inline]
-    fn coalesce_and(self, other: Self) -> Self {
-        match self {
-            Some(x) => other.map(|y| x && y).or(Some(x)),
-            None => other,
-        }
-    }
-
-    #[inline]
-    fn coalesce_or(self, other: Self) -> Self {
-        match self {
-            Some(x) => other.map(|y| x || y).or(Some(x)),
-            None => other,
-        }
-    }
-
-    #[inline]
-    fn is_pass(&self) -> bool {
-        self.unwrap_or(true)
-    }
-}
-
-/// Filters chunks to determine which are to be included in a `Query`.
-pub trait Filter: Send + Sync + Sized + Debug {
-    /// Determines if an archetype matches the filter's conditions.
-    fn filter_archetype(&self, _: &Archetype) -> Option<bool> {
-        None
-    }
-
-    /// Determines if a chunk matches immutable elements of the filter's conditions.
-    /// This must always return the same result when given the same chunk.
-    fn filter_chunk_immutable(&self, chunk: &Chunk) -> Option<bool>;
-
-    /// Determines if a chunk matches variable elements of the filter's conditions.
-    /// This may return different results when called repeatedly with the same chunk.
-    fn filter_chunk_variable(&mut self, chunk: &Chunk) -> Option<bool>;
-
-    /// Determines if a chunk matches the filter's conditions.
-    fn filter_chunk(&mut self, chunk: &Chunk) -> Option<bool> {
-        self.filter_chunk_immutable(chunk)
-            .coalesce_or(self.filter_chunk_variable(chunk))
-    }
-}
-
-pub mod filter {
-    ///! Contains functions for constructing filters.
-    use super::*;
-
-    /// Creates an entity data filter which includes chunks that contain
-    /// entity data components of type `T`.
-    pub fn component<T: Component>() -> ComponentFilter<T> {
-        ComponentFilter::new()
-    }
-
-    /// Creates a shared data filter which includes chunks that contain
-    /// shared data components of type `T`.
-    pub fn tag<T: Tag>() -> TagFilter<T> {
-        TagFilter::new()
-    }
-
-    /// Creates a shared data filter which includes chunks that contain
-    /// specific shared data values.
-    pub fn tag_value<'a, T: Tag>(data: &'a T) -> TagValueFilter<'a, T> {
-        TagValueFilter::new(data)
-    }
-
-    /// Creates a filter which includes chunks for which entity data components
-    /// of type `T` have changed since the filter was last executed.
-    pub fn changed<T: Component>() -> ComponentChangedFilter<T> {
-        ComponentChangedFilter::new()
-    }
-}
-
-/// A passthrough filter which allows all chunks.
-#[derive(Debug)]
-pub struct Passthrough;
-
-impl Filter for Passthrough {
-    #[inline]
-    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> {
-        None
-    }
-
-    #[inline]
-    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> {
-        None
-    }
-}
-
-impl std::ops::Not for Passthrough {
-    type Output = Not<Self>;
-
-    #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
-}
-
-impl<Rhs: Filter> std::ops::BitAnd<Rhs> for Passthrough {
-    type Output = And<(Self, Rhs)>;
-
-    #[inline]
-    fn bitand(self, rhs: Rhs) -> Self::Output {
-        And {
-            filters: (self, rhs),
-        }
-    }
-}
-
-impl<Rhs: Filter> std::ops::BitOr<Rhs> for Passthrough {
-    type Output = Or<(Self, Rhs)>;
-
-    #[inline]
-    fn bitor(self, rhs: Rhs) -> Self::Output {
-        Or {
-            filters: (self, rhs),
-        }
-    }
-}
-
-/// A filter which negates `F`.
-#[derive(Debug)]
-pub struct Not<F> {
-    filter: F,
-}
-
-impl<F: Filter> Filter for Not<F> {
-    #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
-        self.filter.filter_archetype(archetype).map(|x| !x)
-    }
-
-    #[inline]
-    fn filter_chunk_immutable(&self, chunk: &Chunk) -> Option<bool> {
-        self.filter.filter_chunk_immutable(chunk).map(|x| !x)
-    }
-
-    #[inline]
-    fn filter_chunk_variable(&mut self, chunk: &Chunk) -> Option<bool> {
-        self.filter.filter_chunk_variable(chunk).map(|x| !x)
-    }
-}
-
-impl<T: Filter> std::ops::Not for Not<T> {
-    type Output = T;
-
-    #[inline]
-    fn not(self) -> Self::Output {
-        self.filter
-    }
-}
-
-impl<F: Filter, Rhs: Filter> std::ops::BitAnd<Rhs> for Not<F> {
-    type Output = And<(Self, Rhs)>;
-
-    #[inline]
-    fn bitand(self, rhs: Rhs) -> Self::Output {
-        And {
-            filters: (self, rhs),
-        }
-    }
-}
-
-impl<F: Filter, Rhs: Filter> std::ops::BitOr<Rhs> for Not<F> {
-    type Output = Or<(Self, Rhs)>;
-
-    #[inline]
-    fn bitor(self, rhs: Rhs) -> Self::Output {
-        Or {
-            filters: (self, rhs),
-        }
-    }
-}
-
-/// A filter which requires all filters within `T` match.
-#[derive(Debug)]
-pub struct And<T> {
-    filters: T,
-}
-
-macro_rules! impl_and_filter {
-    ( $( $ty: ident ),* ) => {
-        impl<$( $ty: Filter ),*> Filter for And<($( $ty, )*)> {
-            #[inline]
-            fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
-                #![allow(non_snake_case)]
-                let ($( $ty, )*) = &self.filters;
-                let mut result: Option<bool> = None;
-                $( result = result.coalesce_and($ty.filter_archetype(archetype)); )*
-                result
-            }
-
-            #[inline]
-            fn filter_chunk_immutable(&self, chunk: &Chunk) -> Option<bool> {
-                #![allow(non_snake_case)]
-                let ($( $ty, )*) = &self.filters;
-                let mut result: Option<bool> = None;
-                $( result = result.coalesce_and($ty.filter_chunk_immutable(chunk)); )*
-                result
-            }
-
-            #[inline]
-            fn filter_chunk_variable(&mut self, chunk: &Chunk) -> Option<bool> {
-                #![allow(non_snake_case)]
-                let ($( $ty, )*) = &mut self.filters;
-                let mut result: Option<bool> = None;
-                $( result = result.coalesce_and($ty.filter_chunk_variable(chunk)); )*
-                result
-            }
-        }
-
-        impl<$( $ty: Filter ),*> std::ops::Not for And<($( $ty, )*)> {
-            type Output = Not<Self>;
-
-            #[inline]
-            fn not(self) -> Self::Output {
-                Not { filter: self }
-            }
-        }
-
-        impl<$( $ty: Filter ),*, Rhs: Filter> std::ops::BitAnd<Rhs> for And<($( $ty, )*)> {
-            type Output = And<($( $ty, )* Rhs)>;
-
-            #[inline]
-            fn bitand(self, rhs: Rhs) -> Self::Output {
-                #![allow(non_snake_case)]
-                let ($( $ty, )*) = self.filters;
-                And {
-                    filters: ($( $ty, )* rhs),
-                }
-            }
-        }
-
-        impl<$( $ty: Filter ),*, Rhs: Filter> std::ops::BitOr<Rhs> for And<($( $ty, )*)> {
-            type Output = Or<(Self, Rhs)>;
-
-            #[inline]
-            fn bitor(self, rhs: Rhs) -> Self::Output {
-                Or {
-                    filters: (self, rhs),
-                }
-            }
-        }
-    };
-}
-
-impl_and_filter!(A);
-impl_and_filter!(A, B);
-impl_and_filter!(A, B, C);
-impl_and_filter!(A, B, C, D);
-impl_and_filter!(A, B, C, D, E);
-impl_and_filter!(A, B, C, D, E, F);
-
-/// A filter which requires that any filter within `T` match.
-#[derive(Debug)]
-pub struct Or<T> {
-    filters: T,
-}
-
-macro_rules! impl_or_filter {
-    ( $( $ty: ident ),* ) => {
-        impl<$( $ty: Filter ),*> Filter for Or<($( $ty, )*)> {
-            #[inline]
-            fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
-                #![allow(non_snake_case)]
-                let ($( $ty, )*) = &self.filters;
-                let mut result: Option<bool> = None;
-                $( result = result.coalesce_or($ty.filter_archetype(archetype)); )*
-                result
-            }
-
-            #[inline]
-            fn filter_chunk_immutable(&self, chunk: &Chunk) -> Option<bool> {
-                #![allow(non_snake_case)]
-                let ($( $ty, )*) = &self.filters;
-                let mut result: Option<bool> = None;
-                $( result = result.coalesce_or($ty.filter_chunk_immutable(chunk)); )*
-                result
-            }
-
-            #[inline]
-            fn filter_chunk_variable(&mut self, chunk: &Chunk) -> Option<bool> {
-                #![allow(non_snake_case)]
-                let ($( $ty, )*) = &mut self.filters;
-                let mut result: Option<bool> = None;
-                $( result = result.coalesce_or($ty.filter_chunk_variable(chunk)); )*
-                result
-            }
-        }
-
-        impl<$( $ty: Filter ),*> std::ops::Not for Or<($( $ty, )*)> {
-            type Output = Not<Self>;
-
-            #[inline]
-            fn not(self) -> Self::Output {
-                Not { filter: self }
-            }
-        }
-
-        impl<$( $ty: Filter ),*, Rhs: Filter> std::ops::BitAnd<Rhs> for Or<($( $ty, )*)> {
-            type Output = And<(Self, Rhs)>;
-
-            #[inline]
-            fn bitand(self, rhs: Rhs) -> Self::Output {
-                And {
-                    filters: (self, rhs),
-                }
-            }
-        }
-
-        impl<$( $ty: Filter ),*, Rhs: Filter> std::ops::BitOr<Rhs> for Or<($( $ty, )*)> {
-            type Output = Or<($( $ty, )* Rhs)>;
-
-            #[inline]
-            fn bitor(self, rhs: Rhs) -> Self::Output {
-                #![allow(non_snake_case)]
-                let ($( $ty, )*) = self.filters;
-                Or {
-                    filters: ($( $ty, )* rhs),
-                }
-            }
-        }
-    };
-}
-
-impl_or_filter!(A);
-impl_or_filter!(A, B);
-impl_or_filter!(A, B, C);
-impl_or_filter!(A, B, C, D);
-impl_or_filter!(A, B, C, D, E);
-impl_or_filter!(A, B, C, D, E, F);
-
-/// A filter which requires the chunk contain entity data components of type `T`.
-#[derive(Debug)]
-pub struct ComponentFilter<T>(PhantomData<T>);
-
-impl<T: Component> ComponentFilter<T> {
-    fn new() -> Self {
-        ComponentFilter(PhantomData)
-    }
-}
-
-impl<T: Component> Filter for ComponentFilter<T> {
-    #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
-        Some(archetype.has_component::<T>())
-    }
-
-    #[inline]
-    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> {
-        None
-    }
-
-    #[inline]
-    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> {
-        None
-    }
-}
-
-impl<T: Component> std::ops::Not for ComponentFilter<T> {
-    type Output = Not<Self>;
-
-    #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
-}
-
-impl<Rhs: Filter, T: Component> std::ops::BitAnd<Rhs> for ComponentFilter<T> {
-    type Output = And<(Self, Rhs)>;
-
-    #[inline]
-    fn bitand(self, rhs: Rhs) -> Self::Output {
-        And {
-            filters: (self, rhs),
-        }
-    }
-}
-
-impl<Rhs: Filter, T: Component> std::ops::BitOr<Rhs> for ComponentFilter<T> {
-    type Output = Or<(Self, Rhs)>;
-
-    #[inline]
-    fn bitor(self, rhs: Rhs) -> Self::Output {
-        Or {
-            filters: (self, rhs),
-        }
-    }
-}
-
-/// A filter which requires the chunk contain shared data components of type `T`.
-#[derive(Debug)]
-pub struct TagFilter<T>(PhantomData<T>);
-
-impl<T: Tag> TagFilter<T> {
-    fn new() -> Self {
-        TagFilter(PhantomData)
-    }
-}
-
-impl<T: Tag> Filter for TagFilter<T> {
-    #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
-        Some(archetype.has_tag::<T>())
-    }
-
-    #[inline]
-    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> {
-        None
-    }
-
-    #[inline]
-    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> {
-        None
-    }
-}
-
-impl<T: Tag> std::ops::Not for TagFilter<T> {
-    type Output = Not<Self>;
-
-    #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
-}
-
-impl<Rhs: Filter, T: Tag> std::ops::BitAnd<Rhs> for TagFilter<T> {
-    type Output = And<(Self, Rhs)>;
-
-    #[inline]
-    fn bitand(self, rhs: Rhs) -> Self::Output {
-        And {
-            filters: (self, rhs),
-        }
-    }
-}
-
-impl<Rhs: Filter, T: Tag> std::ops::BitOr<Rhs> for TagFilter<T> {
-    type Output = Or<(Self, Rhs)>;
-
-    #[inline]
-    fn bitor(self, rhs: Rhs) -> Self::Output {
-        Or {
-            filters: (self, rhs),
-        }
-    }
-}
-
-/// A filter which requires the chunk contain tags of a specific value.
-#[derive(Debug)]
-pub struct TagValueFilter<'a, T> {
-    value: &'a T,
-}
-
-impl<'a, T: Tag> TagValueFilter<'a, T> {
-    fn new(value: &'a T) -> Self {
-        TagValueFilter { value }
-    }
-}
-
-impl<'a, T: Tag> Filter for TagValueFilter<'a, T> {
-    #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
-        Some(archetype.has_tag::<T>())
-    }
-
-    #[inline]
-    fn filter_chunk_immutable(&self, chunk: &Chunk) -> Option<bool> {
-        Some(chunk.tag::<T>().map_or(false, |s| s == self.value))
-    }
-
-    #[inline]
-    fn filter_chunk_variable(&mut self, _: &Chunk) -> Option<bool> {
-        None
-    }
-}
-
-impl<'a, T: Tag> std::ops::Not for TagValueFilter<'a, T> {
-    type Output = Not<Self>;
-
-    #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
-}
-
-impl<'a, Rhs: Filter, T: Tag> std::ops::BitAnd<Rhs> for TagValueFilter<'a, T> {
-    type Output = And<(Self, Rhs)>;
-
-    #[inline]
-    fn bitand(self, rhs: Rhs) -> Self::Output {
-        And {
-            filters: (self, rhs),
-        }
-    }
-}
-
-impl<'a, Rhs: Filter, T: Tag> std::ops::BitOr<Rhs> for TagValueFilter<'a, T> {
-    type Output = Or<(Self, Rhs)>;
-
-    #[inline]
-    fn bitor(self, rhs: Rhs) -> Self::Output {
-        Or {
-            filters: (self, rhs),
-        }
-    }
-}
-
-/// A filter which requires that entity data of type `T` has changed within the
-/// chunk since the last time the filter was executed.
-#[derive(Debug)]
-pub struct ComponentChangedFilter<T: Component> {
-    versions: FnvHashMap<ChunkId, usize>,
-    phantom: PhantomData<T>,
-}
-
-impl<T: Component> ComponentChangedFilter<T> {
-    fn new() -> ComponentChangedFilter<T> {
-        ComponentChangedFilter {
-            versions: FnvHashMap::default(),
-            phantom: PhantomData,
-        }
-    }
-}
-
-impl<T: Component> std::ops::Not for ComponentChangedFilter<T> {
-    type Output = Not<Self>;
-
-    #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
-}
-
-impl<T: Component> Filter for ComponentChangedFilter<T> {
-    #[inline]
-    fn filter_archetype(&self, archetype: &Archetype) -> Option<bool> {
-        Some(archetype.has_component::<T>())
-    }
-
-    #[inline]
-    fn filter_chunk_immutable(&self, _: &Chunk) -> Option<bool> {
-        None
-    }
-
-    fn filter_chunk_variable(&mut self, chunk: &Chunk) -> Option<bool> {
-        use std::collections::hash_map::Entry;
-        if let Some(version) = chunk.component_version::<T>() {
-            match self.versions.entry(chunk.id()) {
-                Entry::Occupied(mut entry) => Some(entry.insert(version) != version),
-                Entry::Vacant(entry) => {
-                    entry.insert(version);
-                    Some(true)
-                }
-            }
-        } else {
-            Some(false)
-        }
-    }
-}
-
-impl<Rhs: Filter, T: Component> std::ops::BitAnd<Rhs> for ComponentChangedFilter<T> {
-    type Output = And<(Self, Rhs)>;
-
-    #[inline]
-    fn bitand(self, rhs: Rhs) -> Self::Output {
-        And {
-            filters: (self, rhs),
-        }
-    }
-}
-
-impl<Rhs: Filter, T: Component> std::ops::BitOr<Rhs> for ComponentChangedFilter<T> {
-    type Output = Or<(Self, Rhs)>;
-
-    #[inline]
-    fn bitor(self, rhs: Rhs) -> Self::Output {
-        Or {
-            filters: (self, rhs),
-        }
-    }
-}
-
-/// An iterator which filters chunks by filter `F` and yields `ChunkView`s.
-pub struct ChunkViewIter<'data, 'filter, V: View<'data>, F: Filter> {
-    archetypes: Iter<'data, Archetype>,
-    filter: &'filter mut F,
-    frontier: Option<Iter<'data, Chunk>>,
+impl_view_tuple!(A, B, C, D, E, F);
+
+/// A type-safe view of a chunk of entities all of the same data layout.
+pub struct Chunk<'a, V: for<'b> View<'b>> {
+    archetype: &'a ArchetypeData,
+    components: &'a ComponentStorage,
+    index: usize,
     view: PhantomData<V>,
 }
 
-impl<'filter, 'data, F, V> Iterator for ChunkViewIter<'data, 'filter, V, F>
-where
-    F: Filter,
-    V: View<'data>,
-{
-    type Item = ChunkView<'data, V>;
+impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
+    pub fn new(archetype: &'a ArchetypeData, set: usize, index: usize) -> Self {
+        Self {
+            components: unsafe {
+                archetype
+                    .chunksets()
+                    .get_unchecked(set)
+                    .get_unchecked(index)
+            },
+            archetype,
+            index,
+            view: PhantomData,
+        }
+    }
+
+    /// Get a slice of all entities contained within the chunk.
+    #[inline]
+    pub fn entities(&self) -> &'a [Entity] { self.components.entities() }
+
+    /// Get an iterator of all data contained within the chunk.
+    #[inline]
+    pub fn iter(&mut self) -> <V as View<'a>>::Iter {
+        V::fetch(self.archetype, self.components, self.index)
+    }
+
+    /// Get an iterator of all data and entity IDs contained within the chunk.
+    #[inline]
+    pub fn iter_entities(&mut self) -> ZipEntities<'a, V> {
+        ZipEntities {
+            entities: self.entities(),
+            data: V::fetch(self.archetype, self.components, self.index),
+            index: 0,
+            view: PhantomData,
+        }
+    }
+
+    /// Get a tag value.
+    pub fn tag<T: Tag>(&self) -> Option<&T> {
+        self.archetype
+            .tags()
+            .get(TagTypeId::of::<T>())
+            .map(|tags| unsafe { tags.data_slice::<T>() })
+            .map(|slice| unsafe { slice.get_unchecked(self.index) })
+    }
+
+    /// Get a slice of component data.
+    ///
+    /// # Panics
+    ///
+    /// This method performs runtime borrow checking. It will panic if
+    /// any other code is concurrently writing to the data slice.
+    pub fn components<T: Component>(&self) -> Option<RefMap<'a, Shared<'a>, &[T]>> {
+        if !V::reads::<T>() {
+            panic!("data type not readable via this query");
+        }
+        self.components
+            .components(ComponentTypeId::of::<T>())
+            .map(|c| unsafe { c.data_slice::<T>() })
+    }
+
+    /// Get a mutable slice of component data.
+    ///
+    /// # Panics
+    ///
+    /// This method performs runtime borrow checking. It will panic if
+    /// any other code is concurrently accessing the data slice.
+    pub fn components_mut<T: Component>(&self) -> Option<RefMapMut<'a, Exclusive<'a>, &mut [T]>> {
+        if !V::writes::<T>() {
+            panic!("data type not writable via this query");
+        }
+        self.components
+            .components(ComponentTypeId::of::<T>())
+            .map(|c| unsafe { c.data_slice_mut::<T>() })
+    }
+}
+
+/// An iterator which yields view data tuples and entity IDs from a `Chunk`.
+pub struct ZipEntities<'data, V: View<'data>> {
+    entities: &'data [Entity],
+    data: <V as View<'data>>::Iter,
+    index: usize,
+    view: PhantomData<V>,
+}
+
+impl<'data, V: View<'data>> Iterator for ZipEntities<'data, V> {
+    type Item = (Entity, <V::Iter as Iterator>::Item);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
+        if let Some(data) = self.data.next() {
+            let i = self.index;
+            self.index += 1;
+            unsafe { Some((*self.entities.get_unchecked(i), data)) }
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.entities.len() - self.index;
+        (len, Some(len))
+    }
+}
+
+/// An iterator over all chunks that match a given query.
+pub struct ChunkViewIter<
+    'data,
+    'filter,
+    V: for<'a> View<'a>,
+    Arch: Filter<ArchetypeFilterData<'data>>,
+    Chunkset: Filter<ChunksetFilterData<'data>>,
+    Chunk: Filter<ChunkFilterData<'data>>,
+> {
+    _view: PhantomData<V>,
+    storage: &'data Storage,
+    arch_filter: &'filter mut Arch,
+    chunkset_filter: &'filter mut Chunkset,
+    chunk_filter: &'filter mut Chunk,
+    archetypes: Enumerate<Arch::Iter>,
+    set_frontier: Option<(&'data ArchetypeData, Take<Enumerate<Chunkset::Iter>>)>,
+    chunk_frontier: Option<(&'data ArchetypeData, usize, Take<Enumerate<Chunk::Iter>>)>,
+}
+
+impl<
+        'data,
+        'filter,
+        V: for<'a> View<'a>,
+        ArchFilter: Filter<ArchetypeFilterData<'data>>,
+        ChunksetFilter: Filter<ChunksetFilterData<'data>>,
+        ChunkFilter: Filter<ChunkFilterData<'data>>,
+    > ChunkViewIter<'data, 'filter, V, ArchFilter, ChunksetFilter, ChunkFilter>
+{
+    fn next_set(&mut self) -> Option<(&'data ArchetypeData, usize)> {
         loop {
-            if let Some(ref mut inner) = self.frontier {
-                for x in inner {
-                    if self.filter.filter_chunk(x).is_pass() {
-                        return Some(ChunkView {
-                            chunk: x,
-                            view: PhantomData,
-                        });
+            // if we are looping through an archetype, find the next set
+            if let Some((ref arch, ref mut chunks)) = self.set_frontier {
+                for (set_index, filter_data) in chunks {
+                    if self.chunkset_filter.is_match(&filter_data).is_pass() {
+                        return Some((arch, set_index));
                     }
                 }
             }
+
+            // we have completed the current set, find the next one
             loop {
                 match self.archetypes.next() {
-                    Some(archetype) => {
-                        if self.filter.filter_archetype(archetype).is_pass() {
-                            self.frontier = Some(archetype.chunks().iter());
+                    Some((arch_index, arch_data)) => {
+                        if self.arch_filter.is_match(&arch_data).is_pass() {
+                            // we have found another set
+                            self.set_frontier = {
+                                let chunks =
+                                    unsafe { self.storage.archetypes().get_unchecked(arch_index) };
+                                let data = ChunksetFilterData {
+                                    archetype_data: chunks,
+                                };
+
+                                Some((
+                                    chunks,
+                                    self.chunkset_filter
+                                        .collect(data)
+                                        .enumerate()
+                                        .take(chunks.len()),
+                                ))
+                            };
                             break;
                         }
                     }
+                    // there are no more sets
                     None => return None,
                 }
+            }
+        }
+    }
+}
+
+impl<
+        'data,
+        'filter,
+        V: for<'a> View<'a>,
+        ArchFilter: Filter<ArchetypeFilterData<'data>>,
+        ChunkFilter: Filter<ChunkFilterData<'data>>,
+        ChunksetFilter: Filter<ChunksetFilterData<'data>>,
+    > Iterator for ChunkViewIter<'data, 'filter, V, ArchFilter, ChunksetFilter, ChunkFilter>
+{
+    type Item = Chunk<'data, V>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // if we are looping through a set, then yield the next chunk
+            if let Some((ref arch, set_index, ref mut set)) = self.chunk_frontier {
+                for (chunk_index, filter_data) in set {
+                    if self.chunk_filter.is_match(&filter_data).is_pass() {
+                        return Some(Chunk::new(arch, set_index, chunk_index));
+                    }
+                }
+            }
+
+            // we have completed the set, find the next
+            if let Some((ref arch, set_index)) = self.next_set() {
+                let chunks = unsafe { arch.chunksets().get_unchecked(set_index) }.occupied();
+                self.chunk_frontier = Some((
+                    arch,
+                    set_index,
+                    self.chunk_filter
+                        .collect(ChunkFilterData { chunks })
+                        .enumerate()
+                        .take(chunks.len()),
+                ))
+            } else {
+                return None;
             }
         }
     }
@@ -855,20 +499,20 @@ where
 /// An iterator which iterates through all entity data in all chunks.
 pub struct ChunkDataIter<'data, V, I>
 where
-    V: View<'data>,
-    I: Iterator<Item = ChunkView<'data, V>>,
+    V: for<'a> View<'a>,
+    I: Iterator<Item = Chunk<'data, V>>,
 {
     iter: I,
-    frontier: Option<V::Iter>,
-    view: PhantomData<V>,
+    frontier: Option<<V as View<'data>>::Iter>,
+    _view: PhantomData<V>,
 }
 
 impl<'data, V, I> Iterator for ChunkDataIter<'data, V, I>
 where
-    V: View<'data>,
-    I: Iterator<Item = ChunkView<'data, V>>,
+    V: for<'a> View<'a>,
+    I: Iterator<Item = Chunk<'data, V>>,
 {
-    type Item = <V::Iter as Iterator>::Item;
+    type Item = <<V as View<'data>>::Iter as Iterator>::Item;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
@@ -889,20 +533,20 @@ where
 /// An iterator which iterates through all entity data in all chunks, zipped with entity ID.
 pub struct ChunkEntityIter<'data, V, I>
 where
-    V: View<'data>,
-    I: Iterator<Item = ChunkView<'data, V>>,
+    V: for<'a> View<'a>,
+    I: Iterator<Item = Chunk<'data, V>>,
 {
     iter: I,
     frontier: Option<ZipEntities<'data, V>>,
-    view: PhantomData<V>,
+    _view: PhantomData<V>,
 }
 
 impl<'data, 'query, V, I> Iterator for ChunkEntityIter<'data, V, I>
 where
-    V: View<'data>,
-    I: Iterator<Item = ChunkView<'data, V>>,
+    V: for<'a> View<'a>,
+    I: Iterator<Item = Chunk<'data, V>>,
 {
-    type Item = (Entity, <V::Iter as Iterator>::Item);
+    type Item = (Entity, <<V as View<'data>>::Iter as Iterator>::Item);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -1003,13 +647,13 @@ where
 /// # struct Velocity;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Model;
-/// # let universe = Universe::new(None, None);
+/// # let universe = Universe::new();
 /// # let world = universe.create_world();
 /// // A query which writes `Position`, reads `Velocity` and reads `Model`
 /// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
 /// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
-/// for (pos, vel, model) in query.iter(&world) {
+/// for (mut pos, vel, model) in query.iter(&world) {
 ///     // `.iter` yields tuples of references to a single entity's data:
 ///     // pos: &mut Position
 ///     // vel: &Velocity
@@ -1028,7 +672,7 @@ where
 /// # struct Velocity;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Model;
-/// # let universe = Universe::new(None, None);
+/// # let universe = Universe::new();
 /// # let world = universe.create_world();
 /// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
@@ -1042,106 +686,96 @@ where
 /// The `ChunkView` yielded from `iter_chunks` allows access to all shared data in the chunk (queried for or not),
 /// but entity data slices can only be accessed if they were requested in the query's view. Attempting to access
 /// other data types, or attempting to write to components that were only requested via a `Read` will panic.
-pub trait Query {
-    /// The chunk filter used to determine which chunks to include in the output.
-    type Filter: Filter;
+pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
+    view: PhantomData<V>,
+    filter: F,
+}
 
-    /// The view used to determine which components are accessed.
-    type View: for<'data> View<'data>;
-
+impl<V, F> Query<V, F>
+where
+    V: for<'a> View<'a>,
+    F: EntityFilter,
+{
     /// Adds an additional filter to the query.
-    fn filter<T: Filter>(self, filter: T) -> QueryDef<Self::View, And<(Self::Filter, T)>>;
+    pub fn filter<T: EntityFilter>(self, filter: T) -> Query<V, <F as std::ops::BitAnd<T>>::Output>
+    where
+        F: std::ops::BitAnd<T>,
+        <F as std::ops::BitAnd<T>>::Output: EntityFilter,
+    {
+        Query {
+            view: self.view,
+            filter: self.filter & filter,
+        }
+    }
 
     /// Gets an iterator which iterates through all chunks that match the query.
-    fn iter_chunks<'a, 'data>(
+    pub fn iter_chunks<'a, 'data>(
         &'a mut self,
         world: &'data World,
-    ) -> ChunkViewIter<'data, 'a, Self::View, Self::Filter>;
-
-    /// Gets an iterator which iterates through all entity data that matches the query.
-    fn iter<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> ChunkDataIter<'data, Self::View, ChunkViewIter<'data, 'a, Self::View, Self::Filter>>;
+    ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
+        let (arch_filter, chunkset_filter, chunk_filter) = self.filter.filters();
+        let storage = world.storage();
+        let archetypes = arch_filter
+            .collect(ArchetypeFilterData {
+                component_types: storage.component_types(),
+                tag_types: storage.tag_types(),
+            })
+            .enumerate();
+        ChunkViewIter {
+            storage,
+            arch_filter,
+            chunkset_filter,
+            chunk_filter,
+            archetypes,
+            set_frontier: None,
+            chunk_frontier: None,
+            _view: PhantomData,
+        }
+    }
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
-    fn iter_entities<'a, 'data>(
+    pub fn iter_entities<'a, 'data>(
         &'a mut self,
         world: &'data World,
-    ) -> ChunkEntityIter<'data, Self::View, ChunkViewIter<'data, 'a, Self::View, Self::Filter>>;
+    ) -> ChunkEntityIter<
+        'data,
+        V,
+        ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+    > {
+        ChunkEntityIter {
+            iter: self.iter_chunks(world),
+            frontier: None,
+            _view: PhantomData,
+        }
+    }
+
+    /// Gets an iterator which iterates through all entity data that matches the query.
+    pub fn iter<'a, 'data>(
+        &'a mut self,
+        world: &'data World,
+    ) -> ChunkDataIter<
+        'data,
+        V,
+        ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+    > {
+        ChunkDataIter {
+            iter: self.iter_chunks(world),
+            frontier: None,
+            _view: PhantomData,
+        }
+    }
 
     /// Iterates through all entity data that matches the query.
-    fn for_each<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
+    pub fn for_each<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
     where
-        T: Fn(<<Self::View as View<'data>>::Iter as Iterator>::Item),
+        T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
         self.iter(world).for_each(&mut f);
     }
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
-    where
-        T: Fn(<<Self::View as View<'a>>::Iter as Iterator>::Item) + Send + Sync;
-}
-
-/// Queries for entities within a `World`.
-#[derive(Debug)]
-pub struct QueryDef<V: for<'a> View<'a>, F: Filter> {
-    view: PhantomData<V>,
-    filter: F,
-}
-
-impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
-    type View = V;
-    type Filter = F;
-
-    fn filter<T: Filter>(self, filter: T) -> QueryDef<Self::View, And<(Self::Filter, T)>> {
-        QueryDef {
-            view: self.view,
-            filter: And {
-                filters: (self.filter, filter),
-            },
-        }
-    }
-
-    fn iter_chunks<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> ChunkViewIter<'data, 'a, Self::View, Self::Filter> {
-        ChunkViewIter {
-            archetypes: world.archetypes.iter(),
-            filter: &mut self.filter,
-            frontier: None,
-            view: PhantomData,
-        }
-    }
-
-    fn iter<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> ChunkDataIter<'data, Self::View, ChunkViewIter<'data, 'a, Self::View, Self::Filter>> {
-        ChunkDataIter {
-            iter: self.iter_chunks(world),
-            frontier: None,
-            view: PhantomData,
-        }
-    }
-
-    fn iter_entities<'a, 'data>(
-        &'a mut self,
-        world: &'data World,
-    ) -> ChunkEntityIter<'data, Self::View, ChunkViewIter<'data, 'a, Self::View, Self::Filter>>
-    {
-        ChunkEntityIter {
-            iter: self.iter_chunks(world),
-            frontier: None,
-            view: PhantomData,
-        }
-    }
-
-    #[cfg(feature = "par-iter")]
-    fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
+    pub fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
     {
@@ -1151,106 +785,13 @@ impl<V: for<'a> View<'a>, F: Filter> Query for QueryDef<V, F> {
             }
         });
     }
-}
 
-impl<V: for<'a> View<'a>, F: Filter> QueryDef<V, F> {
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
     pub fn par_iter_chunks<'a>(
         &'a mut self,
         world: &'a World,
-    ) -> impl ParallelIterator<Item = ChunkView<'a, V>> {
+    ) -> impl ParallelIterator<Item = Chunk<'a, V>> {
         self.iter_chunks(world).par_bridge()
-    }
-}
-
-/// An iterator which yields view data tuples and entity IDs from a `ChunkView`.
-pub struct ZipEntities<'data, V: View<'data>> {
-    entities: &'data [Entity],
-    data: <V as View<'data>>::Iter,
-    index: usize,
-    view: PhantomData<V>,
-}
-
-impl<'data, V: View<'data>> Iterator for ZipEntities<'data, V> {
-    type Item = (Entity, <V::Iter as Iterator>::Item);
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(data) = self.data.next() {
-            let i = self.index;
-            self.index += 1;
-            unsafe { Some((*self.entities.get_unchecked(i), data)) }
-        } else {
-            None
-        }
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = self.entities.len() - self.index;
-        (len, Some(len))
-    }
-}
-
-/// A type-safe view of a `Chunk`.
-pub struct ChunkView<'a, V: View<'a>> {
-    chunk: &'a Chunk,
-    view: PhantomData<V>,
-}
-
-impl<'a, V: View<'a>> ChunkView<'a, V> {
-    /// Get a slice of all entities contained within the chunk.
-    #[inline]
-    pub fn entities(&self) -> &'a [Entity] {
-        unsafe { self.chunk.entities() }
-    }
-
-    /// Get an iterator of all data contained within the chunk.
-    #[inline]
-    pub fn iter(&mut self) -> V::Iter {
-        V::fetch(self.chunk)
-    }
-
-    /// Get an iterator of all data and entity IDs contained within the chunk.
-    #[inline]
-    pub fn iter_entities(&mut self) -> ZipEntities<'a, V> {
-        ZipEntities {
-            entities: self.entities(),
-            data: V::fetch(self.chunk),
-            index: 0,
-            view: PhantomData,
-        }
-    }
-
-    /// Get a tag value.
-    pub fn tag<T: Tag>(&self) -> Option<&T> {
-        self.chunk.tag()
-    }
-
-    /// Get a slice of component data.
-    ///
-    /// # Panics
-    ///
-    /// This method performs runtime borrow checking. It will panic if
-    /// any other code is concurrently writing to the data slice.
-    pub fn components<T: Component>(&self) -> Option<BorrowedSlice<'a, T>> {
-        if !V::reads::<T>() {
-            panic!("data type not readable via this query");
-        }
-        self.chunk.components()
-    }
-
-    /// Get a mutable slice of component data.
-    ///
-    /// # Panics
-    ///
-    /// This method performs runtime borrow checking. It will panic if
-    /// any other code is concurrently accessing the data slice.
-    pub fn components_mut<T: Component>(&self) -> Option<BorrowedMutSlice<'a, T>> {
-        if !V::writes::<T>() {
-            panic!("data type not writable via this query");
-        }
-        self.chunk.components_mut()
     }
 }
