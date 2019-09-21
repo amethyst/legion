@@ -41,6 +41,9 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
     /// The iterator over the chunk data.
     type Iter: Iterator + 'a;
 
+    /// Accessor type for this view
+    type Accessor;
+
     /// Pulls data out of a chunk.
     fn fetch(
         archetype: &'a ArchetypeData,
@@ -56,6 +59,12 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
 
     /// Determines if the view writes to the specified data type.
     fn writes<T: Component>() -> bool;
+
+    /// Returns an array of the components read by this view
+    fn read_types() -> Vec<ComponentTypeId>;
+
+    /// Returns an array of the components written by this view
+    fn write_types() -> Vec<ComponentTypeId>;
 }
 
 /// A type which can construct a default entity filter.
@@ -103,6 +112,7 @@ impl<'a, T: Component> DefaultFilter for Read<T> {
 
 impl<'a, T: Component> View<'a> for Read<T> {
     type Iter = RefIter<'a, Shared<'a>, T, Iter<'a, T>>;
+    type Accessor = (T);
 
     fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
         let (slice_borrow, slice) = unsafe {
@@ -120,6 +130,10 @@ impl<'a, T: Component> View<'a> for Read<T> {
     fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
     fn writes<D: Component>() -> bool { false }
+
+    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+
+    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
 }
 
 impl<T: Component> ViewElement for Read<T> {
@@ -138,6 +152,7 @@ impl<'a, T: Component> DefaultFilter for Write<T> {
 
 impl<'a, T: Component> View<'a> for Write<T> {
     type Iter = RefIterMut<'a, Exclusive<'a>, T, IterMut<'a, T>>;
+    type Accessor = (T);
 
     #[inline]
     fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
@@ -159,6 +174,12 @@ impl<'a, T: Component> View<'a> for Write<T> {
 
     #[inline]
     fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
+
+    #[inline]
+    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+
+    #[inline]
+    fn write_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
 }
 
 impl<T: Component> ViewElement for Write<T> {
@@ -177,6 +198,7 @@ impl<'a, T: Tag> DefaultFilter for Tagged<T> {
 
 impl<'a, T: Tag> View<'a> for Tagged<T> {
     type Iter = Take<Repeat<&'a T>>;
+    type Accessor = ();
 
     #[inline]
     fn fetch(
@@ -203,6 +225,12 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
 
     #[inline]
     fn writes<D: Component>() -> bool { false }
+
+    #[inline]
+    fn read_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
+
+    #[inline]
+    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
 }
 
 impl<T: Tag> ViewElement for Tagged<T> {
@@ -231,6 +259,7 @@ macro_rules! impl_view_tuple {
 
         impl<'a, $( $ty: ViewElement + View<'a> ),* > View<'a> for ($( $ty, )*) {
             type Iter = itertools::Zip<($( $ty::Iter, )*)>;
+            type Accessor = ($( $ty, )*);
 
             #[inline]
             fn fetch(
@@ -261,6 +290,10 @@ macro_rules! impl_view_tuple {
             fn writes<Data: Component>() -> bool {
                 $( $ty::reads::<Data>() )||*
             }
+
+            fn read_types() -> Vec<ComponentTypeId> { vec![$( ComponentTypeId(TypeId::of::<$ty>()) ),*] }
+
+            fn write_types() -> Vec<ComponentTypeId> { vec![] }
         }
     };
 }

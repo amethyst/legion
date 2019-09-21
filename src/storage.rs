@@ -27,7 +27,7 @@ use std::slice::IterMut;
 
 /// A type ID identifying a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub struct ComponentTypeId(TypeId);
+pub struct ComponentTypeId(pub(crate) TypeId);
 
 impl ComponentTypeId {
     /// Gets the component type ID that represents type `T`.
