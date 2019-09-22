@@ -26,6 +26,7 @@ itertools = "0.8"
 rayon = { version = "1.2", optional = true }
 derivative = "1"
 smallvec = "0.6"
+bit-set = "0.5"
 
 [dev-dependencies]
 env_logger = "0.6"

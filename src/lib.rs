@@ -228,6 +228,7 @@ pub mod entity;
 pub mod filter;
 pub mod query;
 pub mod storage;
+pub mod system;
 pub mod world;
 
 pub mod prelude {
