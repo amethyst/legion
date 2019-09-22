@@ -923,6 +923,7 @@ impl ComponentStorage {
     /// Returns the ID of the entity which was swapped into the removed entity's position.
     pub fn move_entity(&mut self, target: &mut ComponentStorage, index: usize) -> Option<Entity> {
         debug_assert!(index < self.len());
+        debug_assert!(!target.is_full());
         if !target.is_allocated() {
             target.allocate();
         }

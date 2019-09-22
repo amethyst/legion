@@ -74,9 +74,9 @@ impl<T> AtomicRefCell<T> {
     }
 }
 
-unsafe impl<T> Send for AtomicRefCell<T> {}
+unsafe impl<T: Send> Send for AtomicRefCell<T> {}
 
-unsafe impl<T> Sync for AtomicRefCell<T> {}
+unsafe impl<T: Sync> Sync for AtomicRefCell<T> {}
 
 pub trait UnsafeClone {
     unsafe fn clone(&self) -> Self;
