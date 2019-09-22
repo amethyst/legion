@@ -1,15 +1,17 @@
-use crate::borrow::AtomicRefCell;
+use crate::cons::{ConsAppend, ConsFlatten};
+use crate::filter::EntityFilter;
+use crate::query::{Query, View};
+use crate::resources::{Resource, ResourceAccessType, Resources};
 use crate::storage::ComponentTypeId;
 use crate::world::World;
 use bit_set::BitSet;
+use derivative::Derivative;
 use itertools::izip;
 use rayon::prelude::*;
-use std::any::Any;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::repeat;
-use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Stages represent discrete steps of a game's loop, such as "start", "update", "draw", "end", etc.
@@ -48,12 +50,12 @@ impl StageExecutor {
 
             // find resource access dependancies
             let mut dependancies = HashSet::new();
-            for res in &read_res {
+            for res in read_res {
                 if let Some(n) = resource_last_mutated.get(res) {
                     dependancies.insert(*n);
                 }
             }
-            for res in &write_res {
+            for res in write_res {
                 if let Some(n) = resource_last_mutated.get(res) {
                     dependancies.insert(*n);
                 }
@@ -66,20 +68,23 @@ impl StageExecutor {
 
             // find component access dependancies
             let mut comp_dependancies = HashSet::new();
-            for comp in &read_comp {
+            for comp in read_comp {
                 if let Some(ns) = component_mutated.get(comp) {
                     for n in ns {
                         comp_dependancies.insert(*n);
                     }
                 }
             }
-            for comp in &write_comp {
+            for comp in write_comp {
                 if let Some(ns) = component_mutated.get(comp) {
                     for n in ns {
                         comp_dependancies.insert(*n);
                     }
                 }
-                component_mutated.entry(*comp).or_insert(Vec::new()).push(i);
+                component_mutated
+                    .entry(*comp)
+                    .or_insert_with(Vec::new)
+                    .push(i);
             }
             for dep in comp_dependancies {
                 dynamic_dependants[dep].push(i);
@@ -155,33 +160,83 @@ impl StageExecutor {
 }
 
 trait Schedulable: Sync + Send {
-    fn reads(&self) -> (Vec<TypeId>, Vec<ComponentTypeId>);
-    fn writes(&self) -> (Vec<TypeId>, Vec<ComponentTypeId>);
+    fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
+    fn writes(&self) -> (&[TypeId], &[ComponentTypeId]);
     fn prepare(&mut self, world: &World);
     fn accesses_archetypes(&self) -> &BitSet;
     fn run(&self, resources: &Resources, world: &World);
 }
 
-trait Resource: Any + Send + Sync {}
+#[derive(Derivative, Debug, Clone)]
+#[derivative(Default(bound = ""))]
+pub struct Access<T> {
+    reads: Vec<T>,
+    writes: Vec<T>,
+}
 
-struct Resources(HashMap<TypeId, AtomicRefCell<Box<dyn Resource>>>);
+#[derive(Derivative, Debug, Clone)]
+#[derivative(Default(bound = ""))]
+pub struct SystemAccess {
+    pub resources: Access<TypeId>,
+    pub components: Access<ComponentTypeId>,
+}
 
 // implement Accessor for tupes of Read/Write<Resource>
 
 trait Accessor: Send + Sync {
     type Output;
 
-    fn reads() -> Vec<TypeId>;
-    fn writes() -> Vec<TypeId>;
+    fn reads(&self) -> &[TypeId];
+    fn writes(&self) -> &[TypeId];
     fn fetch(resources: &Resources) -> Self::Output;
 }
 
 impl Accessor for () {
     type Output = ();
 
-    fn reads() -> Vec<TypeId> { Vec::default() }
-    fn writes() -> Vec<TypeId> { Vec::default() }
-    fn fetch(_: &Resources) -> () {}
+    fn reads(&self) -> &[TypeId] { &[] }
+    fn writes(&self) -> &[TypeId] { &[] }
+    fn fetch(_resources: &Resources) {}
+}
+
+impl<A> Accessor for (A,)
+where
+    A: Send + Sync,
+{
+    type Output = (A,);
+
+    fn reads(&self) -> &[TypeId] { &[] }
+    fn writes(&self) -> &[TypeId] { &[] }
+    fn fetch(_resources: &Resources) -> (A,) { unimplemented!() }
+}
+impl<A, B> Accessor for (A, B)
+where
+    A: Send + Sync,
+    B: Send + Sync,
+{
+    type Output = (A, B);
+
+    fn reads(&self) -> &[TypeId] { &[] }
+    fn writes(&self) -> &[TypeId] { &[] }
+    fn fetch(_resources: &Resources) -> (A, B) { unimplemented!() }
+}
+
+// This struct exists because of the mentioned bug in HRTB closure associated types
+// Instead, S is provided here which implemenets QuerySet, which is actually our tuple of queries.
+// So we now have a tuple of queries locally (Which is a querySet) that we can call functions
+struct PreparedQuerySet<'a, S>
+where
+    S: QuerySet<'a> + Sized,
+{
+    set: &'a S,
+    prepared: S::PreparedQueries,
+    _marker: std::marker::PhantomData<(&'a S)>,
+}
+impl<'a, S> PreparedQuerySet<'a, S>
+where
+    S: QuerySet<'a> + Sized,
+{
+    pub fn fetch(&self) -> &S::PreparedQueries { &self.prepared }
 }
 
 // * implement QuerySet for tuples of queries
@@ -195,41 +250,61 @@ impl Accessor for () {
 trait QuerySet<'a>: Send + Sync {
     type PreparedQueries: 'a;
 
-    fn reads() -> Vec<ComponentTypeId>;
-    fn writes() -> Vec<ComponentTypeId>;
     fn filter_archetypes(&mut self, world: &World, archetypes: &mut BitSet);
-    fn prepare(&'a self, world: &'a World) -> Self::PreparedQueries;
+    fn prepare(&self) -> Self::PreparedQueries;
 }
 
 impl<'a> QuerySet<'a> for () {
     type PreparedQueries = ();
 
-    fn reads() -> Vec<ComponentTypeId> { Vec::default() }
-    fn writes() -> Vec<ComponentTypeId> { Vec::default() }
+    // We do Vec::with_capacity here because default/new pre-alloacte space
+    // When this is garunteed to never allocate
     fn filter_archetypes(&mut self, _: &World, _: &mut BitSet) {}
-    fn prepare(&'a self, _: &'a World) -> Self::PreparedQueries { () }
+    fn prepare(&self) -> Self::PreparedQueries {}
+}
+
+impl<'a, V1, V2, F1, F2> QuerySet<'a> for (Query<V1, F1>, Query<V2, F2>)
+where
+    V1: for<'v> View<'v>,
+    V2: for<'v> View<'v>,
+    F1: 'a + EntityFilter + Send + Sync,
+    F2: 'a + EntityFilter + Send + Sync,
+{
+    type PreparedQueries = ();
+
+    // We do Vec::with_capacity here because default/new pre-alloacte space
+    // When this is garunteed to never allocate
+    fn filter_archetypes(&mut self, _: &World, _: &mut BitSet) {}
+    fn prepare(&self) -> Self::PreparedQueries {}
 }
 
 struct System<
     R: Accessor,
     Q: for<'a> QuerySet<'a>,
-    F: for<'a> Fn(R::Output, <Q as QuerySet<'a>>::PreparedQueries),
+    F: for<'a> Fn(R::Output, &PreparedQuerySet<'a, Q>),
 > {
-    _resources: PhantomData<R>,
+    resources: R,
     queries: Q,
     run_fn: F,
     archetypes: BitSet,
+
+    // These are stored statically instead of always iterated and created from the
+    // query types, which would make allocations every single request
+    access: SystemAccess,
 }
 
 impl<R, Q, F> Schedulable for System<R, Q, F>
 where
     R: Accessor,
     Q: for<'a> QuerySet<'a>,
-    F: for<'a> Fn(R::Output, <Q as QuerySet<'a>>::PreparedQueries) + Send + Sync,
+    F: for<'a> Fn(R::Output, &PreparedQuerySet<'a, Q>) + Send + Sync,
 {
-    fn reads(&self) -> (Vec<TypeId>, Vec<ComponentTypeId>) { (R::reads(), Q::reads()) }
-
-    fn writes(&self) -> (Vec<TypeId>, Vec<ComponentTypeId>) { (R::writes(), Q::writes()) }
+    fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
+        (&self.access.resources.reads, &self.access.components.reads)
+    }
+    fn writes(&self) -> (&[TypeId], &[ComponentTypeId]) {
+        (&self.access.resources.reads, &self.access.components.reads)
+    }
 
     fn prepare(&mut self, world: &World) {
         self.queries.filter_archetypes(world, &mut self.archetypes);
@@ -239,8 +314,148 @@ where
 
     fn run(&self, resources: &Resources, world: &World) {
         let resources = R::fetch(resources);
-        let queries = self.queries.prepare(world);
+        let queries = PreparedQuerySet {
+            prepared: self.queries.prepare(),
+            set: &self.queries,
+            _marker: Default::default(),
+        };
 
-        (self.run_fn)(resources, queries);
+        (self.run_fn)(resources, &queries);
+    }
+}
+
+// This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
+// for this system. Access types are instead stored and abstracted in the top level vec here
+// so the underlying Accessor type functions from the queries don't need to allocate.
+// Otherwise, this leads to excessive alloaction for every call to reads/writes
+struct SystemBuilder<Q = (), R = ()> {
+    name: String,
+
+    queries: Q,
+    resources: R,
+
+    resource_access: Access<TypeId>,
+    component_access: Access<ComponentTypeId>,
+}
+
+impl<Q, R> SystemBuilder<Q, R>
+where
+    Q: 'static + Send + ConsFlatten,
+    R: 'static + Send + ConsFlatten,
+{
+    #[allow(clippy::new_ret_no_self)]
+    fn new(name: &str) -> SystemBuilder {
+        SystemBuilder {
+            name: name.to_string(),
+            queries: (),
+            resources: (),
+            resource_access: Access::default(),
+            component_access: Access::default(),
+        }
+    }
+
+    pub fn with_query<V, F>(
+        mut self,
+        query: Query<V, F>,
+    ) -> SystemBuilder<<Q as ConsAppend<Query<V, F>>>::Output, R>
+    where
+        V: for<'a> View<'a>,
+        F: 'static + EntityFilter,
+        Q: ConsAppend<Query<V, F>>,
+    {
+        self.component_access.reads.extend(V::read_types().iter());
+        self.component_access.writes.extend(V::write_types().iter());
+
+        SystemBuilder {
+            name: self.name,
+            queries: ConsAppend::append(self.queries, query),
+            resources: self.resources,
+            resource_access: self.resource_access,
+            component_access: self.component_access,
+        }
+    }
+
+    fn with_resource<T>(
+        mut self,
+        access_type: ResourceAccessType,
+    ) -> SystemBuilder<Q, <R as ConsAppend<()>>::Output>
+    where
+        T: 'static + Resource,
+        R: ConsAppend<()>,
+        <R as ConsAppend<()>>::Output: ConsFlatten,
+    {
+        match access_type {
+            ResourceAccessType::Read => self.resource_access.reads.push(TypeId::of::<T>()),
+            ResourceAccessType::Write => self.resource_access.writes.push(TypeId::of::<T>()),
+        }
+
+        SystemBuilder {
+            name: self.name,
+            queries: self.queries,
+            resources: ConsAppend::append(self.resources, ()),
+            resource_access: self.resource_access,
+            component_access: self.component_access,
+        }
+    }
+
+    // This closure has to be structured like this, because we cannot directly reference
+    // QuerySet::PreparedQuery. There is a bug where you cannot use associated types of HRTB lifetime
+    // types in a closure
+    // https://github.com/rust-lang/rust/issues/63031
+    // This means we need to seperate the PreparedQuery from the QuerySet, and have it prepare
+    // and wrap it in a different struct instead.
+    fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
+    where
+        F: for<'a> Fn(
+                <<R as ConsFlatten>::Output as Accessor>::Output,
+                &PreparedQuerySet<'a, <Q as ConsFlatten>::Output>,
+            ) + Send
+            + Sync
+            + 'static,
+        <R as ConsFlatten>::Output: Accessor + Send + Sync,
+        for<'a> <Q as ConsFlatten>::Output: QuerySet<'a> + Send + Sync,
+    {
+        Box::new(System {
+            run_fn,
+            resources: self.resources.flatten(),
+            queries: self.queries.flatten(),
+            archetypes: BitSet::default(), //TODO:
+            access: SystemAccess {
+                resources: self.resource_access,
+                components: self.component_access,
+            },
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prelude::*;
+    use crate::resources::{ResourceAccessType, Resources};
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Pos(f32, f32, f32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Vel(f32, f32, f32);
+    #[derive(Default)]
+    struct TestResource(pub i32);
+
+    #[test]
+    fn builder_crate_and_execute() {
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+        let mut resources = Resources::default();
+
+        let system = SystemBuilder::<()>::new("TestSystem")
+            .with_resource::<TestResource>(ResourceAccessType::Read)
+            .with_query(Read::<Pos>::query())
+            .with_query(Read::<Vel>::query())
+            .build(|resource, queries| {
+                println!("Hello world");
+                let _ = queries.fetch(); // Fetch the prepared queries. This could be implemented as a Deref on the PreparedQueries struct
+            });
+
+        system.run(&resources, &world);
     }
 }

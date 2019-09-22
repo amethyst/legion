@@ -56,6 +56,12 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
 
     /// Determines if the view writes to the specified data type.
     fn writes<T: Component>() -> bool;
+
+    /// Returns an array of the components read by this view
+    fn read_types() -> Vec<ComponentTypeId>;
+
+    /// Returns an array of the components written by this view
+    fn write_types() -> Vec<ComponentTypeId>;
 }
 
 /// A type which can construct a default entity filter.
@@ -120,6 +126,10 @@ impl<'a, T: Component> View<'a> for Read<T> {
     fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
     fn writes<D: Component>() -> bool { false }
+
+    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+
+    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
 }
 
 impl<T: Component> ViewElement for Read<T> {
@@ -159,6 +169,12 @@ impl<'a, T: Component> View<'a> for Write<T> {
 
     #[inline]
     fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
+
+    #[inline]
+    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+
+    #[inline]
+    fn write_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
 }
 
 impl<T: Component> ViewElement for Write<T> {
@@ -203,6 +219,12 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
 
     #[inline]
     fn writes<D: Component>() -> bool { false }
+
+    #[inline]
+    fn read_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
+
+    #[inline]
+    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
 }
 
 impl<T: Tag> ViewElement for Tagged<T> {
@@ -259,8 +281,12 @@ macro_rules! impl_view_tuple {
             }
 
             fn writes<Data: Component>() -> bool {
-                $( $ty::reads::<Data>() )||*
+                $( $ty::writes::<Data>() )||*
             }
+
+            fn read_types() -> Vec<ComponentTypeId> { vec![$( ComponentTypeId::of::<$ty>()),*] }
+
+            fn write_types() -> Vec<ComponentTypeId> { vec![$( ComponentTypeId::of::<$ty>()),*] }
         }
     };
 }
