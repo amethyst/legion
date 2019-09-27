@@ -196,7 +196,7 @@ pub trait EntityFilter {
 }
 
 /// An EntityFilter which combined both an archetype filter and a chunk filter.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EntityFilterTuple<A, S, C> {
     pub arch_filter: A,
     pub chunkset_filter: S,
@@ -449,7 +449,7 @@ impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunksetFilter
 }
 
 /// A passthrough filter which allows through all elements.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Passthrough;
 
 impl<'a> Filter<ArchetypeFilterData<'a>> for Passthrough {
@@ -510,7 +510,7 @@ impl<'a, Rhs> std::ops::BitOr<Rhs> for Passthrough {
 }
 
 /// A filter which negates `F`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Not<F> {
     pub filter: F,
 }
@@ -566,7 +566,7 @@ impl<'a, F> std::ops::BitOr<Passthrough> for Not<F> {
 }
 
 /// A filter which requires all filters within `T` match.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct And<T> {
     pub filters: T,
 }
@@ -715,7 +715,7 @@ impl_and_filter!(A => a, B => b, C => c, D => d, E => e);
 impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
 
 /// A filter which requires that any filter within `T` match.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Or<T> {
     pub filters: T,
 }
@@ -807,7 +807,7 @@ impl_or_filter!(A => a, B => b, C => c, D => d, E => e);
 impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
 
 /// A filter qhich requires that all chunks contain entity data components of type `T`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ComponentFilter<T>(PhantomData<T>);
 
 impl<T: Component> ComponentFilter<T> {
@@ -874,7 +874,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for ComponentFilter<T> {
 }
 
 /// A filter which requires that all chunks contain shared tag data of type `T`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TagFilter<T>(PhantomData<T>);
 
 impl<T: Tag> TagFilter<T> {
@@ -939,7 +939,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagFilter<T> {
 }
 
 /// A filter which requires that all chunks contain a specific tag value.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TagValueFilter<'a, T> {
     value: &'a T,
 }
@@ -1016,7 +1016,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagValueFilter<'a, T> {
 
 /// A filter which requires that entity data of type `T` has changed within the
 /// chunk since the last time the filter was executed.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ComponentChangedFilter<T: Component> {
     versions: HashMap<ChunkId, usize>,
     phantom: PhantomData<T>,

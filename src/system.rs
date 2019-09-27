@@ -1,7 +1,8 @@
+use crate::borrow::AtomicRefCell;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::filter::EntityFilter;
-use crate::query::{Query, View};
-use crate::resources::{Resource, ResourceAccessType, Resources};
+use crate::query::{ChunkEntityIter, ChunkViewIter, Query, View};
+use crate::resources::{Accessor, Resource, ResourceAccessType, Resources};
 use crate::storage::ComponentTypeId;
 use crate::world::World;
 use bit_set::BitSet;
@@ -12,6 +13,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::repeat;
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Stages represent discrete steps of a game's loop, such as "start", "update", "draw", "end", etc.
@@ -181,62 +183,13 @@ pub struct SystemAccess {
     pub components: Access<ComponentTypeId>,
 }
 
-// implement Accessor for tupes of Read/Write<Resource>
-
-trait Accessor: Send + Sync {
-    type Output;
-
-    fn reads(&self) -> &[TypeId];
-    fn writes(&self) -> &[TypeId];
-    fn fetch(resources: &Resources) -> Self::Output;
-}
-
-impl Accessor for () {
-    type Output = ();
-
-    fn reads(&self) -> &[TypeId] { &[] }
-    fn writes(&self) -> &[TypeId] { &[] }
-    fn fetch(_resources: &Resources) {}
-}
-
-impl<A> Accessor for (A,)
-where
-    A: Send + Sync,
-{
-    type Output = (A,);
-
-    fn reads(&self) -> &[TypeId] { &[] }
-    fn writes(&self) -> &[TypeId] { &[] }
-    fn fetch(_resources: &Resources) -> (A,) { unimplemented!() }
-}
-impl<A, B> Accessor for (A, B)
-where
-    A: Send + Sync,
-    B: Send + Sync,
-{
-    type Output = (A, B);
-
-    fn reads(&self) -> &[TypeId] { &[] }
-    fn writes(&self) -> &[TypeId] { &[] }
-    fn fetch(_resources: &Resources) -> (A, B) { unimplemented!() }
-}
-
 // This struct exists because of the mentioned bug in HRTB closure associated types
 // Instead, S is provided here which implemenets QuerySet, which is actually our tuple of queries.
 // So we now have a tuple of queries locally (Which is a querySet) that we can call functions
-struct PreparedQuerySet<'a, S>
+pub trait PreparedQuerySet<'a, S>
 where
-    S: QuerySet<'a> + Sized,
+    S: QuerySet + Sized,
 {
-    set: &'a S,
-    prepared: S::PreparedQueries,
-    _marker: std::marker::PhantomData<(&'a S)>,
-}
-impl<'a, S> PreparedQuerySet<'a, S>
-where
-    S: QuerySet<'a> + Sized,
-{
-    pub fn fetch(&self) -> &S::PreparedQueries { &self.prepared }
 }
 
 // * implement QuerySet for tuples of queries
@@ -246,45 +199,103 @@ where
 // and only append new archetype matches each frame
 // * per-query archetype matches stored as simple Vec<usize> - filter_archetypes() updates them and writes
 // the union of all queries into the BitSet provided, to be used to schedule the system as a whole
-
-trait QuerySet<'a>: Send + Sync {
-    type PreparedQueries: 'a;
-
-    fn filter_archetypes(&mut self, world: &World, archetypes: &mut BitSet);
-    fn prepare(&self) -> Self::PreparedQueries;
-}
-
-impl<'a> QuerySet<'a> for () {
-    type PreparedQueries = ();
-
-    // We do Vec::with_capacity here because default/new pre-alloacte space
-    // When this is garunteed to never allocate
-    fn filter_archetypes(&mut self, _: &World, _: &mut BitSet) {}
-    fn prepare(&self) -> Self::PreparedQueries {}
-}
-
-impl<'a, V1, V2, F1, F2> QuerySet<'a> for (Query<V1, F1>, Query<V2, F2>)
+pub struct PreparedQuery<'a, V, F>
 where
-    V1: for<'v> View<'v>,
-    V2: for<'v> View<'v>,
-    F1: 'a + EntityFilter + Send + Sync,
-    F2: 'a + EntityFilter + Send + Sync,
+    V: for<'v> View<'v>,
+    F: 'a + EntityFilter,
 {
-    type PreparedQueries = ();
+    world: &'a World,
+    query: &'a mut Query<V, F>,
+    _marker: PhantomData<&'a (V, F)>,
+}
+impl<'a, V, F> PreparedQuery<'a, V, F>
+where
+    V: for<'v> View<'v>,
+    F: 'a + EntityFilter,
+{
+    pub(crate) fn new(world: &'a World, query: &'a mut Query<V, F>) -> Self {
+        Self {
+            world,
+            query,
+            _marker: Default::default(),
+        }
+    }
 
-    // We do Vec::with_capacity here because default/new pre-alloacte space
-    // When this is garunteed to never allocate
-    fn filter_archetypes(&mut self, _: &World, _: &mut BitSet) {}
-    fn prepare(&self) -> Self::PreparedQueries {}
+    pub fn iter_chunks<'b>(
+        &'b self,
+    ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
+        //self.query.iter_chunks(self.world)
+        unimplemented!()
+    }
+
+    pub fn iter_entities<'b>(
+        &'b self,
+    ) -> ChunkEntityIter<
+        'a,
+        V,
+        ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+    > {
+        //self.query.iter_entities(self.world)
+        unimplemented!()
+    }
 }
 
-struct System<
-    R: Accessor,
-    Q: for<'a> QuerySet<'a>,
-    F: for<'a> Fn(R::Output, &PreparedQuerySet<'a, Q>),
-> {
+pub trait PreparedQueriesIndirect<'a> {
+    type PreparedQueries: 'a;
+}
+
+pub trait QuerySet: Send + Sync + for<'a> PreparedQueriesIndirect<'a> {
+    fn filter_archetypes(&mut self, world: &World, archetypes: &mut BitSet);
+    fn prepare<'a>(
+        &mut self,
+        world: &'a World,
+    ) -> <Self as PreparedQueriesIndirect<'a>>::PreparedQueries;
+}
+
+macro_rules! impl_queryset_tuple {
+    ( $( $ty: ident ),* ) => {
+        paste::item! {
+            #[allow(unused_parens, non_snake_case)]
+            impl<'a, $( [<$ty V>], [<$ty F>], )*> PreparedQueriesIndirect<'a> for ($( Query<[<$ty V>], [<$ty F>]>, )*)
+            where
+                $( [<$ty V>]: for<'v> View<'v>, )*
+                $( [<$ty F>]: 'static + EntityFilter + Send + Sync,)*
+            {
+                type PreparedQueries = ($( PreparedQuery<'a, [<$ty V>], [<$ty F>]>, )* );
+            }
+
+
+            impl<$( [<$ty V>], [<$ty F>], )*> QuerySet for ($( Query<[<$ty V>], [<$ty F>]>, )*)
+            where
+                Self: for<'a> PreparedQueriesIndirect<'a>,
+                $( [<$ty V>]: for<'v> View<'v>, )*
+                $( [<$ty F>]: 'static + EntityFilter + Send + Sync, )*
+            {
+
+                fn filter_archetypes(&mut self, _: &World, _: &mut BitSet) {}
+                fn prepare<'a>(&mut self, world: &'a World) -> <Self as PreparedQueriesIndirect<'a>>::PreparedQueries {
+                    let ($($ty),*, ) = self;
+                    let prepared: ($( PreparedQuery<'a, [<$ty V>], [<$ty F>]>, )* ) =
+                        ($( PreparedQuery::<'a, [<$ty V>], [<$ty F>]>::new(world, $ty), )*);
+                    prepared
+                }
+            }
+        }
+    };
+}
+
+impl_queryset_tuple!(A);
+impl_queryset_tuple!(A, B);
+//impl_queryset_tuple!(A, B, C);
+//impl_queryset_tuple!(A, B, C, D);
+//impl_queryset_tuple!(A, B, C, D, E);
+//impl_queryset_tuple!(A, B, C, D, E, F);
+//impl_queryset_tuple!(A, B, C, D, E, F, G);
+
+struct System<R: Accessor, Q: QuerySet, F: for<'a> Fn(R::Output, &mut dyn PreparedQuerySet<'a, Q>)>
+{
     resources: R,
-    queries: Q,
+    queries: AtomicRefCell<Q>,
     run_fn: F,
     archetypes: BitSet,
 
@@ -296,8 +307,8 @@ struct System<
 impl<R, Q, F> Schedulable for System<R, Q, F>
 where
     R: Accessor,
-    Q: for<'a> QuerySet<'a>,
-    F: for<'a> Fn(R::Output, &PreparedQuerySet<'a, Q>) + Send + Sync,
+    Q: QuerySet,
+    F: for<'a> Fn(R::Output, &mut dyn PreparedQuerySet<'a, Q>) + Send + Sync,
 {
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
         (&self.access.resources.reads, &self.access.components.reads)
@@ -307,20 +318,19 @@ where
     }
 
     fn prepare(&mut self, world: &World) {
-        self.queries.filter_archetypes(world, &mut self.archetypes);
+        self.queries
+            .get_mut()
+            .filter_archetypes(world, &mut self.archetypes);
     }
 
     fn accesses_archetypes(&self) -> &BitSet { &self.archetypes }
 
     fn run(&self, resources: &Resources, world: &World) {
-        let resources = R::fetch(resources);
-        let queries = PreparedQuerySet {
-            prepared: self.queries.prepare(),
-            set: &self.queries,
-            _marker: Default::default(),
-        };
+        //let resources = R::fetch(resources);
+        // let mut queries = self.queries.get_mut();
+        //let mut prepared_queries = queries.prepare(world);
 
-        (self.run_fn)(resources, &queries);
+        //(self.run_fn)(resources, &mut prepared_queries);
     }
 }
 
@@ -408,17 +418,17 @@ where
     where
         F: for<'a> Fn(
                 <<R as ConsFlatten>::Output as Accessor>::Output,
-                &PreparedQuerySet<'a, <Q as ConsFlatten>::Output>,
+                &mut dyn PreparedQuerySet<'a, <Q as ConsFlatten>::Output>,
             ) + Send
             + Sync
             + 'static,
         <R as ConsFlatten>::Output: Accessor + Send + Sync,
-        for<'a> <Q as ConsFlatten>::Output: QuerySet<'a> + Send + Sync,
+        for<'a> <Q as ConsFlatten>::Output: QuerySet + Send + Sync,
     {
         Box::new(System {
             run_fn,
             resources: self.resources.flatten(),
-            queries: self.queries.flatten(),
+            queries: AtomicRefCell::new(self.queries.flatten()),
             archetypes: BitSet::default(), //TODO:
             access: SystemAccess {
                 resources: self.resource_access,
@@ -447,13 +457,35 @@ mod tests {
         let mut world = universe.create_world();
         let mut resources = Resources::default();
 
+        let components = vec![
+            (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
+        ];
+
+        let mut expected = HashMap::<Entity, (Pos, Vel)>::new();
+
+        for (i, e) in world.insert((), components.clone()).iter().enumerate() {
+            if let Some((pos, rot)) = components.get(i) {
+                expected.insert(*e, (*pos, *rot));
+            }
+        }
+
         let system = SystemBuilder::<()>::new("TestSystem")
             .with_resource::<TestResource>(ResourceAccessType::Read)
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(|resource, queries| {
+            .build(move |resource, queries| {
                 println!("Hello world");
-                let _ = queries.fetch(); // Fetch the prepared queries. This could be implemented as a Deref on the PreparedQueries struct
+                let mut count = 0;
+                {
+                    //let queries = queries.fetch();
+                    //for (entity, pos) in queries.0.iter_entities() {
+                    //    assert_eq!(expected.get(&entity).unwrap().0, *pos);
+                    //    count += 1;
+                    // }
+                }
+
+                assert_eq!(components.len(), count);
             });
 
         system.run(&resources, &world);

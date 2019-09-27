@@ -24,6 +24,7 @@ use crate::storage::Storage;
 use crate::storage::Tag;
 use crate::storage::TagTypeId;
 use crate::world::World;
+use derivative::Derivative;
 use std::any::TypeId;
 use std::iter::Enumerate;
 use std::iter::Repeat;
@@ -712,6 +713,8 @@ where
 /// The `ChunkView` yielded from `iter_chunks` allows access to all shared data in the chunk (queried for or not),
 /// but entity data slices can only be accessed if they were requested in the query's view. Attempting to access
 /// other data types, or attempting to write to components that were only requested via a `Read` will panic.
+#[derive(Derivative)]
+#[derivative(Clone(bound = "F: Clone"))]
 pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
     view: PhantomData<V>,
     filter: F,
