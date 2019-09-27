@@ -183,102 +183,97 @@ pub struct SystemAccess {
     pub components: Access<ComponentTypeId>,
 }
 
-// * implement QuerySet for tuples of queries
-// * likely actually wrapped in another struct, to cache the archetype sets for each query
-// * prepared queries will each re-use the archetype set results in their iterators so
-// that the archetype filters don't need to be run again - can also cache this between runs
-// and only append new archetype matches each frame
-// * per-query archetype matches stored as simple Vec<usize> - filter_archetypes() updates them and writes
-// the union of all queries into the BitSet provided, to be used to schedule the system as a whole
-pub struct PreparedQuery<'a, V, F>
+/// * implement QuerySet for tuples of queries
+/// * likely actually wrapped in another struct, to cache the archetype sets for each query
+/// * prepared queries will each re-use the archetype set results in their iterators so
+/// that the archetype filters don't need to be run again - can also cache this between runs
+/// and only append new archetype matches each frame
+/// * per-query archetype matches stored as simple Vec<usize> - filter_archetypes() updates them and writes
+/// the union of all queries into the BitSet provided, to be used to schedule the system as a whole
+///
+/// FIXME: This would have an associated lifetime and would hold references instead of pointers,
+/// but this is a workaround for lack of GATs and bugs around HRTBs combined with associated types.
+/// See https://github.com/rust-lang/rust/issues/62529
+pub struct PreparedQuery<V, F>
 where
     V: for<'v> View<'v>,
-    F: 'a + EntityFilter,
+    F: EntityFilter,
 {
-    world: &'a World,
-    query: &'a mut Query<V, F>,
-    _marker: PhantomData<&'a (V, F)>,
+    world: *const World,
+    query: *mut Query<V, F>,
 }
-impl<'a, V, F> PreparedQuery<'a, V, F>
+
+impl<V, F> PreparedQuery<V, F>
 where
     V: for<'v> View<'v>,
-    F: 'a + EntityFilter,
+    F: EntityFilter,
 {
-    pub(crate) fn new(world: &'a World, query: &'a mut Query<V, F>) -> Self {
+    /// Safety: input references might not outlive a created instance of `PreparedQuery`.
+    unsafe fn new(world: &World, query: &mut Query<V, F>) -> Self {
         Self {
-            world,
-            query,
-            _marker: Default::default(),
+            world: world as *const World,
+            query: query as *mut Query<V, F>,
         }
     }
 
-    pub fn iter_chunks<'b>(
-        &'b self,
+    // those methods are not unsafe, because we guarantee that `PreparedQuery` lifetime is never actually
+    // in user's hands and access to internal pointers is impossible. There is no way to move the object out
+    // of mutable reference through public API, because there is no way to get access to more than a single instance at a time.
+    // The unsafety is an implementation detail. It can be fully safe once GATs are in the language.
+    pub fn iter_chunks<'a, 'b>(
+        &'b mut self,
     ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
-        //self.query.iter_chunks(self.world)
-        unimplemented!()
+        unsafe { 
+            (&mut *self.query).iter_chunks(&*self.world)
+        }
     }
 
-    pub fn iter_entities<'b>(
-        &'b self,
+    pub fn iter_entities<'a, 'b>(
+        &'b mut self,
     ) -> ChunkEntityIter<
         'a,
         V,
         ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
     > {
-        //self.query.iter_entities(self.world)
-        unimplemented!()
+        unsafe {
+            (&mut *self.query).iter_entities(&*self.world)
+        }
     }
 }
 
-pub trait PreparedQueriesIndirect<'a> {
-    type PreparedQueries: 'a;
-
-    fn prepare_inner(self, world: &'a World) -> Self::PreparedQueries;
-}
-
-pub trait QuerySet: Send + Sync where for<'a> &'a mut Self: PreparedQueriesIndirect<'a> {
+pub trait QuerySet: Send + Sync {
+    type PreparedQueries;
     fn filter_archetypes(&mut self, world: &World, archetypes: &mut BitSet);
-    fn prepare<'a>(&'a mut self, world: &'a World) -> <&'a mut Self as PreparedQueriesIndirect<'a>>::PreparedQueries;
+    /// Safety: prepare call doesn't respect lifetimes of `self` and `world.
+    /// The returned value cannot outlive them.
+    unsafe fn prepare(&mut self, world: &World) -> Self::PreparedQueries;
+    // fn unprepare(prepared: Self::PreparedQueries) -> Self;
 }
 
 macro_rules! impl_queryset_tuple {
     ($($ty: ident),*) => {
         paste::item! {
             #[allow(unused_parens, non_snake_case)]
-            impl<'a, $([<$ty V>], [<$ty F>],)*> PreparedQueriesIndirect<'a> for &'a mut ($(Query<[<$ty V>], [<$ty F>]>,)*)
-            where
-                $([<$ty V>]: for<'v> View<'v>,)*
-                $([<$ty F>]: 'a + EntityFilter + Send + Sync,)*
-            {
-                type PreparedQueries = ($(PreparedQuery<'a, [<$ty V>], [<$ty F>]>, )* );
-                fn prepare_inner(self, world: &'a World) -> Self::PreparedQueries {
-                    let ($($ty,)*) = self;
-                    ($(PreparedQuery::<'_, [<$ty V>], [<$ty F>]>::new(world, $ty),)*)
-                }
-            }
-
-
             impl<$([<$ty V>], [<$ty F>], )*> QuerySet for ($(Query<[<$ty V>], [<$ty F>]>, )*)
             where
-                for<'a> &'a mut Self: PreparedQueriesIndirect<'a>,
                 $([<$ty V>]: for<'v> View<'v>,)*
                 $([<$ty F>]: EntityFilter + Send + Sync,)*
             {
-
+                type PreparedQueries = ($(PreparedQuery<[<$ty V>], [<$ty F>]>, )* );
                 fn filter_archetypes(&mut self, _: &World, _: &mut BitSet) {}
-                fn prepare<'a>(&'a mut self, world: &'a World) -> <&'a mut Self as PreparedQueriesIndirect<'a>>::PreparedQueries {
-                    self.prepare_inner(world)
+                unsafe fn prepare(&mut self, world: &World) -> Self::PreparedQueries {
+                    let ($($ty,)*) = self;
+                    ($(PreparedQuery::<[<$ty V>], [<$ty F>]>::new(world, $ty),)*)
                 }
             }
         }
     };
 }
 
-impl_queryset_tuple!(A);
+// impl_queryset_tuple!(A);
 impl_queryset_tuple!(A, B);
-impl_queryset_tuple!(A, B, C);
-impl_queryset_tuple!(A, B, C, D);
+// impl_queryset_tuple!(A, B, C);
+// impl_queryset_tuple!(A, B, C, D);
 //impl_queryset_tuple!(A, B, C, D, E);
 //impl_queryset_tuple!(A, B, C, D, E, F);
 //impl_queryset_tuple!(A, B, C, D, E, F, G);
@@ -287,8 +282,7 @@ struct System<R, Q, F>
 where
     R: Accessor,
     Q: QuerySet,
-    for<'a> &'a mut Q: PreparedQueriesIndirect<'a>,
-    for<'a> F: Fn(R::Output, <&'a mut Q as PreparedQueriesIndirect<'a>>::PreparedQueries) + Send + Sync,
+    F: Fn(R::Output, &mut <Q as QuerySet>::PreparedQueries) + Send + Sync + 'static,
 {
     resources: R,
     queries: AtomicRefCell<Q>,
@@ -304,8 +298,7 @@ impl<R, Q, F> Schedulable for System<R, Q, F>
 where
     R: Accessor,
     Q: QuerySet,
-    for<'a> &'a mut Q: PreparedQueriesIndirect<'a>,
-    for<'a> F: Fn(R::Output, <&'a mut Q as PreparedQueriesIndirect<'a>>::PreparedQueries) + Send + Sync,
+    F: Fn(R::Output, &mut <Q as QuerySet>::PreparedQueries) + Send + Sync + 'static,
 {
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
         (&self.access.resources.reads, &self.access.components.reads)
@@ -323,13 +316,14 @@ where
     fn accesses_archetypes(&self) -> &BitSet { &self.archetypes }
 
     fn run(&self, resources: &Resources, world: &World) {
-        //let resources = R::fetch(resources);
-        // let mut queries = self.queries.get_mut();
-        //let mut prepared_queries = queries.prepare(world);
+        let resources = R::fetch(resources);
+        let mut queries = self.queries.get_mut();
+        let mut prepared_queries = unsafe { queries.prepare(world) };
 
-        //(self.run_fn)(resources, &mut prepared_queries);
+        (self.run_fn)(resources, &mut prepared_queries);
     }
 }
+
 
 // This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
 // for this system. Access types are instead stored and abstracted in the top level vec here
@@ -397,28 +391,19 @@ where
         }
 
         SystemBuilder {
+            resources: ConsAppend::append(self.resources, ()),
             name: self.name,
             queries: self.queries,
-            resources: ConsAppend::append(self.resources, ()),
             resource_access: self.resource_access,
             component_access: self.component_access,
         }
     }
 
-    // This closure has to be structured like this, because we cannot directly reference
-    // QuerySet::PreparedQuery. There is a bug where you cannot use associated types of HRTB lifetime
-    // types in a closure
-    // https://github.com/rust-lang/rust/issues/63031
-    // This means we need to seperate the PreparedQuery from the QuerySet, and have it prepare
-    // and wrap it in a different struct instead.
     fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: Accessor + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
-        for<'a> &'a mut <Q as ConsFlatten>::Output: PreparedQueriesIndirect<'a>,
-        F: for<'a> Fn(<<R as ConsFlatten>::Output as Accessor>::Output, <&'a mut <Q as ConsFlatten>::Output as PreparedQueriesIndirect<'a>>::PreparedQueries)  + Send
-            + Sync
-            + 'static,
+        F: Fn(<<R as ConsFlatten>::Output as Accessor>::Output, &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries) + Send + Sync + 'static,
     {
         Box::new(System {
             run_fn,
@@ -450,7 +435,7 @@ mod tests {
     fn builder_crate_and_execute() {
         let universe = Universe::new();
         let mut world = universe.create_world();
-        let mut resources = Resources::default();
+        let resources = Resources::default();
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -469,15 +454,14 @@ mod tests {
             .with_resource::<TestResource>(ResourceAccessType::Read)
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(move |resource, queries| {
+            .build(move |_resource, queries| {
                 println!("Hello world");
                 let mut count = 0;
                 {
-                    //let queries = queries.fetch();
-                    //for (entity, pos) in queries.0.iter_entities() {
-                    //    assert_eq!(expected.get(&entity).unwrap().0, *pos);
-                    //    count += 1;
-                    // }
+                    for (entity, pos) in queries.0.iter_entities() {
+                       assert_eq!(expected.get(&entity).unwrap().0, *pos);
+                       count += 1;
+                    }
                 }
 
                 assert_eq!(components.len(), count);
