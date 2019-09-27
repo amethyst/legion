@@ -183,15 +183,6 @@ pub struct SystemAccess {
     pub components: Access<ComponentTypeId>,
 }
 
-// This struct exists because of the mentioned bug in HRTB closure associated types
-// Instead, S is provided here which implemenets QuerySet, which is actually our tuple of queries.
-// So we now have a tuple of queries locally (Which is a querySet) that we can call functions
-pub trait PreparedQuerySet<'a, S>
-where
-    S: QuerySet + Sized,
-{
-}
-
 // * implement QuerySet for tuples of queries
 // * likely actually wrapped in another struct, to cache the archetype sets for each query
 // * prepared queries will each re-use the archetype set results in their iterators so
@@ -242,42 +233,42 @@ where
 
 pub trait PreparedQueriesIndirect<'a> {
     type PreparedQueries: 'a;
+
+    fn prepare_inner(self, world: &'a World) -> Self::PreparedQueries;
 }
 
-pub trait QuerySet: Send + Sync + for<'a> PreparedQueriesIndirect<'a> {
+pub trait QuerySet: Send + Sync where for<'a> &'a mut Self: PreparedQueriesIndirect<'a> {
     fn filter_archetypes(&mut self, world: &World, archetypes: &mut BitSet);
-    fn prepare<'a>(
-        &mut self,
-        world: &'a World,
-    ) -> <Self as PreparedQueriesIndirect<'a>>::PreparedQueries;
+    fn prepare<'a>(&'a mut self, world: &'a World) -> <&'a mut Self as PreparedQueriesIndirect<'a>>::PreparedQueries;
 }
 
 macro_rules! impl_queryset_tuple {
-    ( $( $ty: ident ),* ) => {
+    ($($ty: ident),*) => {
         paste::item! {
             #[allow(unused_parens, non_snake_case)]
-            impl<'a, $( [<$ty V>], [<$ty F>], )*> PreparedQueriesIndirect<'a> for ($( Query<[<$ty V>], [<$ty F>]>, )*)
+            impl<'a, $([<$ty V>], [<$ty F>],)*> PreparedQueriesIndirect<'a> for &'a mut ($(Query<[<$ty V>], [<$ty F>]>,)*)
             where
-                $( [<$ty V>]: for<'v> View<'v>, )*
-                $( [<$ty F>]: 'static + EntityFilter + Send + Sync,)*
+                $([<$ty V>]: for<'v> View<'v>,)*
+                $([<$ty F>]: 'a + EntityFilter + Send + Sync,)*
             {
-                type PreparedQueries = ($( PreparedQuery<'a, [<$ty V>], [<$ty F>]>, )* );
+                type PreparedQueries = ($(PreparedQuery<'a, [<$ty V>], [<$ty F>]>, )* );
+                fn prepare_inner(self, world: &'a World) -> Self::PreparedQueries {
+                    let ($($ty,)*) = self;
+                    ($(PreparedQuery::<'_, [<$ty V>], [<$ty F>]>::new(world, $ty),)*)
+                }
             }
 
 
-            impl<$( [<$ty V>], [<$ty F>], )*> QuerySet for ($( Query<[<$ty V>], [<$ty F>]>, )*)
+            impl<$([<$ty V>], [<$ty F>], )*> QuerySet for ($(Query<[<$ty V>], [<$ty F>]>, )*)
             where
-                Self: for<'a> PreparedQueriesIndirect<'a>,
-                $( [<$ty V>]: for<'v> View<'v>, )*
-                $( [<$ty F>]: 'static + EntityFilter + Send + Sync, )*
+                for<'a> &'a mut Self: PreparedQueriesIndirect<'a>,
+                $([<$ty V>]: for<'v> View<'v>,)*
+                $([<$ty F>]: EntityFilter + Send + Sync,)*
             {
 
                 fn filter_archetypes(&mut self, _: &World, _: &mut BitSet) {}
-                fn prepare<'a>(&mut self, world: &'a World) -> <Self as PreparedQueriesIndirect<'a>>::PreparedQueries {
-                    let ($($ty),*, ) = self;
-                    let prepared: ($( PreparedQuery<'a, [<$ty V>], [<$ty F>]>, )* ) =
-                        ($( PreparedQuery::<'a, [<$ty V>], [<$ty F>]>::new(world, $ty), )*);
-                    prepared
+                fn prepare<'a>(&'a mut self, world: &'a World) -> <&'a mut Self as PreparedQueriesIndirect<'a>>::PreparedQueries {
+                    self.prepare_inner(world)
                 }
             }
         }
@@ -286,13 +277,18 @@ macro_rules! impl_queryset_tuple {
 
 impl_queryset_tuple!(A);
 impl_queryset_tuple!(A, B);
-//impl_queryset_tuple!(A, B, C);
-//impl_queryset_tuple!(A, B, C, D);
+impl_queryset_tuple!(A, B, C);
+impl_queryset_tuple!(A, B, C, D);
 //impl_queryset_tuple!(A, B, C, D, E);
 //impl_queryset_tuple!(A, B, C, D, E, F);
 //impl_queryset_tuple!(A, B, C, D, E, F, G);
 
-struct System<R: Accessor, Q: QuerySet, F: for<'a> Fn(R::Output, &mut dyn PreparedQuerySet<'a, Q>)>
+struct System<R, Q, F>
+where
+    R: Accessor,
+    Q: QuerySet,
+    for<'a> &'a mut Q: PreparedQueriesIndirect<'a>,
+    for<'a> F: Fn(R::Output, <&'a mut Q as PreparedQueriesIndirect<'a>>::PreparedQueries) + Send + Sync,
 {
     resources: R,
     queries: AtomicRefCell<Q>,
@@ -308,7 +304,8 @@ impl<R, Q, F> Schedulable for System<R, Q, F>
 where
     R: Accessor,
     Q: QuerySet,
-    F: for<'a> Fn(R::Output, &mut dyn PreparedQuerySet<'a, Q>) + Send + Sync,
+    for<'a> &'a mut Q: PreparedQueriesIndirect<'a>,
+    for<'a> F: Fn(R::Output, <&'a mut Q as PreparedQueriesIndirect<'a>>::PreparedQueries) + Send + Sync,
 {
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
         (&self.access.resources.reads, &self.access.components.reads)
@@ -416,14 +413,12 @@ where
     // and wrap it in a different struct instead.
     fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
     where
-        F: for<'a> Fn(
-                <<R as ConsFlatten>::Output as Accessor>::Output,
-                &mut dyn PreparedQuerySet<'a, <Q as ConsFlatten>::Output>,
-            ) + Send
+        <R as ConsFlatten>::Output: Accessor + Send + Sync,
+        <Q as ConsFlatten>::Output: QuerySet,
+        for<'a> &'a mut <Q as ConsFlatten>::Output: PreparedQueriesIndirect<'a>,
+        F: for<'a> Fn(<<R as ConsFlatten>::Output as Accessor>::Output, <&'a mut <Q as ConsFlatten>::Output as PreparedQueriesIndirect<'a>>::PreparedQueries)  + Send
             + Sync
             + 'static,
-        <R as ConsFlatten>::Output: Accessor + Send + Sync,
-        for<'a> <Q as ConsFlatten>::Output: QuerySet + Send + Sync,
     {
         Box::new(System {
             run_fn,
