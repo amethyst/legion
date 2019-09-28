@@ -227,7 +227,7 @@ pub mod borrow;
 pub mod entity;
 pub mod filter;
 pub mod query;
-pub mod resources;
+pub mod resource;
 pub mod storage;
 pub mod system;
 pub mod world;

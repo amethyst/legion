@@ -2,7 +2,7 @@ use crate::borrow::AtomicRefCell;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::filter::EntityFilter;
 use crate::query::{Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, View};
-use crate::resources::{Accessor, Resource, ResourceAccessType, Resources};
+use crate::resource::{Accessor, Resource, ResourceAccessType, Resources};
 use crate::storage::ComponentTypeId;
 use crate::world::World;
 use bit_set::BitSet;
@@ -132,10 +132,6 @@ impl StageExecutor {
                 // if the archetype sets intersect,
                 // then we can move the dynamic dependant into the static dependants set
                 if !other.accesses_archetypes().is_disjoint(archetypes) {
-                    log::trace!(
-                        "Interception, adding static dep?, depcount = {}",
-                        static_dependancy_counts[dep].load(Ordering::SeqCst)
-                    );
                     static_dep.push(dep);
                     dyn_dep.swap_remove(i);
                     static_dependancy_counts[dep].fetch_add(1, Ordering::SeqCst);
@@ -426,7 +422,7 @@ where
 /// system, as well as resource access and other metadata.
 /// ```rust
 /// # use legion::prelude::*;
-/// # use legion::resources::ResourceAccessType;
+/// # use legion::resource::ResourceAccessType;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -551,7 +547,7 @@ where
 mod tests {
     use super::*;
     use crate::prelude::*;
-    use crate::resources::{ResourceAccessType, Resources};
+    use crate::resource::{ResourceAccessType, Resources};
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
