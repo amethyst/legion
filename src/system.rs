@@ -92,8 +92,13 @@ impl StageExecutor {
             }
         }
 
+        let mut awaiting = Vec::with_capacity(systems.len());
+        systems
+            .iter()
+            .for_each(|_| awaiting.push(AtomicUsize::new(0)));
+
         Self {
-            awaiting: Vec::new(),
+            awaiting,
             static_dependants,
             dynamic_dependants,
             static_dependancy_counts,
@@ -101,6 +106,8 @@ impl StageExecutor {
         }
     }
 
+    /// Execute this stage
+    /// TODO: needs better description
     pub fn execute(&mut self, resources: &Resources, world: &World) {
         let systems = &mut self.systems;
         let static_dependancy_counts = &self.static_dependancy_counts;
@@ -125,6 +132,10 @@ impl StageExecutor {
                 // if the archetype sets intersect,
                 // then we can move the dynamic dependant into the static dependants set
                 if !other.accesses_archetypes().is_disjoint(archetypes) {
+                    log::trace!(
+                        "Interception, adding static dep?, depcount = {}",
+                        static_dependancy_counts[dep].load(Ordering::SeqCst)
+                    );
                     static_dep.push(dep);
                     dyn_dep.swap_remove(i);
                     static_dependancy_counts[dep].fetch_add(1, Ordering::SeqCst);
@@ -134,6 +145,7 @@ impl StageExecutor {
 
         // initialize dependancy tracking
         for (i, count) in static_dependancy_counts.iter().enumerate() {
+            log::trace!("STORE: {}, {}", i, count.load(Ordering::SeqCst));
             awaiting[i].store(count.load(Ordering::SeqCst), Ordering::SeqCst);
         }
 
@@ -148,18 +160,28 @@ impl StageExecutor {
             });
     }
 
+    /// Recursively execute through the generated depedency cascade and exhaust it.
     fn run_recursive(&self, i: usize, resources: &Resources, world: &World) {
+        log::trace!("run_recursive");
         self.systems[i].run(resources, world);
 
         // notify dependants of the completion of this dependancy
         // execute all systems that became available upon the completion of this system
         self.static_dependants[i]
             .par_iter()
-            .filter(|dep| self.awaiting[**dep].fetch_sub(1, Ordering::SeqCst) == 0)
-            .for_each(|dep| self.run_recursive(*dep, resources, world));
+            .filter(|dep| {
+                let fetch = self.awaiting[**dep].fetch_sub(1, Ordering::SeqCst);
+                log::trace!("filter dep: {:?} = {}", dep, fetch);
+                fetch == 0
+            })
+            .for_each(|dep| {
+                log::trace!("run_recursive dep: {:?}", dep);
+                self.run_recursive(*dep, resources, world)
+            });
     }
 }
 
+/// Trait describing a schedulable type. This is implemented by `System`
 trait Schedulable: Sync + Send {
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
     fn writes(&self) -> (&[TypeId], &[ComponentTypeId]);
@@ -168,6 +190,7 @@ trait Schedulable: Sync + Send {
     fn run(&self, resources: &Resources, world: &World);
 }
 
+/// Structure used by `SystemAccess` for describing access to the provided `T`
 #[derive(Derivative, Debug, Clone)]
 #[derivative(Default(bound = ""))]
 pub struct Access<T> {
@@ -175,6 +198,7 @@ pub struct Access<T> {
     writes: Vec<T>,
 }
 
+/// Structure describing the resource and component access conditions of the system.
 #[derive(Derivative, Debug, Clone)]
 #[derivative(Default(bound = ""))]
 pub struct SystemAccess {
@@ -294,7 +318,7 @@ macro_rules! impl_queryset_tuple {
                 $([<$ty V>]: for<'v> View<'v>,)*
                 $([<$ty F>]: EntityFilter + Send + Sync,)*
             {
-                type PreparedQueries = ($(PreparedQuery<[<$ty V>], [<$ty F>]>, )* );
+                type PreparedQueries = ( $(PreparedQuery<[<$ty V>], [<$ty F>]>, )*  );
                 fn filter_archetypes(&mut self, world: &World, bitset: &mut BitSet) {
                     let ($($ty,)*) = self;
 
@@ -312,6 +336,23 @@ macro_rules! impl_queryset_tuple {
     };
 }
 
+impl<AV, AF> QuerySet for Query<AV, AF>
+where
+    AV: for<'v> View<'v>,
+    AF: EntityFilter + Send + Sync,
+{
+    type PreparedQueries = PreparedQuery<AV, AF>;
+    fn filter_archetypes(&mut self, world: &World, bitset: &mut BitSet) {
+        let storage = world.storage();
+        self.filter.iter_archetype_indexes(storage).for_each(|id| {
+            bitset.insert(id);
+        });
+    }
+    unsafe fn prepare(&mut self, world: &World) -> Self::PreparedQueries {
+        PreparedQuery::<AV, AF>::new(world, self)
+    }
+}
+
 impl_queryset_tuple!(A);
 impl_queryset_tuple!(A, B);
 impl_queryset_tuple!(A, B, C);
@@ -320,6 +361,16 @@ impl_queryset_tuple!(A, B, C, D, E);
 impl_queryset_tuple!(A, B, C, D, E, F);
 impl_queryset_tuple!(A, B, C, D, E, F, G);
 
+/// The concrete type which contains the system closure provided by the user.  This struct should
+/// not be instantiated directly, and instead should be created using `SystemBuilder`.
+///
+/// Implements `Schedulable` which is consumable by the `StageExecutor`, executing the closure.
+///
+/// Also handles caching of archetype information in a `BitSet`, as well as maintaining the provided
+/// information about what queries this system will run and, as a result, its data access.
+///
+/// Queries are stored generically within this struct, and the `PreparedQuery` types are generated
+/// on each `run` call, wrapping the world and providing the set to the user in their closure.
 struct System<R, Q, F>
 where
     R: Accessor,
@@ -370,6 +421,38 @@ where
 // for this system. Access types are instead stored and abstracted in the top level vec here
 // so the underlying Accessor type functions from the queries don't need to allocate.
 // Otherwise, this leads to excessive alloaction for every call to reads/writes
+/// The core builder of `System` types, which are systems within Legion. Systems are implemented
+/// as singular closures for a given system - providing queries which should be cached for that
+/// system, as well as resource access and other metadata.
+/// ```rust
+/// # use legion::prelude::*;
+/// # use legion::resources::ResourceAccessType;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Velocity;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Model;
+/// #[derive(Copy, Clone, Debug, PartialEq)]
+/// struct Static;
+///
+///  let mut system_one = SystemBuilder::<()>::new("TestSystem")
+///            .with_resource::<TestResource>(ResourceAccessType::Read)
+///            .with_query(<(Read<Position>, Tagged<Model>)>::query()
+///                         .filter(!tag::<Static>() | changed::<Position>()))
+///            .build(move |_resource, queries| {
+///                println!("Hello world");
+///               let mut count = 0;
+///                {
+///                    for (entity, pos) in queries.iter_entities() {
+///                        assert_eq!(expected.get(&entity).unwrap().0, *pos);
+///                        count += 1;
+///                    }
+///                }
+///
+///                assert_eq!(components.len(), count);
+///            });
+/// ```
 struct SystemBuilder<Q = (), R = ()> {
     name: String,
 
@@ -478,7 +561,51 @@ mod tests {
     struct TestResource(pub i32);
 
     #[test]
-    fn builder_crate_and_execute() {
+    fn builder_schedule_execute() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+        let resources = Resources::default();
+
+        let components = vec![
+            (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
+        ];
+
+        let mut expected = HashMap::<Entity, (Pos, Vel)>::new();
+
+        for (i, e) in world.insert((), components.clone()).iter().enumerate() {
+            if let Some((pos, rot)) = components.get(i) {
+                expected.insert(*e, (*pos, *rot));
+            }
+        }
+
+        let mut system_one = SystemBuilder::<()>::new("TestSystem1")
+            .with_resource::<TestResource>(ResourceAccessType::Read)
+            .with_query(Read::<Pos>::query())
+            .with_query(Read::<Vel>::query())
+            .build(move |_resource, queries| {
+                log::trace!("TestSystem1");
+            });
+
+        let mut system_two = SystemBuilder::<()>::new("TestSystem2")
+            .with_resource::<TestResource>(ResourceAccessType::Read)
+            .with_query(Read::<Vel>::query())
+            .build(move |_resource, queries| {
+                log::trace!("TestSystem2");
+            });
+
+        let systems = vec![system_one, system_two];
+
+        let mut executor = StageExecutor::new(systems);
+        executor.execute(&resources, &world);
+    }
+
+    #[test]
+    fn builder_create_and_execute() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let universe = Universe::new();
         let mut world = universe.create_world();
         let resources = Resources::default();
@@ -501,7 +628,6 @@ mod tests {
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
             .build(move |_resource, queries| {
-                println!("Hello world");
                 let mut count = 0;
                 {
                     for (entity, pos) in queries.0.iter_entities() {
