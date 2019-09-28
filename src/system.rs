@@ -1,7 +1,7 @@
 use crate::borrow::AtomicRefCell;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::filter::EntityFilter;
-use crate::query::{ChunkEntityIter, ChunkViewIter, Query, View};
+use crate::query::{Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, View};
 use crate::resources::{Accessor, Resource, ResourceAccessType, Resources};
 use crate::storage::ComponentTypeId;
 use crate::world::World;
@@ -13,7 +13,6 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::repeat;
-use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Stages represent discrete steps of a game's loop, such as "start", "update", "draw", "end", etc.
@@ -216,18 +215,18 @@ where
         }
     }
 
-    // those methods are not unsafe, because we guarantee that `PreparedQuery` lifetime is never actually
+    // These methods are not unsafe, because we guarantee that `PreparedQuery` lifetime is never actually
     // in user's hands and access to internal pointers is impossible. There is no way to move the object out
     // of mutable reference through public API, because there is no way to get access to more than a single instance at a time.
     // The unsafety is an implementation detail. It can be fully safe once GATs are in the language.
+    /// Gets an iterator which iterates through all chunks that match the query.
     pub fn iter_chunks<'a, 'b>(
         &'b mut self,
     ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
-        unsafe { 
-            (&mut *self.query).iter_chunks(&*self.world)
-        }
+        unsafe { (&mut *self.query).iter_chunks(&*self.world) }
     }
 
+    /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     pub fn iter_entities<'a, 'b>(
         &'b mut self,
     ) -> ChunkEntityIter<
@@ -235,9 +234,45 @@ where
         V,
         ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
     > {
-        unsafe {
-            (&mut *self.query).iter_entities(&*self.world)
-        }
+        unsafe { (&mut *self.query).iter_entities(&*self.world) }
+    }
+
+    /// Gets an iterator which iterates through all entity data that matches the query.
+    pub fn iter<'a, 'data>(
+        &'a mut self,
+    ) -> ChunkDataIter<
+        'data,
+        V,
+        ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+    > {
+        unsafe { (&mut *self.query).iter(&*self.world) }
+    }
+
+    /// Iterates through all entity data that matches the query.
+    pub fn for_each<'a, 'data, T>(&'a mut self, mut f: T)
+    where
+        T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
+    {
+        self.iter().for_each(&mut f);
+    }
+
+    /// Iterates through all entity data that matches the query in parallel.
+    #[cfg(feature = "par-iter")]
+    pub fn par_for_each<'a, T>(&'a mut self, f: T)
+    where
+        T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
+    {
+        self.par_iter_chunks().for_each(|mut chunk| {
+            for data in chunk.iter() {
+                f(data);
+            }
+        });
+    }
+
+    /// Gets a parallel iterator of chunks that match the query.
+    #[cfg(feature = "par-iter")]
+    pub fn par_iter_chunks<'a>(&'a mut self) -> impl ParallelIterator<Item = Chunk<'a, V>> {
+        self.iter_chunks().par_bridge()
     }
 }
 
@@ -260,7 +295,14 @@ macro_rules! impl_queryset_tuple {
                 $([<$ty F>]: EntityFilter + Send + Sync,)*
             {
                 type PreparedQueries = ($(PreparedQuery<[<$ty V>], [<$ty F>]>, )* );
-                fn filter_archetypes(&mut self, _: &World, _: &mut BitSet) {}
+                fn filter_archetypes(&mut self, world: &World, bitset: &mut BitSet) {
+                    let ($($ty,)*) = self;
+
+                    $(
+                        let storage = world.storage();
+                        $ty.filter.iter_archetype_indexes(storage).for_each(|id| { bitset.insert(id); });
+                    )*
+                }
                 unsafe fn prepare(&mut self, world: &World) -> Self::PreparedQueries {
                     let ($($ty,)*) = self;
                     ($(PreparedQuery::<[<$ty V>], [<$ty F>]>::new(world, $ty),)*)
@@ -270,13 +312,13 @@ macro_rules! impl_queryset_tuple {
     };
 }
 
-// impl_queryset_tuple!(A);
+impl_queryset_tuple!(A);
 impl_queryset_tuple!(A, B);
-// impl_queryset_tuple!(A, B, C);
-// impl_queryset_tuple!(A, B, C, D);
-//impl_queryset_tuple!(A, B, C, D, E);
-//impl_queryset_tuple!(A, B, C, D, E, F);
-//impl_queryset_tuple!(A, B, C, D, E, F, G);
+impl_queryset_tuple!(A, B, C);
+impl_queryset_tuple!(A, B, C, D);
+impl_queryset_tuple!(A, B, C, D, E);
+impl_queryset_tuple!(A, B, C, D, E, F);
+impl_queryset_tuple!(A, B, C, D, E, F, G);
 
 struct System<R, Q, F>
 where
@@ -323,7 +365,6 @@ where
         (self.run_fn)(resources, &mut prepared_queries);
     }
 }
-
 
 // This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
 // for this system. Access types are instead stored and abstracted in the top level vec here
@@ -403,7 +444,12 @@ where
     where
         <R as ConsFlatten>::Output: Accessor + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
-        F: Fn(<<R as ConsFlatten>::Output as Accessor>::Output, &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries) + Send + Sync + 'static,
+        F: Fn(
+                <<R as ConsFlatten>::Output as Accessor>::Output,
+                &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
+            ) + Send
+            + Sync
+            + 'static,
     {
         Box::new(System {
             run_fn,
@@ -450,7 +496,7 @@ mod tests {
             }
         }
 
-        let system = SystemBuilder::<()>::new("TestSystem")
+        let mut system = SystemBuilder::<()>::new("TestSystem")
             .with_resource::<TestResource>(ResourceAccessType::Read)
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
@@ -459,14 +505,14 @@ mod tests {
                 let mut count = 0;
                 {
                     for (entity, pos) in queries.0.iter_entities() {
-                       assert_eq!(expected.get(&entity).unwrap().0, *pos);
-                       count += 1;
+                        assert_eq!(expected.get(&entity).unwrap().0, *pos);
+                        count += 1;
                     }
                 }
 
                 assert_eq!(components.len(), count);
             });
-
+        system.prepare(&world);
         system.run(&resources, &world);
     }
 }

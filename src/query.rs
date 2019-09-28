@@ -717,7 +717,7 @@ where
 #[derivative(Clone(bound = "F: Clone"))]
 pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
     view: PhantomData<V>,
-    filter: F,
+    pub(crate) filter: F,
 }
 
 impl<V, F> Query<V, F>
