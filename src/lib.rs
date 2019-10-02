@@ -235,8 +235,10 @@ pub mod world;
 mod cons;
 
 pub mod prelude {
-    pub use crate::entity::Entity;
-    pub use crate::filter::filter_fns::*;
-    pub use crate::query::{IntoQuery, Query, Read, Tagged, Write};
-    pub use crate::world::{Universe, World};
+  pub use crate::entity::Entity;
+  pub use crate::filter::filter_fns::*;
+  pub use crate::query::{IntoQuery, Query, Read, Tagged, Write};
+  pub use crate::resource::{ResourceAccessType, Resources};
+  pub use crate::system::{StageExecutor, System, SystemBuilder};
+  pub use crate::world::{Universe, World};
 }
