@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq {}
 
 /// Executes all systems that are to be run within a single given stage.
-struct StageExecutor {
+pub struct StageExecutor {
     systems: Vec<Box<dyn Schedulable>>,
     static_dependants: Vec<Vec<usize>>,
     dynamic_dependants: Vec<Vec<usize>>,
@@ -178,7 +178,7 @@ impl StageExecutor {
 }
 
 /// Trait describing a schedulable type. This is implemented by `System`
-trait Schedulable: Sync + Send {
+pub trait Schedulable: Sync + Send {
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
     fn writes(&self) -> (&[TypeId], &[ComponentTypeId]);
     fn prepare(&mut self, world: &World);
@@ -367,7 +367,7 @@ impl_queryset_tuple!(A, B, C, D, E, F, G);
 ///
 /// Queries are stored generically within this struct, and the `PreparedQuery` types are generated
 /// on each `run` call, wrapping the world and providing the set to the user in their closure.
-struct System<R, Q, F>
+pub struct System<R, Q, F>
 where
     R: Accessor,
     Q: QuerySet,
@@ -449,7 +449,7 @@ where
 ///                assert_eq!(components.len(), count);
 ///            });
 /// ```
-struct SystemBuilder<Q = (), R = ()> {
+pub struct SystemBuilder<Q = (), R = ()> {
     name: String,
 
     queries: Q,
@@ -465,7 +465,7 @@ where
     R: 'static + Send + ConsFlatten,
 {
     #[allow(clippy::new_ret_no_self)]
-    fn new(name: &str) -> SystemBuilder {
+    pub fn new(name: &str) -> SystemBuilder {
         SystemBuilder {
             name: name.to_string(),
             queries: (),
@@ -496,7 +496,7 @@ where
         }
     }
 
-    fn with_resource<T>(
+    pub fn with_resource<T>(
         mut self,
         access_type: ResourceAccessType,
     ) -> SystemBuilder<Q, <R as ConsAppend<()>>::Output>
@@ -519,7 +519,7 @@ where
         }
     }
 
-    fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
+    pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: Accessor + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
