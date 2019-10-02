@@ -1,4 +1,4 @@
-use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
+use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMapMut, Shared};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -27,17 +27,16 @@ impl<'a, T: Resource> Deref for Read<'a, T> {
 /// Hashmap. For now, I just pass the ref directly out, and perform the downcasting on Deref. This
 /// is not optimal, but it is a hack for this code to work for now until someone smarter can fix.
 pub struct Write<'a, T: Resource> {
-    inner: RefMut<'a, Exclusive<'a>, Box<dyn Resource>>,
-    _marker: PhantomData<T>,
+    inner: RefMapMut<'a, Exclusive<'a>, &'a mut T>,
 }
 impl<'a, T: Resource> Deref for Write<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target { Any::downcast_ref::<T>(self.inner.deref()).unwrap() }
+    fn deref(&self) -> &Self::Target { self.inner.deref() }
 }
 
 impl<'a, T: Resource> DerefMut for Write<'a, T> {
-    fn deref_mut(&mut self) -> &mut T { Any::downcast_mut::<T>(self.inner.deref_mut()).unwrap() }
+    fn deref_mut(&mut self) -> &mut T { self.inner.deref_mut() }
 }
 
 #[derive(Default)]
@@ -55,22 +54,24 @@ impl Resources {
     }
 
     pub fn get<T: Resource>(&self) -> Option<Read<'_, T>> {
-        if let Some(value) = self.storage.get(&TypeId::of::<T>()) {
-            Some(Read {
-                inner: value.get().map(|v| Any::downcast_ref::<&T>(v).unwrap()),
-            })
-        } else {
-            None
-        }
+        Some(Read {
+            inner: self.storage.get(&TypeId::of::<T>())?.get().map(|v| {
+                let r = v.as_ref();
+                unsafe { std::mem::transmute(v) }
+            }),
+        })
     }
 
     pub fn get_mut<T: Resource>(&self) -> Option<Write<'_, T>> {
-        let value = self.storage.get(&TypeId::of::<T>()).unwrap();
-        let value = unsafe { &*(value as *const AtomicRefCell<Box<dyn Resource>>) };
-        let r = value.get_mut();
         Some(Write {
-            inner: r,
-            _marker: Default::default(),
+            inner: self
+                .storage
+                .get(&TypeId::of::<T>())?
+                .get_mut()
+                .map_into(|v| {
+                    let r = v.as_ref();
+                    unsafe { std::mem::transmute(v) }
+                }),
         })
     }
 }
@@ -138,6 +139,6 @@ mod tests {
         });
 
         assert_eq!(resources.get::<TestOne>().unwrap().value, "poop");
-        assert_eq!(resources.get::<TestOne>().unwrap().value, "balls");
+        assert_eq!(resources.get::<TestTwo>().unwrap().value, "balls");
     }
 }
