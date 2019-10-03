@@ -4,7 +4,7 @@ use crate::cons::{ConsAppend, ConsFlatten};
 use crate::filter::EntityFilter;
 use crate::query::{Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, View};
 use crate::resource::{Accessor, Resource, ResourceAccessType, Resources};
-use crate::storage::ComponentTypeId;
+use crate::storage::{ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
 use derivative::Derivative;
@@ -195,6 +195,7 @@ pub struct Access<T> {
 pub struct SystemAccess {
     pub resources: Access<TypeId>,
     pub components: Access<ComponentTypeId>,
+    pub tags: Access<TagTypeId>,
 }
 
 /// * implement QuerySet for tuples of queries
@@ -366,7 +367,7 @@ pub struct System<R, Q, F>
 where
     R: Accessor,
     Q: QuerySet,
-    F: Fn(R::Output, &mut <Q as QuerySet>::PreparedQueries) -> Option<CommandBuffer>
+    F: Fn(&mut CommandBuffer, R::Output, &mut <Q as QuerySet>::PreparedQueries)
         + Send
         + Sync
         + 'static,
@@ -379,13 +380,16 @@ where
     // These are stored statically instead of always iterated and created from the
     // query types, which would make allocations every single request
     access: SystemAccess,
+
+    // We pre-allocate a commnad buffer for ourself. Writes are self-draining so we never have to rellocate.
+    command_buffer: AtomicRefCell<CommandBuffer>,
 }
 
 impl<R, Q, F> Schedulable for System<R, Q, F>
 where
     R: Accessor,
     Q: QuerySet,
-    F: Fn(R::Output, &mut <Q as QuerySet>::PreparedQueries) -> Option<CommandBuffer>
+    F: Fn(&mut CommandBuffer, R::Output, &mut <Q as QuerySet>::PreparedQueries)
         + Send
         + Sync
         + 'static,
@@ -410,7 +414,15 @@ where
         let mut queries = self.queries.get_mut();
         let mut prepared_queries = unsafe { queries.prepare(world) };
 
-        (self.run_fn)(resources, &mut prepared_queries);
+        // Give the command buffer a new entity block.
+        // This should usually just pull a free block, or allocate a new one...
+        // TODO: The BlockAllocator should *ensure* keeping at least 1 free block so this prevents an allocation
+
+        (self.run_fn)(
+            &mut self.command_buffer.get_mut(),
+            resources,
+            &mut prepared_queries,
+        );
     }
 }
 
@@ -525,10 +537,10 @@ where
         <R as ConsFlatten>::Output: Accessor + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
         F: Fn(
+                &mut CommandBuffer,
                 <<R as ConsFlatten>::Output as Accessor>::Output,
                 &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
-            ) -> Option<CommandBuffer>
-            + Send
+            ) + Send
             + Sync
             + 'static,
     {
@@ -540,7 +552,9 @@ where
             access: SystemAccess {
                 resources: self.resource_access,
                 components: self.component_access,
+                tags: Access::default(),
             },
+            command_buffer: AtomicRefCell::new(CommandBuffer::default()),
         })
     }
 }
@@ -594,28 +608,24 @@ mod tests {
             .with_resource::<TestResource>(ResourceAccessType::Read)
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(move |_resource, _queries| {
+            .build(move |_commands, _resource, _queries| {
                 log::trace!("TestSystem1");
                 system_one_runs
                     .lock()
                     .unwrap()
                     .push(TestSystems::TestSystemOne);
-
-                None
             });
 
         let system_two_runs = runs.clone();
         let system_two = SystemBuilder::<()>::new("TestSystem2")
             .with_resource::<TestResource>(ResourceAccessType::Read)
             .with_query(Read::<Vel>::query())
-            .build(move |_resource, _queries| {
+            .build(move |_commands, _resource, _queries| {
                 log::trace!("TestSystem2");
                 system_two_runs
                     .lock()
                     .unwrap()
                     .push(TestSystems::TestSystemTwo);
-
-                None
             });
 
         let order = vec![TestSystems::TestSystemOne, TestSystems::TestSystemTwo];
@@ -652,7 +662,7 @@ mod tests {
             .with_resource::<TestResource>(ResourceAccessType::Read)
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(move |_resource, queries| {
+            .build(move |_commands, _resource, queries| {
                 let mut count = 0;
                 {
                     for (entity, pos) in queries.0.iter_entities() {
@@ -662,8 +672,6 @@ mod tests {
                 }
 
                 assert_eq!(components.len(), count);
-
-                None
             });
         system.prepare(&world);
         system.run(&resources, &world);

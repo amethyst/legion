@@ -31,6 +31,7 @@ paste = "0.1"
 log = "0.4"
 
 [dev-dependencies]
+env_logger = "0.7"
 criterion = "0.3"
 cgmath = "0.17"
 

@@ -81,7 +81,7 @@ pub struct WorldId(usize);
 pub struct World {
     id: WorldId,
     storage: UnsafeCell<Storage>,
-    entity_allocator: EntityAllocator,
+    pub(crate) entity_allocator: EntityAllocator,
     defrag_progress: usize,
 
     #[cfg(feature = "events")]
