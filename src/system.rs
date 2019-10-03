@@ -1,4 +1,5 @@
 use crate::borrow::AtomicRefCell;
+use crate::command::CommandBuffer;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::filter::EntityFilter;
 use crate::query::{Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, View};
@@ -141,7 +142,6 @@ impl StageExecutor {
 
         // initialize dependancy tracking
         for (i, count) in static_dependancy_counts.iter().enumerate() {
-            log::trace!("STORE: {}, {}", i, count.load(Ordering::SeqCst));
             awaiting[i].store(count.load(Ordering::SeqCst), Ordering::SeqCst);
         }
 
@@ -158,7 +158,6 @@ impl StageExecutor {
 
     /// Recursively execute through the generated depedency cascade and exhaust it.
     fn run_recursive(&self, i: usize, resources: &Resources, world: &World) {
-        log::trace!("run_recursive");
         self.systems[i].run(resources, world);
 
         // notify dependants of the completion of this dependancy
@@ -167,13 +166,9 @@ impl StageExecutor {
             .par_iter()
             .filter(|dep| {
                 let fetch = self.awaiting[**dep].fetch_sub(1, Ordering::SeqCst);
-                log::trace!("filter dep: {:?} = {}", dep, fetch);
-                fetch == 0
+                fetch - 1 == 0
             })
-            .for_each(|dep| {
-                log::trace!("run_recursive dep: {:?}", dep);
-                self.run_recursive(*dep, resources, world)
-            });
+            .for_each(|dep| self.run_recursive(*dep, resources, world));
     }
 }
 
@@ -291,7 +286,7 @@ where
 
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
-    pub fn par_iter_chunks<'a>(&'a mut self) -> impl ParallelIterator<Item = Chunk<'a, V>> {
+    pub fn par_iter_chunks(&mut self) -> impl ParallelIterator<Item = Chunk<'_, V>> {
         self.iter_chunks().par_bridge()
     }
 }
@@ -371,7 +366,10 @@ pub struct System<R, Q, F>
 where
     R: Accessor,
     Q: QuerySet,
-    F: Fn(R::Output, &mut <Q as QuerySet>::PreparedQueries) + Send + Sync + 'static,
+    F: Fn(R::Output, &mut <Q as QuerySet>::PreparedQueries) -> Option<CommandBuffer>
+        + Send
+        + Sync
+        + 'static,
 {
     resources: R,
     queries: AtomicRefCell<Q>,
@@ -387,7 +385,10 @@ impl<R, Q, F> Schedulable for System<R, Q, F>
 where
     R: Accessor,
     Q: QuerySet,
-    F: Fn(R::Output, &mut <Q as QuerySet>::PreparedQueries) + Send + Sync + 'static,
+    F: Fn(R::Output, &mut <Q as QuerySet>::PreparedQueries) -> Option<CommandBuffer>
+        + Send
+        + Sync
+        + 'static,
 {
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
         (&self.access.resources.reads, &self.access.components.reads)
@@ -526,7 +527,8 @@ where
         F: Fn(
                 <<R as ConsFlatten>::Output as Accessor>::Output,
                 &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
-            ) + Send
+            ) -> Option<CommandBuffer>
+            + Send
             + Sync
             + 'static,
     {
@@ -548,6 +550,7 @@ mod tests {
     use super::*;
     use crate::prelude::*;
     use crate::resource::{ResourceAccessType, Resources};
+    use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
@@ -577,25 +580,51 @@ mod tests {
             }
         }
 
-        let mut system_one = SystemBuilder::<()>::new("TestSystem1")
+        #[derive(Debug, Eq, PartialEq)]
+        pub enum TestSystems {
+            TestSystemOne,
+            TestSystemTwo,
+            TestSystemThree,
+        }
+
+        let runs = Arc::new(Mutex::new(Vec::new()));
+
+        let system_one_runs = runs.clone();
+        let system_one = SystemBuilder::<()>::new("TestSystem1")
             .with_resource::<TestResource>(ResourceAccessType::Read)
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(move |_resource, queries| {
+            .build(move |_resource, _queries| {
                 log::trace!("TestSystem1");
+                system_one_runs
+                    .lock()
+                    .unwrap()
+                    .push(TestSystems::TestSystemOne);
+
+                None
             });
 
-        let mut system_two = SystemBuilder::<()>::new("TestSystem2")
+        let system_two_runs = runs.clone();
+        let system_two = SystemBuilder::<()>::new("TestSystem2")
             .with_resource::<TestResource>(ResourceAccessType::Read)
             .with_query(Read::<Vel>::query())
-            .build(move |_resource, queries| {
+            .build(move |_resource, _queries| {
                 log::trace!("TestSystem2");
+                system_two_runs
+                    .lock()
+                    .unwrap()
+                    .push(TestSystems::TestSystemTwo);
+
+                None
             });
+
+        let order = vec![TestSystems::TestSystemOne, TestSystems::TestSystemTwo];
 
         let systems = vec![system_one, system_two];
 
         let mut executor = StageExecutor::new(systems);
         executor.execute(&resources, &world);
+        assert_eq!(order, *(runs.lock().unwrap()));
     }
 
     #[test]
@@ -633,6 +662,8 @@ mod tests {
                 }
 
                 assert_eq!(components.len(), count);
+
+                None
             });
         system.prepare(&world);
         system.run(&resources, &world);

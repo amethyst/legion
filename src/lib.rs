@@ -224,6 +224,8 @@
 #![allow(dead_code)]
 
 pub mod borrow;
+pub mod command;
+mod cons;
 pub mod entity;
 pub mod filter;
 pub mod query;
@@ -232,13 +234,14 @@ pub mod storage;
 pub mod system;
 pub mod world;
 
-mod cons;
+#[cfg(feature = "events")]
+pub mod event;
 
 pub mod prelude {
-  pub use crate::entity::Entity;
-  pub use crate::filter::filter_fns::*;
-  pub use crate::query::{IntoQuery, Query, Read, Tagged, Write};
-  pub use crate::resource::{ResourceAccessType, Resources};
-  pub use crate::system::{StageExecutor, System, SystemBuilder};
-  pub use crate::world::{Universe, World};
+    pub use crate::entity::Entity;
+    pub use crate::filter::filter_fns::*;
+    pub use crate::query::{IntoQuery, Query, Read, Tagged, Write};
+    pub use crate::resource::{ResourceAccessType, Resources};
+    pub use crate::system::{StageExecutor, System, SystemBuilder};
+    pub use crate::world::{Universe, World};
 }

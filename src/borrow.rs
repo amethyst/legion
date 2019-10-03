@@ -20,6 +20,9 @@ impl<T> AtomicRefCell<T> {
     #[inline(always)]
     pub fn get<'a>(&'a self) -> Ref<'a, Shared, T> { self.try_get().unwrap() }
 
+    /// Unwrap the value from the RefCell and kill it, returning the value.
+    pub fn into_inner(self) -> T { self.value.into_inner() }
+
     #[cfg(debug_assertions)]
     pub fn try_get<'a>(&'a self) -> Result<Ref<'a, Shared<'a>, T>, &'static str> {
         loop {

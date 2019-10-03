@@ -2,7 +2,6 @@ use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMapMut, Shared};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
@@ -14,6 +13,12 @@ pub enum ResourceAccessType {
 pub trait Resource: 'static + Any + Send + Sync {}
 impl<T> Resource for T where T: 'static + Any + Send + Sync {}
 
+pub trait AccessType {
+    fn access_type() -> ResourceAccessType;
+    fn is_read() -> bool;
+    fn is_write() -> bool;
+}
+
 pub struct Read<'a, T: Resource> {
     inner: Ref<'a, Shared<'a>, &'a T>,
 }
@@ -22,10 +27,12 @@ impl<'a, T: Resource> Deref for Read<'a, T> {
 
     fn deref(&self) -> &Self::Target { self.inner.deref() }
 }
+impl<'a, T: Resource> AccessType for Read<'a, T> {
+    fn access_type() -> ResourceAccessType { ResourceAccessType::Read }
+    fn is_read() -> bool { true }
+    fn is_write() -> bool { false }
+}
 
-/// TODO: RefMut::map_into seems to have borrowing issues when used in conjunction with this trait
-/// Hashmap. For now, I just pass the ref directly out, and perform the downcasting on Deref. This
-/// is not optimal, but it is a hack for this code to work for now until someone smarter can fix.
 pub struct Write<'a, T: Resource> {
     inner: RefMapMut<'a, Exclusive<'a>, &'a mut T>,
 }
@@ -39,25 +46,29 @@ impl<'a, T: Resource> DerefMut for Write<'a, T> {
     fn deref_mut(&mut self) -> &mut T { self.inner.deref_mut() }
 }
 
+impl<'a, T: Resource> AccessType for Write<'a, T> {
+    fn access_type() -> ResourceAccessType { ResourceAccessType::Write }
+    fn is_read() -> bool { false }
+    fn is_write() -> bool { true }
+}
+
 #[derive(Default)]
 pub struct Resources {
     storage: HashMap<TypeId, AtomicRefCell<Box<dyn Resource>>>,
 }
 
 impl Resources {
-    pub fn insert<T: Resource>(&mut self, value: T) -> Option<T> {
+    pub fn insert<T: Resource>(&mut self, value: T) {
+        // We cant return the original inserted value becase we wrapped it in a box
+        // I think anyways?
         self.storage
             .insert(TypeId::of::<T>(), AtomicRefCell::new(Box::new(value)));
-
-        // TODO: Return the existing value
-        None
     }
 
     pub fn get<T: Resource>(&self) -> Option<Read<'_, T>> {
         Some(Read {
-            inner: self.storage.get(&TypeId::of::<T>())?.get().map(|v| {
-                let r = v.as_ref();
-                unsafe { std::mem::transmute(v) }
+            inner: self.storage.get(&TypeId::of::<T>())?.get().map(|v| unsafe {
+                &*(v as *const std::boxed::Box<(dyn Resource + 'static)> as *const &T)
             }),
         })
     }
@@ -68,9 +79,8 @@ impl Resources {
                 .storage
                 .get(&TypeId::of::<T>())?
                 .get_mut()
-                .map_into(|v| {
-                    let r = v.as_ref();
-                    unsafe { std::mem::transmute(v) }
+                .map_into(|v| unsafe {
+                    &mut *(v as *mut std::boxed::Box<(dyn Resource + 'static)> as *mut T)
                 }),
         })
     }
@@ -98,9 +108,9 @@ macro_rules! impl_resource_tuple {
         {
             type Output = ($( $ty, )*);
 
-                fn reads(&self) -> Vec<TypeId> { vec![$( TypeId::of::<$ty>()),*] }
-                fn writes(&self) -> Vec<TypeId> { vec![$( TypeId::of::<$ty>()),*] }
-                fn fetch(_: &Resources) -> ($( $ty, )*) { unimplemented!() }
+            fn reads(&self) -> Vec<TypeId> { vec![$( TypeId::of::<$ty>()),*] }
+            fn writes(&self) -> Vec<TypeId> { vec![$( TypeId::of::<$ty>()),*] }
+            fn fetch(_: &Resources) -> ($( $ty, )*) { unimplemented!() }
         }
     };
 }

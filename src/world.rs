@@ -34,6 +34,9 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+#[cfg(feature = "events")]
+use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
+
 /// The `Universe` is a factory for creating `World`s.
 ///
 /// Entities inserted into worlds created within the same universe are guarenteed to have
@@ -42,6 +45,8 @@ use std::sync::Arc;
 pub struct Universe {
     allocator: Arc<Mutex<BlockAllocator>>,
     world_count: AtomicUsize,
+    #[cfg(feature = "events")]
+    channel: Channel<WorldCreatedEvent>,
 }
 
 impl Universe {
@@ -61,6 +66,8 @@ impl Universe {
 impl Default for Universe {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "events")]
+            channel: Channel::default(),
             world_count: AtomicUsize::from(0),
             allocator: Arc::new(Mutex::new(BlockAllocator::new())),
         }
@@ -76,6 +83,9 @@ pub struct World {
     storage: UnsafeCell<Storage>,
     entity_allocator: EntityAllocator,
     defrag_progress: usize,
+
+    #[cfg(feature = "events")]
+    entity_channel: Channel<EntityEvent>,
 }
 
 unsafe impl Send for World {}
@@ -89,6 +99,8 @@ impl World {
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: allocator,
             defrag_progress: 0,
+            #[cfg(feature = "events")]
+            entity_channel: Channel::default(),
         }
     }
 
@@ -166,13 +178,27 @@ impl World {
             }
         }
 
-        self.entity_allocator.allocation_buffer()
+        let entities = self.entity_allocator.allocation_buffer();
+
+        #[cfg(feature = "events")]
+        for entity in entities {
+            self.entity_channel
+                .write(EntityEvent::EntityRemoved(*entity))
+                .unwrap();
+        }
+
+        entities
     }
 
     /// Removes the given `Entity` from the `World`.
     ///
     /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
+        #[cfg(feature = "events")]
+        self.entity_channel
+            .write(EntityEvent::EntityRemoved(entity))
+            .unwrap();
+
         if let Some(location) = self.entity_allocator.delete_entity(entity) {
             // find entity's chunk
             let chunk = self
@@ -791,6 +817,9 @@ mod tuple_impls {
                         while let Some(($( $id, )*)) = { if count == space { None } else { self.iter.next() } } {
                             let entity = allocator.create_entity();
                             entities.push(entity);
+
+                            // TODO: Trigger component addition events here
+
                             $(
                                 let slice = [$id];
                                 $ty.push(&slice);
