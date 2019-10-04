@@ -1,8 +1,8 @@
-use crate::entity::Entity;
+use crate::{entity::Entity, filter::EntityFilter};
 use crossbeam::queue::{ArrayQueue, PopError, PushError};
-
-#[cfg(feature = "par-iter")]
-use rayon::prelude::*;
+use std::marker::PhantomData;
+//#[cfg(feature = "par-iter")]
+//use rayon::prelude::*;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ListenerId(usize);
@@ -59,10 +59,9 @@ pub enum ComponentEvent {
     ComponentRemoved,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EntityEvent {
-    EntityCreated(Entity),
-    EntityRemoved(Entity),
+pub enum EntityEvent<F: EntityFilter> {
+    InScope(Entity, PhantomData<F>),
+    OutScope(Entity, PhantomData<F>),
 }
 
 #[cfg(test)]

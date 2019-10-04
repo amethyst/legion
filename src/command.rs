@@ -289,7 +289,7 @@ mod tests {
         let mut query = Read::<Pos>::query();
 
         let mut count = 0;
-        for (entity, pos) in query.iter_entities(&world) {
+        for (_, _) in query.iter_entities(&world) {
             //assert_eq!(expected.get(&entity).unwrap().0, *pos);
             count += 1;
         }
@@ -324,7 +324,7 @@ mod tests {
         let mut query = Read::<Pos>::query();
 
         let mut count = 0;
-        for (entity, pos) in query.iter_entities(&world) {
+        for (_, _) in query.iter_entities(&world) {
             //assert_eq!(expected.get(&entity).unwrap().0, *pos);
             count += 1;
         }

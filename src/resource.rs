@@ -20,13 +20,14 @@ pub trait AccessType {
 }
 
 pub trait Accessor: Send + Sync {
-    type Output;
+    type Output: Accessor;
+
     fn reads() -> Vec<TypeId>;
     fn writes() -> Vec<TypeId>;
     fn fetch(resources: &Resources) -> Self::Output;
 }
 
-pub struct Read<'a, T: Resource> {
+pub struct Read<'a, T: 'a + Resource> {
     inner: Ref<'a, Shared<'a>, &'a T>,
 }
 impl<'a, T: Resource> Deref for Read<'a, T> {
@@ -34,33 +35,33 @@ impl<'a, T: Resource> Deref for Read<'a, T> {
 
     fn deref(&self) -> &Self::Target { self.inner.deref() }
 }
-impl<'a, T: Resource> AccessType for Read<'a, T> {
+impl<'a, T: 'a + Resource> AccessType for Read<'a, T> {
     fn access_type() -> ResourceAccessType { ResourceAccessType::Read }
     fn is_read() -> bool { true }
     fn is_write() -> bool { false }
 }
-impl<'a, T: Resource> Accessor for Read<'a, T> {
-    type Output = Self;
+impl<'a, T: 'a + Resource> Accessor for Read<'a, T> {
+    type Output = Read<'a, T>;
 
     fn reads() -> Vec<TypeId> { vec![] }
     fn writes() -> Vec<TypeId> { vec![] }
-    fn fetch(resources: &Resources) -> Self::Output { resources.get::<T>().unwrap() }
+    fn fetch(_: &Resources) -> Self::Output { unimplemented!() }
 }
 
 pub struct Write<'a, T: Resource> {
     inner: RefMapMut<'a, Exclusive<'a>, &'a mut T>,
 }
-impl<'a, T: Resource> Deref for Write<'a, T> {
+impl<'a, T: 'a + Resource> Deref for Write<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target { self.inner.deref() }
 }
 
-impl<'a, T: Resource> DerefMut for Write<'a, T> {
+impl<'a, T: 'a + Resource> DerefMut for Write<'a, T> {
     fn deref_mut(&mut self) -> &mut T { self.inner.deref_mut() }
 }
 
-impl<'a, T: Resource> AccessType for Write<'a, T> {
+impl<'a, T: 'a + Resource> AccessType for Write<'a, T> {
     fn access_type() -> ResourceAccessType { ResourceAccessType::Write }
     fn is_read() -> bool { false }
     fn is_write() -> bool { true }
@@ -70,7 +71,7 @@ impl<'a, T: Resource> Accessor for Write<'a, T> {
 
     fn reads() -> Vec<TypeId> { vec![] }
     fn writes() -> Vec<TypeId> { vec![] }
-    fn fetch(resources: &Resources) -> Self::Output { resources.get_mut::<T>().unwrap() }
+    fn fetch(_: &Resources) -> Self::Output { unimplemented!() }
 }
 
 #[derive(Default)]
@@ -112,21 +113,21 @@ impl Accessor for () {
 
     fn reads() -> Vec<TypeId> { vec![] }
     fn writes() -> Vec<TypeId> { vec![] }
-    fn fetch(resources: &Resources) {}
+    fn fetch(_: &Resources) {}
 }
 
 macro_rules! impl_resource_tuple {
     ( $( $ty: ident ),* ) => {
         impl<$( $ty: Resource ),*> Accessor for ($( $ty, )*)
         {
-            type Output = ($( $ty, )*);
-
+            type Output = Self;
             fn reads() -> Vec<TypeId> { vec![$( TypeId::of::<$ty>()),*] }
             fn writes() -> Vec<TypeId> { vec![$( TypeId::of::<$ty>()),*] }
-            fn fetch<(_: &Resources) -> ($( $ty, )*) { unimplemented!() }
+            fn fetch(_: &Resources) -> Self::Output { unimplemented!() }
         }
     };
 }
+//($( $ty, )*)
 
 impl_resource_tuple!(A);
 impl_resource_tuple!(A, B);

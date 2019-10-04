@@ -35,7 +35,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 #[cfg(feature = "events")]
-use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
+use crate::event::{Channel, WorldCreatedEvent};
 
 /// The `Universe` is a factory for creating `World`s.
 ///
@@ -83,9 +83,6 @@ pub struct World {
     storage: UnsafeCell<Storage>,
     pub(crate) entity_allocator: EntityAllocator,
     defrag_progress: usize,
-
-    #[cfg(feature = "events")]
-    entity_channel: Channel<EntityEvent>,
 }
 
 unsafe impl Send for World {}
@@ -99,8 +96,6 @@ impl World {
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: allocator,
             defrag_progress: 0,
-            #[cfg(feature = "events")]
-            entity_channel: Channel::default(),
         }
     }
 
@@ -178,27 +173,13 @@ impl World {
             }
         }
 
-        let entities = self.entity_allocator.allocation_buffer();
-
-        #[cfg(feature = "events")]
-        for entity in entities {
-            self.entity_channel
-                .write(EntityEvent::EntityRemoved(*entity))
-                .unwrap();
-        }
-
-        entities
+        self.entity_allocator.allocation_buffer()
     }
 
     /// Removes the given `Entity` from the `World`.
     ///
     /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
-        #[cfg(feature = "events")]
-        self.entity_channel
-            .write(EntityEvent::EntityRemoved(entity))
-            .unwrap();
-
         if let Some(location) = self.entity_allocator.delete_entity(entity) {
             // find entity's chunk
             let chunk = self
