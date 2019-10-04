@@ -129,7 +129,7 @@ pub struct EntityBuilder<'a> {
 impl<'a> EntityBuilder<'a> {
     fn new(entity: Entity, buffer: &'a mut CommandBuffer) -> Self { Self { entity, buffer } }
 
-    pub fn with_component<C: Component>(mut self, component: C) -> Self {
+    pub fn with_component<C: Component>(self, component: C) -> Self {
         let buffer = self.buffer;
         let entity = self.entity;
         buffer.add_component(self.entity, component);
@@ -137,7 +137,7 @@ impl<'a> EntityBuilder<'a> {
         Self { entity, buffer }
     }
 
-    pub fn with_tag<T: Tag>(mut self, tag: T) -> Self {
+    pub fn with_tag<T: Tag>(self, tag: T) -> Self {
         let buffer = self.buffer;
         let entity = self.entity;
         buffer.add_tag(self.entity, tag);
@@ -146,7 +146,7 @@ impl<'a> EntityBuilder<'a> {
     }
 
     /// This releases the borrow on the CommandBuffer
-    pub fn build(mut self) {}
+    pub fn build(self) {}
 }
 
 enum EntityCommand {
@@ -256,7 +256,6 @@ impl CommandBuffer {
 mod tests {
     use super::*;
     use crate::prelude::*;
-    use std::collections::HashMap;
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
