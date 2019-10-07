@@ -1,4 +1,5 @@
 use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMapMut, Shared};
+use derivative::Derivative;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -11,19 +12,26 @@ pub enum ResourceAccessType {
     Write,
 }
 
-pub struct FetchWrapper<T> {
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
+pub struct ReadWrapper<'a, T> {
     _marker: PhantomData<T>,
-    access_type: ResourceAccessType,
 }
-impl<T: Resource> FetchWrapper<T> {
-    pub fn new(access_type: ResourceAccessType) -> Self {
-        Self {
-            access_type,
-            _marker: Default::default(),
-        }
-    }
+
+impl<'a, T: Resource> Accessor for ReadWrapper<'a, T> {
+    type Output = Read<'a, T>;
+
+    fn reads() -> Vec<TypeId> { vec![] }
+    fn writes() -> Vec<TypeId> { vec![] }
+    fn fetch<'a>(_: &'a Resources) -> Self::Output { unimplemented!() }
 }
-impl<T: Resource> Accessor for FetchWrapper<T> {
+
+#[derive(Derivative)]
+#[derivative(Default(bound = ""))]
+pub struct WriteWrapper<T> {
+    _marker: PhantomData<T>,
+}
+impl<T: Resource> Accessor for WriteWrapper<T> {
     type Output = Self;
 
     fn reads() -> Vec<TypeId> { vec![] }

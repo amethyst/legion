@@ -3,7 +3,9 @@ use crate::command::CommandBuffer;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::filter::EntityFilter;
 use crate::query::{Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, View};
-use crate::resource::{Accessor, FetchWrapper, Resource, ResourceAccessType, Resources};
+use crate::resource::{
+    Accessor, ReadWrapper, Resource, ResourceAccessType, Resources, Write, WriteWrapper,
+};
 use crate::storage::{ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
@@ -509,22 +511,34 @@ where
         }
     }
 
-    pub fn with_resource<T>(
-        mut self,
-        access_type: ResourceAccessType,
-    ) -> SystemBuilder<Q, <R as ConsAppend<FetchWrapper<T>>>::Output>
+    pub fn read_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<ReadWrapper<T>>>::Output>
     where
         T: 'static + Resource,
-        R: ConsAppend<FetchWrapper<T>>,
-        <R as ConsAppend<FetchWrapper<T>>>::Output: ConsFlatten,
+        R: ConsAppend<ReadWrapper<T>>,
+        <R as ConsAppend<ReadWrapper<T>>>::Output: ConsFlatten,
     {
-        match access_type {
-            ResourceAccessType::Read => self.resource_access.reads.push(TypeId::of::<T>()),
-            ResourceAccessType::Write => self.resource_access.writes.push(TypeId::of::<T>()),
-        }
+        self.resource_access.reads.push(TypeId::of::<T>());
 
         SystemBuilder {
-            resources: ConsAppend::append(self.resources, FetchWrapper::<T>::new(access_type)),
+            resources: ConsAppend::append(self.resources, ReadWrapper::<T>::default()),
+            name: self.name,
+            queries: self.queries,
+            resource_access: self.resource_access,
+            component_access: self.component_access,
+        }
+    }
+    pub fn write_resource<T>(
+        mut self,
+    ) -> SystemBuilder<Q, <R as ConsAppend<WriteWrapper<T>>>::Output>
+    where
+        T: 'static + Resource,
+        R: ConsAppend<WriteWrapper<T>>,
+        <R as ConsAppend<WriteWrapper<T>>>::Output: ConsFlatten,
+    {
+        self.resource_access.writes.push(TypeId::of::<T>());
+
+        SystemBuilder {
+            resources: ConsAppend::append(self.resources, WriteWrapper::<T>::default()),
             name: self.name,
             queries: self.queries,
             resource_access: self.resource_access,
@@ -605,7 +619,7 @@ mod tests {
 
         let system_one_runs = runs.clone();
         let system_one = SystemBuilder::<()>::new("TestSystem1")
-            .with_resource::<TestResource>(ResourceAccessType::Read)
+            .read_resource::<TestResource>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
             .build(move |_commands, _resource, _queries| {
@@ -618,7 +632,7 @@ mod tests {
 
         let system_two_runs = runs.clone();
         let system_two = SystemBuilder::<()>::new("TestSystem2")
-            .with_resource::<TestResource>(ResourceAccessType::Read)
+            .read_resource::<TestResource>()
             .with_query(Read::<Vel>::query())
             .build(move |_commands, _resource, _queries| {
                 log::trace!("TestSystem2");
@@ -659,7 +673,7 @@ mod tests {
         }
 
         let mut system = SystemBuilder::<()>::new("TestSystem")
-            .with_resource::<TestResource>(ResourceAccessType::Read)
+            .read_resource::<TestResource>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
             .build(move |_commands, _resource, queries| {
