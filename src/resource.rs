@@ -2,12 +2,33 @@ use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMapMut, Shared};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
+    marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
 pub enum ResourceAccessType {
     Read,
     Write,
+}
+
+pub struct FetchWrapper<T> {
+    _marker: PhantomData<T>,
+    access_type: ResourceAccessType,
+}
+impl<T: Resource> FetchWrapper<T> {
+    pub fn new(access_type: ResourceAccessType) -> Self {
+        Self {
+            access_type,
+            _marker: Default::default(),
+        }
+    }
+}
+impl<T: Resource> Accessor for FetchWrapper<T> {
+    type Output = Self;
+
+    fn reads() -> Vec<TypeId> { vec![] }
+    fn writes() -> Vec<TypeId> { vec![] }
+    fn fetch(_: &Resources) -> Self::Output { unimplemented!() }
 }
 
 pub trait Resource: 'static + Any + Send + Sync {}
