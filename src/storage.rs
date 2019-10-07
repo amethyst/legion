@@ -662,7 +662,7 @@ impl ComponentStorageLayout {
             .map(|(ty, _, meta)| {
                 (
                     *ty,
-                    ComponentAccessor {
+                    ComponentResourceSet {
                         ptr: AtomicRefCell::new(meta.align as *mut u8),
                         capacity: self.capacity,
                         count: UnsafeCell::new(0),
@@ -826,17 +826,17 @@ impl ChunkId {
 }
 
 /// A set of component slices located on a chunk.
-pub struct Components(SmallVec<[(ComponentTypeId, ComponentAccessor); 5]>);
+pub struct Components(SmallVec<[(ComponentTypeId, ComponentResourceSet); 5]>);
 
 impl Components {
-    pub(crate) fn new(mut data: SmallVec<[(ComponentTypeId, ComponentAccessor); 5]>) -> Self {
+    pub(crate) fn new(mut data: SmallVec<[(ComponentTypeId, ComponentResourceSet); 5]>) -> Self {
         data.sort_by_key(|(t, _)| *t);
         Self(data)
     }
 
     /// Gets a component slice accessor for the specified component type.
     #[inline]
-    pub fn get(&self, type_id: ComponentTypeId) -> Option<&ComponentAccessor> {
+    pub fn get(&self, type_id: ComponentTypeId) -> Option<&ComponentResourceSet> {
         self.0
             .binary_search_by_key(&type_id, |(t, _)| *t)
             .ok()
@@ -845,18 +845,18 @@ impl Components {
 
     /// Gets a mutable component slice accessor for the specified component type.
     #[inline]
-    pub fn get_mut(&mut self, type_id: ComponentTypeId) -> Option<&mut ComponentAccessor> {
+    pub fn get_mut(&mut self, type_id: ComponentTypeId) -> Option<&mut ComponentResourceSet> {
         self.0
             .binary_search_by_key(&type_id, |(t, _)| *t)
             .ok()
             .map(move |i| unsafe { &mut self.0.get_unchecked_mut(i).1 })
     }
 
-    fn iter(&mut self) -> Iter<(ComponentTypeId, ComponentAccessor)> { self.0.iter() }
+    fn iter(&mut self) -> Iter<(ComponentTypeId, ComponentResourceSet)> { self.0.iter() }
 
-    fn iter_mut(&mut self) -> IterMut<(ComponentTypeId, ComponentAccessor)> { self.0.iter_mut() }
+    fn iter_mut(&mut self) -> IterMut<(ComponentTypeId, ComponentResourceSet)> { self.0.iter_mut() }
 
-    fn drain(&mut self) -> Drain<(ComponentTypeId, ComponentAccessor)> { self.0.drain() }
+    fn drain(&mut self) -> Drain<(ComponentTypeId, ComponentResourceSet)> { self.0.drain() }
 }
 
 /// Stores a chunk of entities and their component data of a specific data layout.
@@ -893,7 +893,7 @@ impl ComponentStorage {
     pub fn entities(&self) -> &[Entity] { self.entities.as_slice() }
 
     /// Gets a component accessor for the specified component type.
-    pub fn components(&self, component_type: ComponentTypeId) -> Option<&ComponentAccessor> {
+    pub fn components(&self, component_type: ComponentTypeId) -> Option<&ComponentResourceSet> {
         unsafe { &*self.component_info.get() }.get(component_type)
     }
 
@@ -1028,7 +1028,7 @@ impl Drop for ComponentStorage {
 
 /// Provides raw access to component data slices.
 #[repr(align(64))]
-pub struct ComponentAccessor {
+pub struct ComponentResourceSet {
     ptr: AtomicRefCell<*mut u8>,
     element_size: usize,
     count: UnsafeCell<usize>,
@@ -1037,7 +1037,7 @@ pub struct ComponentAccessor {
     version: UnsafeCell<Wrapping<usize>>,
 }
 
-impl ComponentAccessor {
+impl ComponentResourceSet {
     /// Gets the version of the component slice.
     pub fn version(&self) -> usize { unsafe { (*self.version.get()).0 } }
 
@@ -1101,11 +1101,11 @@ impl ComponentAccessor {
     pub fn writer(&mut self) -> ComponentWriter { ComponentWriter::new(self) }
 }
 
-impl Debug for ComponentAccessor {
+impl Debug for ComponentResourceSet {
     fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
         write!(
             f,
-            "ComponentAccessor {{ ptr: {:?}, element_size: {}, count: {}, capacity: {}, version: {} }}",
+            "ComponentResourceSet {{ ptr: {:?}, element_size: {}, count: {}, capacity: {}, version: {} }}",
             *self.ptr.get(),
             self.element_size,
             unsafe { *self.count.get() },
@@ -1117,12 +1117,12 @@ impl Debug for ComponentAccessor {
 
 /// Provides methods adding or removing components from a component vec.
 pub struct ComponentWriter<'a> {
-    accessor: &'a ComponentAccessor,
+    accessor: &'a ComponentResourceSet,
     ptr: RefMut<'a, Exclusive<'a>, *mut u8>,
 }
 
 impl<'a> ComponentWriter<'a> {
-    fn new(accessor: &'a ComponentAccessor) -> ComponentWriter<'a> {
+    fn new(accessor: &'a ComponentResourceSet) -> ComponentWriter<'a> {
         Self {
             accessor,
             ptr: accessor.ptr.get_mut(),

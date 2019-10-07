@@ -3,9 +3,7 @@ use crate::command::CommandBuffer;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::filter::EntityFilter;
 use crate::query::{Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, View};
-use crate::resource::{
-    Accessor, ReadWrapper, Resource, ResourceAccessType, Resources, Write, WriteWrapper,
-};
+use crate::resource::{ReadWrapper, Resource, ResourceSet, Resources, WriteWrapper};
 use crate::storage::{ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
@@ -367,10 +365,13 @@ impl_queryset_tuple!(A, B, C, D, E, F, G);
 /// on each `run` call, wrapping the world and providing the set to the user in their closure.
 pub struct System<R, Q, F>
 where
-    R: Accessor,
+    R: ResourceSet,
     Q: QuerySet,
-    F: Fn(&mut CommandBuffer, R::Output, &mut <Q as QuerySet>::PreparedQueries)
-        + Send
+    F: Fn(
+            &mut CommandBuffer,
+            &mut <R as ResourceSet>::PreparedResources,
+            &mut <Q as QuerySet>::PreparedQueries,
+        ) + Send
         + Sync
         + 'static,
 {
@@ -389,10 +390,13 @@ where
 
 impl<R, Q, F> Schedulable for System<R, Q, F>
 where
-    R: Accessor,
+    R: ResourceSet,
     Q: QuerySet,
-    F: Fn(&mut CommandBuffer, R::Output, &mut <Q as QuerySet>::PreparedQueries)
-        + Send
+    F: Fn(
+            &mut CommandBuffer,
+            &mut <R as ResourceSet>::PreparedResources,
+            &mut <Q as QuerySet>::PreparedQueries,
+        ) + Send
         + Sync
         + 'static,
 {
@@ -412,7 +416,7 @@ where
     fn accesses_archetypes(&self) -> &BitSet { &self.archetypes }
 
     fn run(&self, resources: &Resources, world: &World) {
-        let resources = R::fetch(resources);
+        let mut resources = self.resources.fetch(resources);
         let mut queries = self.queries.get_mut();
         let mut prepared_queries = unsafe { queries.prepare(world) };
 
@@ -422,7 +426,7 @@ where
 
         (self.run_fn)(
             &mut self.command_buffer.get_mut(),
-            resources,
+            &mut resources,
             &mut prepared_queries,
         );
     }
@@ -430,14 +434,13 @@ where
 
 // This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
 // for this system. Access types are instead stored and abstracted in the top level vec here
-// so the underlying Accessor type functions from the queries don't need to allocate.
+// so the underlying ResourceSet type functions from the queries don't need to allocate.
 // Otherwise, this leads to excessive alloaction for every call to reads/writes
 /// The core builder of `System` types, which are systems within Legion. Systems are implemented
 /// as singular closures for a given system - providing queries which should be cached for that
 /// system, as well as resource access and other metadata.
 /// ```rust
 /// # use legion::prelude::*;
-/// # use legion::resource::ResourceAccessType;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -448,7 +451,7 @@ where
 /// struct Static;
 ///
 ///  let mut system_one = SystemBuilder::<()>::new("TestSystem")
-///            .with_resource::<TestResource>(ResourceAccessType::Read)
+///            .read_resource::<TestResource>()
 ///            .with_query(<(Read<Position>, Tagged<Model>)>::query()
 ///                         .filter(!tag::<Static>() | changed::<Position>()))
 ///            .build(move |_resource, queries| {
@@ -548,11 +551,11 @@ where
 
     pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
     where
-        <R as ConsFlatten>::Output: Accessor + Send + Sync,
+        <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
         F: Fn(
                 &mut CommandBuffer,
-                <<R as ConsFlatten>::Output as Accessor>::Output,
+                &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
                 &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
             ) + Send
             + Sync
@@ -577,7 +580,7 @@ where
 mod tests {
     use super::*;
     use crate::prelude::*;
-    use crate::resource::{ResourceAccessType, Resources};
+    use crate::resource::Resources;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -593,7 +596,8 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        let resources = Resources::default();
+        let mut resources = Resources::default();
+        resources.insert(TestResource(123));
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -657,7 +661,8 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        let resources = Resources::default();
+        let mut resources = Resources::default();
+        resources.insert(TestResource(123));
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -676,7 +681,8 @@ mod tests {
             .read_resource::<TestResource>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(move |_commands, _resource, queries| {
+            .build(move |_commands, resource, queries| {
+                assert_eq!(resource.0, 123);
                 let mut count = 0;
                 {
                     for (entity, pos) in queries.0.iter_entities() {

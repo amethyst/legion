@@ -7,53 +7,57 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-pub enum ResourceAccessType {
-    Read,
-    Write,
+pub trait ResourceSet: Send + Sync {
+    type PreparedResources;
+
+    fn fetch<'a>(&self, resources: &'a Resources) -> Self::PreparedResources;
 }
+
+pub trait Resource: 'static + Any + Send + Sync {}
+impl<T> Resource for T where T: 'static + Any + Send + Sync {}
+
+pub struct PreparedReadWrapper<T: Resource> {
+    resource: *const T,
+}
+impl<T: Resource> PreparedReadWrapper<T> {
+    pub(crate) unsafe fn new(resource: *const T) -> Self { Self { resource } }
+}
+impl<T: Resource> Deref for PreparedReadWrapper<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target { unsafe { &*self.resource } }
+}
+unsafe impl<T: Resource> Send for PreparedReadWrapper<T> {}
+unsafe impl<T: Resource> Sync for PreparedReadWrapper<T> {}
+
+pub struct PreparedWriteWrapper<T: Resource> {
+    resource: *mut T,
+}
+impl<T: Resource> Deref for PreparedWriteWrapper<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target { unsafe { &*self.resource } }
+}
+
+impl<T: Resource> DerefMut for PreparedWriteWrapper<T> {
+    fn deref_mut(&mut self) -> &mut T { unsafe { &mut *self.resource } }
+}
+impl<T: Resource> PreparedWriteWrapper<T> {
+    pub(crate) unsafe fn new(resource: *mut T) -> Self { Self { resource } }
+}
+unsafe impl<T: Resource> Send for PreparedWriteWrapper<T> {}
+unsafe impl<T: Resource> Sync for PreparedWriteWrapper<T> {}
 
 #[derive(Derivative)]
 #[derivative(Default(bound = ""))]
-pub struct ReadWrapper<'a, T> {
+pub struct ReadWrapper<T> {
     _marker: PhantomData<T>,
-}
-
-impl<'a, T: Resource> Accessor for ReadWrapper<'a, T> {
-    type Output = Read<'a, T>;
-
-    fn reads() -> Vec<TypeId> { vec![] }
-    fn writes() -> Vec<TypeId> { vec![] }
-    fn fetch<'a>(_: &'a Resources) -> Self::Output { unimplemented!() }
 }
 
 #[derive(Derivative)]
 #[derivative(Default(bound = ""))]
 pub struct WriteWrapper<T> {
     _marker: PhantomData<T>,
-}
-impl<T: Resource> Accessor for WriteWrapper<T> {
-    type Output = Self;
-
-    fn reads() -> Vec<TypeId> { vec![] }
-    fn writes() -> Vec<TypeId> { vec![] }
-    fn fetch(_: &Resources) -> Self::Output { unimplemented!() }
-}
-
-pub trait Resource: 'static + Any + Send + Sync {}
-impl<T> Resource for T where T: 'static + Any + Send + Sync {}
-
-pub trait AccessType {
-    fn access_type() -> ResourceAccessType;
-    fn is_read() -> bool;
-    fn is_write() -> bool;
-}
-
-pub trait Accessor: Send + Sync {
-    type Output: Accessor;
-
-    fn reads() -> Vec<TypeId>;
-    fn writes() -> Vec<TypeId>;
-    fn fetch(resources: &Resources) -> Self::Output;
 }
 
 pub struct Read<'a, T: 'a + Resource> {
@@ -63,18 +67,6 @@ impl<'a, T: Resource> Deref for Read<'a, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target { self.inner.deref() }
-}
-impl<'a, T: 'a + Resource> AccessType for Read<'a, T> {
-    fn access_type() -> ResourceAccessType { ResourceAccessType::Read }
-    fn is_read() -> bool { true }
-    fn is_write() -> bool { false }
-}
-impl<'a, T: 'a + Resource> Accessor for Read<'a, T> {
-    type Output = Read<'a, T>;
-
-    fn reads() -> Vec<TypeId> { vec![] }
-    fn writes() -> Vec<TypeId> { vec![] }
-    fn fetch(_: &Resources) -> Self::Output { unimplemented!() }
 }
 
 pub struct Write<'a, T: Resource> {
@@ -88,19 +80,6 @@ impl<'a, T: 'a + Resource> Deref for Write<'a, T> {
 
 impl<'a, T: 'a + Resource> DerefMut for Write<'a, T> {
     fn deref_mut(&mut self) -> &mut T { self.inner.deref_mut() }
-}
-
-impl<'a, T: 'a + Resource> AccessType for Write<'a, T> {
-    fn access_type() -> ResourceAccessType { ResourceAccessType::Write }
-    fn is_read() -> bool { false }
-    fn is_write() -> bool { true }
-}
-impl<'a, T: Resource> Accessor for Write<'a, T> {
-    type Output = Self;
-
-    fn reads() -> Vec<TypeId> { vec![] }
-    fn writes() -> Vec<TypeId> { vec![] }
-    fn fetch(_: &Resources) -> Self::Output { unimplemented!() }
 }
 
 #[derive(Default)]
@@ -137,22 +116,40 @@ impl Resources {
     }
 }
 
-impl Accessor for () {
-    type Output = ();
+impl ResourceSet for () {
+    type PreparedResources = ();
 
-    fn reads() -> Vec<TypeId> { vec![] }
-    fn writes() -> Vec<TypeId> { vec![] }
-    fn fetch(_: &Resources) {}
+    fn fetch(&self, _: &Resources) {}
+}
+
+impl<T: Resource> ResourceSet for ReadWrapper<T> {
+    type PreparedResources = PreparedReadWrapper<T>;
+
+    fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
+        let resource = resources.get::<T>().unwrap();
+        unsafe { PreparedReadWrapper::new(resource.deref() as *const T) }
+    }
+}
+impl<T: Resource> ResourceSet for WriteWrapper<T> {
+    type PreparedResources = PreparedWriteWrapper<T>;
+
+    fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
+        let mut resource = resources.get_mut::<T>().unwrap();
+        unsafe { PreparedWriteWrapper::new(resource.deref_mut() as *mut T) }
+    }
 }
 
 macro_rules! impl_resource_tuple {
     ( $( $ty: ident ),* ) => {
-        impl<$( $ty: Resource ),*> Accessor for ($( $ty, )*)
+        #[allow(unused_parens, non_snake_case)]
+        impl<$( $ty: ResourceSet ),*> ResourceSet for ($( $ty, )*)
         {
-            type Output = Self;
-            fn reads() -> Vec<TypeId> { vec![$( TypeId::of::<$ty>()),*] }
-            fn writes() -> Vec<TypeId> { vec![$( TypeId::of::<$ty>()),*] }
-            fn fetch(_: &Resources) -> Self::Output { unimplemented!() }
+            type PreparedResources = ($( $ty::PreparedResources, )*);
+
+            fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
+                let ($($ty,)*) = self;
+                ($( $ty.fetch(resources), )*)
+             }
         }
     };
 }
