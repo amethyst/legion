@@ -97,6 +97,8 @@ struct Static;
 
 #[test]
 fn query_read_entity_data() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -127,6 +129,8 @@ fn query_read_entity_data() {
 
 #[test]
 fn query_cached_read_entity_data() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -157,6 +161,8 @@ fn query_cached_read_entity_data() {
 
 #[test]
 fn query_read_entity_data_par() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -188,6 +194,8 @@ fn query_read_entity_data_par() {
 
 #[test]
 fn query_read_entity_data_par_foreach() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -216,6 +224,8 @@ fn query_read_entity_data_par_foreach() {
 
 #[test]
 fn query_read_entity_data_tuple() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -247,6 +257,8 @@ fn query_read_entity_data_tuple() {
 
 #[test]
 fn query_write_entity_data() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -279,6 +291,8 @@ fn query_write_entity_data() {
 
 #[test]
 fn query_write_entity_data_tuple() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -313,6 +327,8 @@ fn query_write_entity_data_tuple() {
 
 #[test]
 fn query_mixed_entity_data_tuple() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -346,6 +362,8 @@ fn query_mixed_entity_data_tuple() {
 
 #[test]
 fn query_partial_match() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -379,6 +397,8 @@ fn query_partial_match() {
 
 #[test]
 fn query_read_shared_data() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -403,6 +423,8 @@ fn query_read_shared_data() {
 
 #[test]
 fn query_on_changed_first() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -433,6 +455,8 @@ fn query_on_changed_first() {
 
 #[test]
 fn query_on_changed_no_changes() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -471,6 +495,8 @@ fn query_on_changed_no_changes() {
 
 #[test]
 fn query_on_changed_self_changes() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 

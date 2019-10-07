@@ -1322,7 +1322,7 @@ impl TagStorage {
             };
 
             if ptr.is_null() {
-                println!("out of memory");
+                log::trace!("out of memory");
                 std::process::abort()
             }
 
@@ -1376,6 +1376,8 @@ mod test {
 
     #[test]
     pub fn create() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1408,6 +1410,8 @@ mod test {
 
     #[test]
     pub fn create_lazy_allocated() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1436,6 +1440,8 @@ mod test {
 
     #[test]
     pub fn create_free_when_empty() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1477,6 +1483,8 @@ mod test {
 
     #[test]
     pub fn read_components() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1557,6 +1565,8 @@ mod test {
 
     #[test]
     pub fn read_tags() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1599,6 +1609,8 @@ mod test {
 
     #[test]
     pub fn create_zero_size_tags() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1633,6 +1645,8 @@ mod test {
 
     #[test]
     pub fn create_zero_size_components() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();

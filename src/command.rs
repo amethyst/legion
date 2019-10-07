@@ -7,7 +7,7 @@ use crate::{
 use derivative::Derivative;
 use std::{marker::PhantomData, sync::Arc};
 
-trait WorldWritable {
+pub trait WorldWritable {
     fn write(self: Arc<Self>, world: &mut World);
 
     fn write_components(&self) -> Vec<ComponentTypeId>;
@@ -151,6 +151,8 @@ impl<'a> EntityBuilder<'a> {
 
 enum EntityCommand {
     WriteWorld(Arc<dyn WorldWritable>),
+    ExecWorld(Arc<dyn Fn(&World)>),
+    ExecMutWorld(Arc<dyn Fn(&mut World)>),
 }
 
 #[derive(Default)]
@@ -193,7 +195,24 @@ impl CommandBuffer {
     pub fn write(&mut self, world: &mut World) {
         self.commands.drain(..).for_each(|command| match command {
             EntityCommand::WriteWorld(ptr) => ptr.write(world),
+            EntityCommand::ExecMutWorld(closure) => closure(world),
+            EntityCommand::ExecWorld(closure) => closure(world),
         })
+    }
+
+    pub fn exec_mut<F>(&mut self, f: F)
+    where
+        F: 'static + Fn(&mut World),
+    {
+        self.commands.push(EntityCommand::ExecMutWorld(Arc::new(f)));
+    }
+
+    pub fn insert_writer<W>(&mut self, writer: W)
+    where
+        W: 'static + WorldWritable,
+    {
+        self.commands
+            .push(EntityCommand::WriteWorld(Arc::new(writer)));
     }
 
     pub fn insert<T, C>(&mut self, tags: T, components: C)
@@ -264,6 +283,7 @@ mod tests {
     #[derive(Default)]
     struct TestResource(pub i32);
 
+    /*
     #[test]
     fn delayed_builder_test() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -296,7 +316,7 @@ mod tests {
 
         assert_eq!(components_len, count);
     }
-
+        */
     #[test]
     fn simple_write_test() {
         let _ = env_logger::builder().is_test(true).try_init();

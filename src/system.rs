@@ -449,22 +449,21 @@ where
 /// # struct Model;
 /// #[derive(Copy, Clone, Debug, PartialEq)]
 /// struct Static;
+/// #[derive(Debug)]
+/// struct TestResource {}
 ///
 ///  let mut system_one = SystemBuilder::<()>::new("TestSystem")
 ///            .read_resource::<TestResource>()
 ///            .with_query(<(Read<Position>, Tagged<Model>)>::query()
 ///                         .filter(!tag::<Static>() | changed::<Position>()))
-///            .build(move |_resource, queries| {
-///                println!("Hello world");
+///            .build(move |commands, resource, queries| {
+///                log::trace!("Hello world");
 ///               let mut count = 0;
 ///                {
 ///                    for (entity, pos) in queries.iter_entities() {
-///                        assert_eq!(expected.get(&entity).unwrap().0, *pos);
-///                        count += 1;
+///                        
 ///                    }
 ///                }
-///
-///                assert_eq!(components.len(), count);
 ///            });
 /// ```
 pub struct SystemBuilder<Q = (), R = ()> {

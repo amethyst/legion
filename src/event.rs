@@ -68,6 +68,6 @@ pub enum EntityEvent<F: EntityFilter> {
 mod tests {
     #[test]
     fn simple_events() {
-        println!("Hello World");
+        log::trace!("Hello World");
     }
 }

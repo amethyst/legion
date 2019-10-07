@@ -304,6 +304,12 @@ impl World {
             add_tags,
             remove_tags,
         );
+        log::trace!("src  = {:?}", location);
+        log::trace!(
+            "target_arch_index={}, target_chunkset_index={}",
+            target_arch_index,
+            target_chunkset_index
+        );
 
         // Safety Note:
         // It is only safe for us to have 2 &mut references to storage here because
@@ -337,9 +343,22 @@ impl World {
         // move existing data over into new chunk
         if let Some(swapped) = current_chunk.move_entity(target_chunk, location.component()) {
             // update location of any entity that was moved into the previous location
+            log::trace!("SWAP location! {:?}, {:?}", swapped, location);
+
             self.entity_allocator
                 .set_location(swapped.index(), location);
         }
+
+        log::trace!(
+            "Set location! {:?}, {:?}",
+            entity,
+            EntityLocation::new(
+                target_arch_index,
+                target_chunkset_index,
+                target_chunk_index,
+                target_chunk.len() - 1,
+            )
+        );
 
         // record the entity's new location
         self.entity_allocator.set_location(
@@ -495,7 +514,8 @@ impl World {
         let location = self.entity_allocator.get_location(entity.index())?;
         let archetype = self.storage().archetypes().get(location.archetype())?;
         let tags = archetype.tags().get(TagTypeId::of::<T>())?;
-        unsafe { tags.data_slice::<T>().get(location.chunk()) }
+
+        unsafe { tags.data_slice::<T>().get(location.set()) }
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
@@ -1125,16 +1145,24 @@ mod tests {
     }
 
     #[test]
-    fn create_universe() { Universe::default(); }
+    fn create_universe() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        Universe::default();
+    }
 
     #[test]
     fn create_world() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let universe = Universe::new();
         universe.create_world();
     }
 
     #[test]
     fn insert() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (1usize, 2f32, 3u16);
@@ -1146,6 +1174,8 @@ mod tests {
 
     #[test]
     fn get_component() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1176,6 +1206,8 @@ mod tests {
 
     #[test]
     fn get_component_wrong_type() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         world.insert((), vec![(0f64,)]);
@@ -1187,6 +1219,8 @@ mod tests {
 
     #[test]
     fn get_tag() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1205,6 +1239,8 @@ mod tests {
 
     #[test]
     fn get_tag_wrong_type() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         world.insert((Static,), vec![(0f64,)]);
@@ -1216,6 +1252,8 @@ mod tests {
 
     #[test]
     fn delete() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1238,6 +1276,8 @@ mod tests {
 
     #[test]
     fn delete_last() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1265,6 +1305,8 @@ mod tests {
 
     #[test]
     fn delete_first() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1292,6 +1334,8 @@ mod tests {
 
     #[test]
     fn add_component() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let components = vec![
@@ -1317,6 +1361,8 @@ mod tests {
 
     #[test]
     fn remove_component() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let components = vec![
@@ -1338,6 +1384,8 @@ mod tests {
 
     #[test]
     fn add_tag() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let components = vec![
@@ -1364,6 +1412,8 @@ mod tests {
 
     #[test]
     fn remove_tag() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let components = vec![
