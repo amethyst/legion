@@ -29,6 +29,8 @@ smallvec = "0.6"
 bit-set = "0.5"
 paste = "0.1"
 log = "0.4"
+shrinkwraprs = "0.2"
+
 
 [dev-dependencies]
 env_logger = "0.7"

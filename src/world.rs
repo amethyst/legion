@@ -59,7 +59,13 @@ impl Universe {
     /// unique `Entity` IDs, even across worlds.
     pub fn create_world(&self) -> World {
         let id = self.world_count.fetch_add(1, Ordering::SeqCst);
-        World::new(WorldId(id), EntityAllocator::new(self.allocator.clone()))
+        let world = World::new(WorldId(id), EntityAllocator::new(self.allocator.clone()));
+
+        self.channel
+            .write(WorldCreatedEvent(WorldId(id)))
+            .expect("Failed to write to WorldCreatedEvent channel.");
+
+        world
     }
 }
 

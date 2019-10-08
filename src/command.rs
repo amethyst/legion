@@ -193,6 +193,7 @@ impl CommandBuffer {
     }
 
     pub fn write(&mut self, world: &mut World) {
+        log::trace!("Performing drain");
         self.commands.drain(..).for_each(|command| match command {
             EntityCommand::WriteWorld(ptr) => ptr.write(world),
             EntityCommand::ExecMutWorld(closure) => closure(world),

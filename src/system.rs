@@ -1,4 +1,4 @@
-use crate::borrow::AtomicRefCell;
+use crate::borrow::{AtomicRefCell, Exclusive, RefMut};
 use crate::command::CommandBuffer;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::filter::EntityFilter;
@@ -179,6 +179,7 @@ pub trait Schedulable: Sync + Send {
     fn prepare(&mut self, world: &World);
     fn accesses_archetypes(&self) -> &BitSet;
     fn run(&self, resources: &Resources, world: &World);
+    fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;
 }
 
 /// Structure used by `SystemAccess` for describing access to the provided `T`
@@ -414,6 +415,10 @@ where
     }
 
     fn accesses_archetypes(&self) -> &BitSet { &self.archetypes }
+
+    fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer> {
+        self.command_buffer.get_mut()
+    }
 
     fn run(&self, resources: &Resources, world: &World) {
         let mut resources = self.resources.fetch(resources);
