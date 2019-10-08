@@ -22,6 +22,7 @@ use crate::storage::TagMeta;
 use crate::storage::TagTypeId;
 use crate::storage::Tags;
 use parking_lot::Mutex;
+use rayon::prelude::*;
 use std::cell::UnsafeCell;
 use std::iter::Enumerate;
 use std::iter::Peekable;
@@ -35,7 +36,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 #[cfg(feature = "events")]
-use crate::event::{Channel, WorldCreatedEvent};
+use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
 
 /// The `Universe` is a factory for creating `World`s.
 ///
@@ -67,6 +68,8 @@ impl Universe {
 
         world
     }
+
+    pub fn channel(&mut self) -> &mut Channel<WorldCreatedEvent> { &mut self.channel }
 }
 
 impl Default for Universe {
@@ -89,6 +92,9 @@ pub struct World {
     storage: UnsafeCell<Storage>,
     pub(crate) entity_allocator: EntityAllocator,
     defrag_progress: usize,
+
+    #[cfg(feature = "events")]
+    channel: Channel<EntityEvent>,
 }
 
 unsafe impl Send for World {}
@@ -102,8 +108,11 @@ impl World {
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: allocator,
             defrag_progress: 0,
+            channel: Channel::default(),
         }
     }
+
+    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> { &mut self.channel }
 
     pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
 
@@ -179,13 +188,24 @@ impl World {
             }
         }
 
-        self.entity_allocator.allocation_buffer()
+        let entities = self.entity_allocator.allocation_buffer();
+        entities.par_iter().for_each(|e| {
+            self.channel
+                .write(EntityEvent::Created(e.clone()))
+                .expect("Failed to write to WorldCreatedEvent channel.");
+        });
+
+        entities
     }
 
     /// Removes the given `Entity` from the `World`.
     ///
     /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
+        self.channel
+            .write(EntityEvent::Deleted(entity.clone()))
+            .expect("Failed to write to EntityEvent::Deleted channel.");
+
         if let Some(location) = self.entity_allocator.delete_entity(entity) {
             // find entity's chunk
             let chunk = self

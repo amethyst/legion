@@ -1,10 +1,11 @@
-use crate::borrow::{AtomicRefCell, Exclusive, RefMut};
+use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
 use crate::command::CommandBuffer;
 use crate::cons::{ConsAppend, ConsFlatten};
+use crate::entity::Entity;
 use crate::filter::EntityFilter;
 use crate::query::{Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, View};
 use crate::resource::{ReadWrapper, Resource, ResourceSet, Resources, WriteWrapper};
-use crate::storage::{ComponentTypeId, TagTypeId};
+use crate::storage::{Component, ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
 use derivative::Derivative;
@@ -329,6 +330,12 @@ macro_rules! impl_queryset_tuple {
     };
 }
 
+impl QuerySet for () {
+    type PreparedQueries = ();
+    fn filter_archetypes(&mut self, _: &World, _: &mut BitSet) {}
+    unsafe fn prepare(&mut self, _: &World) {}
+}
+
 impl<AV, AF> QuerySet for Query<AV, AF>
 where
     AV: for<'v> View<'v>,
@@ -354,6 +361,36 @@ impl_queryset_tuple!(A, B, C, D, E);
 impl_queryset_tuple!(A, B, C, D, E, F);
 impl_queryset_tuple!(A, B, C, D, E, F, G);
 
+pub struct PreparedWorld {
+    world: *const World,
+    access: *const Access<ComponentTypeId>,
+}
+impl PreparedWorld {
+    unsafe fn new(world: &World, access: &Access<ComponentTypeId>) -> Self {
+        Self {
+            world: world as *const World,
+            access: access as *const Access<ComponentTypeId>,
+        }
+    }
+}
+
+impl PreparedWorld {
+    #[inline]
+    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
+        assert!(unsafe { (&*self.access) }
+            .reads
+            .contains(&ComponentTypeId::of::<T>()));
+        unsafe { (&*self.world) }.get_component::<T>(entity)
+    }
+    #[inline]
+    pub fn get_component_mut<T: Component>(&self, entity: Entity) -> Option<RefMut<Exclusive, T>> {
+        assert!(unsafe { (&*self.access) }
+            .writes
+            .contains(&ComponentTypeId::of::<T>()));
+        unsafe { (&*self.world) }.get_component_mut::<T>(entity)
+    }
+}
+
 /// The concrete type which contains the system closure provided by the user.  This struct should
 /// not be instantiated directly, and instead should be created using `SystemBuilder`.
 ///
@@ -370,6 +407,7 @@ where
     Q: QuerySet,
     F: Fn(
             &mut CommandBuffer,
+            &mut PreparedWorld,
             &mut <R as ResourceSet>::PreparedResources,
             &mut <Q as QuerySet>::PreparedQueries,
         ) + Send
@@ -395,6 +433,7 @@ where
     Q: QuerySet,
     F: Fn(
             &mut CommandBuffer,
+            &mut PreparedWorld,
             &mut <R as ResourceSet>::PreparedResources,
             &mut <Q as QuerySet>::PreparedQueries,
         ) + Send
@@ -424,6 +463,7 @@ where
         let mut resources = self.resources.fetch(resources);
         let mut queries = self.queries.get_mut();
         let mut prepared_queries = unsafe { queries.prepare(world) };
+        let mut world_shim = unsafe { PreparedWorld::new(world, &self.access.components) };
 
         // Give the command buffer a new entity block.
         // This should usually just pull a free block, or allocate a new one...
@@ -431,6 +471,7 @@ where
 
         (self.run_fn)(
             &mut self.command_buffer.get_mut(),
+            &mut world_shim,
             &mut resources,
             &mut prepared_queries,
         );
@@ -553,12 +594,36 @@ where
         }
     }
 
+    /// This performs a shared lock on the component for reading
+    pub fn read_component<T>(mut self) -> Self
+    where
+        T: Component,
+    {
+        self.component_access.reads.push(ComponentTypeId::of::<T>());
+
+        self
+    }
+
+    /// This performs a exclusive lock on the component for writing
+    /// TOOD: doc implications
+    pub fn write_component<T>(mut self) -> Self
+    where
+        T: Component,
+    {
+        self.component_access
+            .writes
+            .push(ComponentTypeId::of::<T>());
+
+        self
+    }
+
     pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
         F: Fn(
                 &mut CommandBuffer,
+                &mut PreparedWorld,
                 &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
                 &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
             ) + Send
@@ -630,7 +695,7 @@ mod tests {
             .read_resource::<TestResource>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(move |_commands, _resource, _queries| {
+            .build(move |_commands, _world, _resource, _queries| {
                 log::trace!("TestSystem1");
                 system_one_runs
                     .lock()
@@ -642,7 +707,7 @@ mod tests {
         let system_two = SystemBuilder::<()>::new("TestSystem2")
             .read_resource::<TestResource>()
             .with_query(Read::<Vel>::query())
-            .build(move |_commands, _resource, _queries| {
+            .build(move |_commands, _world, _resource, _queries| {
                 log::trace!("TestSystem2");
                 system_two_runs
                     .lock()
@@ -685,7 +750,7 @@ mod tests {
             .read_resource::<TestResource>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(move |_commands, resource, queries| {
+            .build(move |_commands, _world, resource, queries| {
                 assert_eq!(resource.0, 123);
                 let mut count = 0;
                 {

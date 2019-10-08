@@ -97,7 +97,14 @@ pub enum ComponentEvent {
     ComponentRemoved,
 }
 
-pub enum EntityEvent<F: EntityFilter> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EntityEvent {
+    Created(Entity),
+    Deleted(Entity),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EntityFilterEvent<F: EntityFilter> {
     InScope(Entity, PhantomData<F>),
     OutScope(Entity, PhantomData<F>),
 }
