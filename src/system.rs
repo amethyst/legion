@@ -25,21 +25,20 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq {}
 
 /// Executes all systems that are to be run within a single given stage.
-pub struct StageExecutor {
-    systems: Vec<Box<dyn Schedulable>>,
+pub struct StageExecutor<'a> {
+    systems: &'a mut [Box<dyn Schedulable>],
     static_dependants: Vec<Vec<usize>>,
     dynamic_dependants: Vec<Vec<usize>>,
     static_dependancy_counts: Vec<AtomicUsize>,
     awaiting: Vec<AtomicUsize>,
 }
 
-impl StageExecutor {
+impl<'a> StageExecutor<'a> {
     /// Constructs a new executor for all systems to be run in a single stage.
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
-    pub fn new<I: IntoIterator<Item = Box<dyn Schedulable>>>(systems: I) -> Self {
-        let systems: Vec<_> = systems.into_iter().collect();
+    pub fn new(systems: &'a mut [Box<dyn Schedulable>]) -> Self {
         let mut static_dependants: Vec<Vec<_>> = repeat(Vec::new()).take(systems.len()).collect();
         let mut dynamic_dependants: Vec<Vec<_>> = repeat(Vec::new()).take(systems.len()).collect();
         let mut static_dependancy_counts = Vec::new();
@@ -717,9 +716,9 @@ mod tests {
 
         let order = vec![TestSystems::TestSystemOne, TestSystems::TestSystemTwo];
 
-        let systems = vec![system_one, system_two];
+        let mut systems = vec![system_one, system_two];
 
-        let mut executor = StageExecutor::new(systems);
+        let mut executor = StageExecutor::new(&mut systems);
         executor.execute(&resources, &world);
         assert_eq!(order, *(runs.lock().unwrap()));
     }
