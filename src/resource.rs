@@ -88,11 +88,21 @@ pub struct Resources {
 }
 
 impl Resources {
+    pub fn contains<T: Resource>(&self) -> bool { self.storage.contains_key(&TypeId::of::<T>()) }
+
     pub fn insert<T: Resource>(&mut self, value: T) {
-        // We cant return the original inserted value becase we wrapped it in a box
-        // I think anyways?
         self.storage
             .insert(TypeId::of::<T>(), AtomicRefCell::new(Box::new(value)));
+    }
+
+    /// Removes from the storage and moves ownership out to the caller
+    pub fn remove<T: Resource>(&mut self) -> Option<T> {
+        self.storage
+            .remove(&TypeId::of::<T>())?
+            .into_inner()
+            .downcast()
+            .ok()?
+            .map(|x| *x)
     }
 
     pub fn get<T: Resource>(&self) -> Option<Read<'_, T>> {
@@ -190,5 +200,9 @@ mod tests {
 
         assert_eq!(resources.get::<TestOne>().unwrap().value, "poop");
         assert_eq!(resources.get::<TestTwo>().unwrap().value, "balls");
+
+        // test re-ownership
+        let owned = resources.remove::<TestTwo>();
+        assert_eq!(owned.unwrap().value, "balls")
     }
 }
