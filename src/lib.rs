@@ -220,7 +220,6 @@
 //!     render_instanced(model, &transforms);
 //! }
 //! ```
-
 #![allow(dead_code)]
 
 pub mod borrow;

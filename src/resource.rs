@@ -1,7 +1,8 @@
-use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMapMut, Shared};
+use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
 use derivative::Derivative;
+use mopa::Any;
 use std::{
-    any::{Any, TypeId},
+    any::TypeId,
     collections::HashMap,
     marker::PhantomData,
     ops::{Deref, DerefMut},
@@ -15,6 +16,16 @@ pub trait ResourceSet: Send + Sync {
 
 pub trait Resource: 'static + Any + Send + Sync {}
 impl<T> Resource for T where T: 'static + Any + Send + Sync {}
+
+mod __resource_mopafy_scope {
+    #![allow(clippy::all)]
+
+    use mopa::mopafy;
+
+    use super::Resource;
+
+    mopafy!(Resource);
+}
 
 pub struct PreparedReadWrapper<T: Resource> {
     resource: *const T,
@@ -61,25 +72,27 @@ pub struct WriteWrapper<T> {
 }
 
 pub struct Read<'a, T: 'a + Resource> {
-    inner: Ref<'a, Shared<'a>, &'a T>,
+    inner: Ref<'a, Shared<'a>, Box<dyn Resource>>,
+    _marker: PhantomData<T>,
 }
 impl<'a, T: Resource> Deref for Read<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target { self.inner.deref() }
+    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
 pub struct Write<'a, T: Resource> {
-    inner: RefMapMut<'a, Exclusive<'a>, &'a mut T>,
+    inner: RefMut<'a, Exclusive<'a>, Box<dyn Resource>>,
+    _marker: PhantomData<T>,
 }
 impl<'a, T: 'a + Resource> Deref for Write<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target { self.inner.deref() }
+    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
 impl<'a, T: 'a + Resource> DerefMut for Write<'a, T> {
-    fn deref_mut(&mut self) -> &mut T { self.inner.deref_mut() }
+    fn deref_mut(&mut self) -> &mut T { unsafe { self.inner.downcast_mut_unchecked::<T>() } }
 }
 
 #[derive(Default)]
@@ -95,33 +108,28 @@ impl Resources {
             .insert(TypeId::of::<T>(), AtomicRefCell::new(Box::new(value)));
     }
 
-    /// Removes from the storage and moves ownership out to the caller
     pub fn remove<T: Resource>(&mut self) -> Option<T> {
-        self.storage
-            .remove(&TypeId::of::<T>())?
-            .into_inner()
-            .downcast()
-            .ok()?
-            .map(|x| *x)
+        Some(
+            *self
+                .storage
+                .remove(&TypeId::of::<T>())?
+                .into_inner()
+                .downcast::<T>()
+                .ok()?,
+        )
     }
 
     pub fn get<T: Resource>(&self) -> Option<Read<'_, T>> {
         Some(Read {
-            inner: self.storage.get(&TypeId::of::<T>())?.get().map(|v| unsafe {
-                &*(v as *const std::boxed::Box<(dyn Resource + 'static)> as *const &T)
-            }),
+            inner: self.storage.get(&TypeId::of::<T>())?.get(),
+            _marker: Default::default(),
         })
     }
 
     pub fn get_mut<T: Resource>(&self) -> Option<Write<'_, T>> {
         Some(Write {
-            inner: self
-                .storage
-                .get(&TypeId::of::<T>())?
-                .get_mut()
-                .map_into(|v| unsafe {
-                    &mut *(v as *mut std::boxed::Box<(dyn Resource + 'static)> as *mut T)
-                }),
+            inner: self.storage.get(&TypeId::of::<T>())?.get_mut(),
+            _marker: Default::default(),
         })
     }
 }
