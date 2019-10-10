@@ -173,7 +173,7 @@ impl<'a> StageExecutor<'a> {
 }
 
 /// Trait describing a schedulable type. This is implemented by `System`
-pub trait Schedulable: Sync + Send {
+pub trait Schedulable: Send + Sync {
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
     fn writes(&self) -> (&[TypeId], &[ComponentTypeId]);
     fn prepare(&mut self, world: &World);
@@ -373,6 +373,7 @@ impl PreparedWorld {
     }
 }
 
+// TODO: these assertions should have better errors
 impl PreparedWorld {
     #[inline]
     pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
@@ -404,18 +405,12 @@ pub struct System<R, Q, F>
 where
     R: ResourceSet,
     Q: QuerySet,
-    F: Fn(
-            &mut CommandBuffer,
-            &mut PreparedWorld,
-            &mut <R as ResourceSet>::PreparedResources,
-            &mut <Q as QuerySet>::PreparedQueries,
-        ) + Send
-        + Sync
-        + 'static,
+    F: SystemDisposable<R, Q>,
 {
     resources: R,
     queries: AtomicRefCell<Q>,
-    run_fn: F,
+    run_fn: AtomicRefCell<F>,
+    dispose_fn: Option<Box<dyn Fn(&mut World, &mut Resources) + Send + Sync + 'static>>,
     archetypes: BitSet,
 
     // These are stored statically instead of always iterated and created from the
@@ -430,14 +425,7 @@ impl<R, Q, F> Schedulable for System<R, Q, F>
 where
     R: ResourceSet,
     Q: QuerySet,
-    F: Fn(
-            &mut CommandBuffer,
-            &mut PreparedWorld,
-            &mut <R as ResourceSet>::PreparedResources,
-            &mut <Q as QuerySet>::PreparedQueries,
-        ) + Send
-        + Sync
-        + 'static,
+    F: SystemDisposable<R, Q>,
 {
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
         (&self.access.resources.reads, &self.access.components.reads)
@@ -468,13 +456,58 @@ where
         // This should usually just pull a free block, or allocate a new one...
         // TODO: The BlockAllocator should *ensure* keeping at least 1 free block so this prevents an allocation
 
-        (self.run_fn)(
+        use std::ops::DerefMut;
+        let mut borrow = self.run_fn.get_mut();
+        SystemDisposable::<R, Q>::run(
+            borrow.deref_mut(),
             &mut self.command_buffer.get_mut(),
             &mut world_shim,
             &mut resources,
             &mut prepared_queries,
         );
     }
+}
+
+pub trait SystemDisposable<R, Q>: 'static + Send + Sync
+where
+    R: ResourceSet,
+    Q: QuerySet,
+{
+    fn run(
+        &mut self,
+        commands: &mut CommandBuffer,
+        world: &mut PreparedWorld,
+        resources: &mut <R as ResourceSet>::PreparedResources,
+        queries: &mut <Q as QuerySet>::PreparedQueries,
+    );
+
+    fn dispose(self);
+}
+
+impl<R, Q, F> SystemDisposable<R, Q> for F
+where
+    R: ResourceSet,
+    Q: QuerySet,
+    F: FnMut(
+            &mut CommandBuffer,
+            &mut PreparedWorld,
+            &mut <R as ResourceSet>::PreparedResources,
+            &mut <Q as QuerySet>::PreparedQueries,
+        ) + Send
+        + Sync
+        + 'static,
+{
+    fn run(
+        &mut self,
+        commands: &mut CommandBuffer,
+        world: &mut PreparedWorld,
+        resources: &mut <R as ResourceSet>::PreparedResources,
+        queries: &mut <Q as QuerySet>::PreparedQueries,
+    ) {
+        (self)(commands, world, resources, queries)
+    }
+
+    fn dispose(self) {}
 }
 
 // This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
@@ -517,6 +550,8 @@ pub struct SystemBuilder<Q = (), R = ()> {
     queries: Q,
     resources: R,
 
+    dispose_fn: Option<Box<dyn Fn(&mut World, &mut Resources) + Send + Sync + 'static>>,
+
     resource_access: Access<TypeId>,
     component_access: Access<ComponentTypeId>,
 }
@@ -530,6 +565,7 @@ where
     pub fn new(name: &str) -> SystemBuilder {
         SystemBuilder {
             name: name.to_string(),
+            dispose_fn: None,
             queries: (),
             resources: (),
             resource_access: Access::default(),
@@ -551,6 +587,7 @@ where
 
         SystemBuilder {
             name: self.name,
+            dispose_fn: self.dispose_fn,
             queries: ConsAppend::append(self.queries, query),
             resources: self.resources,
             resource_access: self.resource_access,
@@ -567,6 +604,7 @@ where
         self.resource_access.reads.push(TypeId::of::<T>());
 
         SystemBuilder {
+            dispose_fn: self.dispose_fn,
             resources: ConsAppend::append(self.resources, ReadWrapper::<T>::default()),
             name: self.name,
             queries: self.queries,
@@ -585,6 +623,7 @@ where
         self.resource_access.writes.push(TypeId::of::<T>());
 
         SystemBuilder {
+            dispose_fn: self.dispose_fn,
             resources: ConsAppend::append(self.resources, WriteWrapper::<T>::default()),
             name: self.name,
             queries: self.queries,
@@ -616,11 +655,41 @@ where
         self
     }
 
+    pub fn with_drop<D: Fn(&mut World, &mut Resources) + Send + Sync + 'static>(
+        mut self,
+        dispose_fn: D,
+    ) -> Self {
+        self.dispose_fn = Some(Box::new(dispose_fn));
+
+        self
+    }
+
+    pub fn build_disposable<F>(self, run_fn: F) -> Box<dyn Schedulable>
+    where
+        <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
+        <Q as ConsFlatten>::Output: QuerySet,
+        F: SystemDisposable<<R as ConsFlatten>::Output, <Q as ConsFlatten>::Output>,
+    {
+        Box::new(System {
+            run_fn: AtomicRefCell::new(run_fn),
+            dispose_fn: None,
+            resources: self.resources.flatten(),
+            queries: AtomicRefCell::new(self.queries.flatten()),
+            archetypes: BitSet::default(), //TODO:
+            access: SystemAccess {
+                resources: self.resource_access,
+                components: self.component_access,
+                tags: Access::default(),
+            },
+            command_buffer: AtomicRefCell::new(CommandBuffer::default()),
+        })
+    }
+
     pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
-        F: Fn(
+        F: FnMut(
                 &mut CommandBuffer,
                 &mut PreparedWorld,
                 &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
@@ -630,7 +699,8 @@ where
             + 'static,
     {
         Box::new(System {
-            run_fn,
+            run_fn: AtomicRefCell::new(run_fn),
+            dispose_fn: None,
             resources: self.resources.flatten(),
             queries: AtomicRefCell::new(self.queries.flatten()),
             archetypes: BitSet::default(), //TODO:
@@ -763,5 +833,147 @@ mod tests {
             });
         system.prepare(&world);
         system.run(&resources, &world);
+    }
+
+    #[test]
+    fn fnmut_stateful_system_test() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+        let mut resources = Resources::default();
+        resources.insert(TestResource(123));
+
+        let components = vec![
+            (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
+        ];
+
+        let mut expected = HashMap::<Entity, (Pos, Vel)>::new();
+
+        for (i, e) in world.insert((), components.clone()).iter().enumerate() {
+            if let Some((pos, rot)) = components.get(i) {
+                expected.insert(*e, (*pos, *rot));
+            }
+        }
+
+        let mut state = 0;
+        let mut system = SystemBuilder::<()>::new("TestSystem")
+            .read_resource::<TestResource>()
+            .with_query(Read::<Pos>::query())
+            .with_query(Read::<Vel>::query())
+            .build(move |_commands, _world, resource, queries| {
+                state += 1;
+            });
+
+        system.prepare(&world);
+        system.run(&resources, &world);
+    }
+
+    pub struct TestDisposable {
+        pub count: usize,
+    }
+    impl<R, Q> SystemDisposable<R, Q> for TestDisposable
+    where
+        R: ResourceSet,
+        Q: QuerySet,
+    {
+        fn run(
+            &mut self,
+            commands: &mut CommandBuffer,
+            world: &mut PreparedWorld,
+            resources: &mut <R as ResourceSet>::PreparedResources,
+            queries: &mut <Q as QuerySet>::PreparedQueries,
+        ) {
+            self.count += 1;
+        }
+
+        fn dispose(self) {
+            assert_eq!(self.count, 4);
+        }
+    }
+
+    #[test]
+    fn system_disposable_test() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+        let mut resources = Resources::default();
+        resources.insert(TestResource(123));
+
+        let components = vec![
+            (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
+        ];
+
+        let mut expected = HashMap::<Entity, (Pos, Vel)>::new();
+
+        for (i, e) in world.insert((), components.clone()).iter().enumerate() {
+            if let Some((pos, rot)) = components.get(i) {
+                expected.insert(*e, (*pos, *rot));
+            }
+        }
+
+        let mut state = 0;
+        {
+            let mut system = SystemBuilder::<()>::new("TestSystem")
+                .read_resource::<TestResource>()
+                .with_query(Read::<Pos>::query())
+                .with_query(Read::<Vel>::query())
+                .with_drop(|world, resources| {
+                    println!("dropped!");
+                })
+                .build_disposable(TestDisposable { count: 0 });
+
+            system.prepare(&world);
+            system.run(&resources, &world);
+            system.run(&resources, &world);
+            system.run(&resources, &world);
+            system.run(&resources, &world);
+        }
+    }
+
+    #[test]
+    fn system_drop_test() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+        let mut resources = Resources::default();
+        resources.insert(TestResource(123));
+
+        let components = vec![
+            (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
+        ];
+
+        let mut expected = HashMap::<Entity, (Pos, Vel)>::new();
+
+        for (i, e) in world.insert((), components.clone()).iter().enumerate() {
+            if let Some((pos, rot)) = components.get(i) {
+                expected.insert(*e, (*pos, *rot));
+            }
+        }
+
+        let mut state = 0;
+        {
+            let mut system = SystemBuilder::<()>::new("TestSystem")
+                .read_resource::<TestResource>()
+                .with_query(Read::<Pos>::query())
+                .with_query(Read::<Vel>::query())
+                .with_drop(|world, resources| {
+                    println!("dropped!");
+                })
+                .build(move |_commands, _world, resource, queries| {
+                    state += 1;
+                });
+
+            system.prepare(&world);
+            system.run(&resources, &world);
+            system.run(&resources, &world);
+            system.run(&resources, &world);
+            system.run(&resources, &world);
+        }
     }
 }

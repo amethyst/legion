@@ -21,6 +21,10 @@ pub mod filter_fns {
     ///! Contains functions for constructing filters.
     use super::*;
 
+    pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough, Passthrough> {
+        EntityFilterTuple::new(Passthrough, Passthrough, Passthrough)
+    }
+
     /// Creates an entity data filter which includes chunks that contain
     /// entity data components of type `T`.
     pub fn component<T: Component>(

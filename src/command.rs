@@ -99,6 +99,7 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
+        println!("Adding component: {}", std::any::type_name::<C>());
         world.add_component::<C>(consumed.entity, consumed.component)
     }
 

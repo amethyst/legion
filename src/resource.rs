@@ -78,7 +78,18 @@ pub struct Read<'a, T: 'a + Resource> {
 impl<'a, T: Resource> Deref for Read<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
+    //  #[cfg(debug_assertions)]
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.inner.downcast_ref::<T>().expect(&format!(
+            "Unable to downcast the resource!: {}",
+            std::any::type_name::<T>()
+        ))
+    }
+
+    //  #[cfg(not(debug_assertions))]
+    //  #[inline]
+    //  fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
 pub struct Write<'a, T: Resource> {
@@ -88,11 +99,33 @@ pub struct Write<'a, T: Resource> {
 impl<'a, T: 'a + Resource> Deref for Write<'a, T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
+    //  #[cfg(debug_assertions)]
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.inner.downcast_ref::<T>().expect(&format!(
+            "Unable to downcast the resource!: {}",
+            std::any::type_name::<T>()
+        ))
+    }
+
+    //    #[cfg(not(debug_assertions))]
+    //    #[inline]
+    //    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
 impl<'a, T: 'a + Resource> DerefMut for Write<'a, T> {
-    fn deref_mut(&mut self) -> &mut T { unsafe { self.inner.downcast_mut_unchecked::<T>() } }
+    //    #[cfg(debug_assertions)]
+    #[inline]
+    fn deref_mut(&mut self) -> &mut T {
+        self.inner.downcast_mut::<T>().expect(&format!(
+            "Unable to downcast the resource!: {}",
+            std::any::type_name::<T>()
+        ))
+    }
+
+    //   #[cfg(not(debug_assertions))]
+    //   #[inline]
+    //   fn deref_mut(&mut self) -> &mut T { unsafe { self.inner.downcast_mut_unchecked::<T>() } }
 }
 
 #[derive(Default)]
@@ -144,7 +177,10 @@ impl<T: Resource> ResourceSet for ReadWrapper<T> {
     type PreparedResources = PreparedReadWrapper<T>;
 
     fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
-        let resource = resources.get::<T>().unwrap();
+        let resource = resources.get::<T>().expect(&format!(
+            "Failed to fetch resource: {}",
+            std::any::type_name::<T>()
+        ));
         unsafe { PreparedReadWrapper::new(resource.deref() as *const T) }
     }
 }
@@ -152,7 +188,10 @@ impl<T: Resource> ResourceSet for WriteWrapper<T> {
     type PreparedResources = PreparedWriteWrapper<T>;
 
     fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
-        let mut resource = resources.get_mut::<T>().unwrap();
+        let mut resource = resources.get_mut::<T>().expect(&format!(
+            "Failed to fetch resource: {}",
+            std::any::type_name::<T>()
+        ));
         unsafe { PreparedWriteWrapper::new(resource.deref_mut() as *mut T) }
     }
 }
