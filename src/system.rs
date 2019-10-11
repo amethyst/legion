@@ -362,6 +362,25 @@ impl_queryset_tuple!(A, B, C, D);
 impl_queryset_tuple!(A, B, C, D, E);
 impl_queryset_tuple!(A, B, C, D, E, F);
 impl_queryset_tuple!(A, B, C, D, E, F, G);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y);
+impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
 
 pub struct PreparedWorld {
     world: *const World,
@@ -557,7 +576,7 @@ where
 ///               let mut count = 0;
 ///                {
 ///                    for (entity, pos) in queries.iter_entities() {
-///                        
+///
 ///                    }
 ///                }
 ///            });
