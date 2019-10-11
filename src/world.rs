@@ -191,7 +191,7 @@ impl World {
         let entities = self.entity_allocator.allocation_buffer();
         entities.par_iter().for_each(|e| {
             self.channel
-                .write(EntityEvent::Created(e.clone()))
+                .write(EntityEvent::Created(*e))
                 .expect("Failed to write to WorldCreatedEvent channel.");
         });
 
@@ -203,7 +203,7 @@ impl World {
     /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
         self.channel
-            .write(EntityEvent::Deleted(entity.clone()))
+            .write(EntityEvent::Deleted(entity))
             .expect("Failed to write to EntityEvent::Deleted channel.");
 
         if let Some(location) = self.entity_allocator.delete_entity(entity) {

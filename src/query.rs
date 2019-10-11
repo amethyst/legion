@@ -234,34 +234,6 @@ impl<T: Tag> ViewElement for Tagged<T> {
     type Component = Tagged<T>;
 }
 
-impl<'a> DefaultFilter for () {
-    type Filter = EntityFilterTuple<Passthrough, Passthrough, Passthrough>;
-
-    fn filter() -> Self::Filter { super::filter::filter_fns::passthrough() }
-}
-
-impl<'a> View<'a> for () {
-    type Iter = std::iter::Empty<()>;
-
-    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
-        std::iter::empty::<()>()
-    }
-
-    fn validate() -> bool { true }
-
-    fn reads<D: Component>() -> bool { false }
-
-    fn writes<D: Component>() -> bool { false }
-
-    fn read_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-
-    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-}
-
-impl ViewElement for () {
-    type Component = ();
-}
-
 macro_rules! impl_view_tuple {
     ( $( $ty: ident ),* ) => {
         impl<$( $ty: ViewElement + DefaultFilter ),*> DefaultFilter for ($( $ty, )*) {

@@ -1,6 +1,5 @@
 use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
 use crate::query::{Read, Write};
-use derivative::Derivative;
 use mopa::Any;
 use std::{
     any::TypeId,
@@ -70,10 +69,12 @@ impl<'a, T: Resource> Deref for Fetch<'a, T> {
     //  #[cfg(debug_assertions)]
     #[inline]
     fn deref(&self) -> &Self::Target {
-        self.inner.downcast_ref::<T>().expect(&format!(
-            "Unable to downcast the resource!: {}",
-            std::any::type_name::<T>()
-        ))
+        self.inner.downcast_ref::<T>().unwrap_or_else(|| {
+            panic!(
+                "Unable to downcast the resource!: {}",
+                std::any::type_name::<T>()
+            )
+        })
     }
 
     //  #[cfg(not(debug_assertions))]
@@ -91,10 +92,12 @@ impl<'a, T: 'a + Resource> Deref for FetchMut<'a, T> {
     //  #[cfg(debug_assertions)]
     #[inline]
     fn deref(&self) -> &Self::Target {
-        self.inner.downcast_ref::<T>().expect(&format!(
-            "Unable to downcast the resource!: {}",
-            std::any::type_name::<T>()
-        ))
+        self.inner.downcast_ref::<T>().unwrap_or_else(|| {
+            panic!(
+                "Unable to downcast the resource!: {}",
+                std::any::type_name::<T>()
+            )
+        })
     }
 
     //    #[cfg(not(debug_assertions))]
@@ -106,10 +109,12 @@ impl<'a, T: 'a + Resource> DerefMut for FetchMut<'a, T> {
     //    #[cfg(debug_assertions)]
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
-        self.inner.downcast_mut::<T>().expect(&format!(
-            "Unable to downcast the resource!: {}",
-            std::any::type_name::<T>()
-        ))
+        self.inner.downcast_mut::<T>().unwrap_or_else(|| {
+            panic!(
+                "Unable to downcast the resource!: {}",
+                std::any::type_name::<T>()
+            )
+        })
     }
 
     //   #[cfg(not(debug_assertions))]
@@ -166,10 +171,9 @@ impl<T: Resource> ResourceSet for Read<T> {
     type PreparedResources = PreparedRead<T>;
 
     fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
-        let resource = resources.get::<T>().expect(&format!(
-            "Failed to fetch resource: {}",
-            std::any::type_name::<T>()
-        ));
+        let resource = resources
+            .get::<T>()
+            .unwrap_or_else(|| panic!("Failed to fetch resource!: {}", std::any::type_name::<T>()));
         unsafe { PreparedRead::new(resource.deref() as *const T) }
     }
 }
@@ -177,10 +181,9 @@ impl<T: Resource> ResourceSet for Write<T> {
     type PreparedResources = PreparedWrite<T>;
 
     fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
-        let mut resource = resources.get_mut::<T>().expect(&format!(
-            "Failed to fetch resource: {}",
-            std::any::type_name::<T>()
-        ));
+        let mut resource = resources
+            .get_mut::<T>()
+            .unwrap_or_else(|| panic!("Failed to fetch resource!: {}", std::any::type_name::<T>()));
         unsafe { PreparedWrite::new(resource.deref_mut() as *mut T) }
     }
 }

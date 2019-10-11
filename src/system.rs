@@ -547,6 +547,52 @@ where
     fn dispose(self) {}
 }
 
+struct SystemDisposableStateful<
+    T: Send + Sync,
+    R: ResourceSet,
+    Q: QuerySet,
+    F: FnMut(
+            &mut T,
+            &mut CommandBuffer,
+            &mut PreparedWorld,
+            &mut <R as ResourceSet>::PreparedResources,
+            &mut <Q as QuerySet>::PreparedQueries,
+        ) + Send
+        + Sync
+        + 'static,
+>(F, T, PhantomData<(R, Q)>);
+
+impl<T, R, Q, F> SystemDisposable for SystemDisposableStateful<T, R, Q, F>
+where
+    T: Send + Sync,
+    R: ResourceSet,
+    Q: QuerySet,
+    F: FnMut(
+            &mut T,
+            &mut CommandBuffer,
+            &mut PreparedWorld,
+            &mut <R as ResourceSet>::PreparedResources,
+            &mut <Q as QuerySet>::PreparedQueries,
+        ) + Send
+        + Sync
+        + 'static,
+{
+    type Resources = R;
+    type Queries = Q;
+
+    fn run(
+        &mut self,
+        commands: &mut CommandBuffer,
+        world: &mut PreparedWorld,
+        resources: &mut <R as ResourceSet>::PreparedResources,
+        queries: &mut <Q as QuerySet>::PreparedQueries,
+    ) {
+        (self.0)(&mut self.1, commands, world, resources, queries)
+    }
+
+    fn dispose(self) {}
+}
+
 // This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
 // for this system. Access types are instead stored and abstracted in the top level vec here
 // so the underlying ResourceSet type functions from the queries don't need to allocate.
@@ -699,7 +745,7 @@ where
         self
     }
 
-    pub fn build_disposable<F>(self, disposable: F) -> Box<dyn Schedulable>
+    fn build_disposable<F>(self, disposable: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
@@ -721,6 +767,28 @@ where
             },
             command_buffer: AtomicRefCell::new(CommandBuffer::default()),
         })
+    }
+
+    pub fn build_stateful<F, S>(self, initial_state: S, run_fn: F) -> Box<dyn Schedulable>
+    where
+        S: 'static + Send + Sync,
+        <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
+        <Q as ConsFlatten>::Output: QuerySet,
+        F: FnMut(
+                &mut S,
+                &mut CommandBuffer,
+                &mut PreparedWorld,
+                &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
+                &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
+            ) + Send
+            + Sync
+            + 'static,
+    {
+        self.build_disposable(SystemDisposableStateful(
+            run_fn,
+            initial_state,
+            Default::default(),
+        ))
     }
 
     pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
@@ -745,7 +813,10 @@ mod tests {
     use super::*;
     use crate::prelude::*;
     use crate::resource::Resources;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    };
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
@@ -908,10 +979,10 @@ mod tests {
 
         fn run(
             &mut self,
-            commands: &mut CommandBuffer,
-            world: &mut PreparedWorld,
-            resources: &mut <Self::Resources as ResourceSet>::PreparedResources,
-            queries: &mut <Self::Queries as QuerySet>::PreparedQueries,
+            _: &mut CommandBuffer,
+            _: &mut PreparedWorld,
+            _: &mut <Self::Resources as ResourceSet>::PreparedResources,
+            _: &mut <Self::Queries as QuerySet>::PreparedQueries,
         ) {
             self.count += 1;
         }
@@ -983,7 +1054,7 @@ mod tests {
             }
         }
 
-        let mut state = 0;
+        let mut state = Arc::new(AtomicUsize::new(0));
         {
             let mut system = SystemBuilder::<()>::new("TestSystem")
                 .read_resource::<TestResource>()
@@ -992,15 +1063,20 @@ mod tests {
                 .with_drop(|world, resources| {
                     println!("dropped!");
                 })
-                .build(move |_commands, _world, resource, queries| {
-                    state += 1;
-                });
+                .build_stateful(
+                    state.clone(),
+                    move |state, _commands, _world, resource, queries| {
+                        state.fetch_add(1, Ordering::SeqCst);
+                    },
+                );
 
             system.prepare(&world);
             system.run(&resources, &world);
             system.run(&resources, &world);
             system.run(&resources, &world);
             system.run(&resources, &world);
+
+            assert_eq!(state.load(Ordering::SeqCst), 4);
         }
     }
 }

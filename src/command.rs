@@ -150,6 +150,7 @@ impl<'a> EntityBuilder<'a> {
     pub fn build(self) {}
 }
 
+#[allow(clippy::enum_variant_names)]
 enum EntityCommand {
     WriteWorld(Arc<dyn WorldWritable>),
     ExecWorld(Arc<dyn Fn(&World)>),
@@ -167,7 +168,7 @@ unsafe impl Send for CommandBuffer {}
 unsafe impl Sync for CommandBuffer {}
 
 impl CommandBuffer {
-    pub fn build_entity<'a>(&'a mut self) -> Option<EntityBuilder<'a>> {
+    pub fn build_entity(&mut self) -> Option<EntityBuilder<'_>> {
         let entity = self.create_entity()?;
         Some(EntityBuilder::new(entity, self))
     }
@@ -275,7 +276,6 @@ impl CommandBuffer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::prelude::*;
 
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -285,40 +285,6 @@ mod tests {
     #[derive(Default)]
     struct TestResource(pub i32);
 
-    /*
-    #[test]
-    fn delayed_builder_test() {
-        let _ = env_logger::builder().is_test(true).try_init();
-
-        let universe = Universe::new();
-        let mut world = universe.create_world();
-
-        let components = vec![
-            (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
-            (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
-        ];
-        let components_len = components.len();
-        let mut command = CommandBuffer::default();
-        command.swap_block(&mut world);
-        command
-            .build_entity()
-            .unwrap()
-            .with_component(Pos(1., 2., 3.))
-            .build();
-
-        command.write(&mut world);
-
-        let mut query = Read::<Pos>::query();
-
-        let mut count = 0;
-        for (_, _) in query.iter_entities(&world) {
-            //assert_eq!(expected.get(&entity).unwrap().0, *pos);
-            count += 1;
-        }
-
-        assert_eq!(components_len, count);
-    }
-        */
     #[test]
     fn simple_write_test() {
         let _ = env_logger::builder().is_test(true).try_init();
