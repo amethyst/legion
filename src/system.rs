@@ -433,7 +433,6 @@ where
     resources: R,
     queries: AtomicRefCell<Q>,
     run_fn: AtomicRefCell<F>,
-    dispose_fn: Option<Box<dyn Fn(&mut World, &mut Resources) + Send + Sync + 'static>>,
     archetypes: BitSet,
 
     // These are stored statically instead of always iterated and created from the
@@ -503,7 +502,7 @@ pub trait SystemDisposable: Send + Sync {
         queries: &mut <Self::Queries as QuerySet>::PreparedQueries,
     );
 
-    fn dispose(self);
+    fn dispose(self, world: &mut World, resources: &mut Resources);
 }
 
 struct SystemDisposableFnMut<
@@ -545,7 +544,7 @@ where
         (self.0)(commands, world, resources, queries)
     }
 
-    fn dispose(self) {}
+    fn dispose(self, _: &mut World, _: &mut Resources) {}
 }
 
 #[derive(Shrinkwrap)]
@@ -554,12 +553,12 @@ struct StateWrapper<T: Send>(pub T);
 // This is safe because systems are never called from 2 threads simultaneously.
 unsafe impl<T: Send> Sync for StateWrapper<T> {}
 
-struct SystemDisposableStateful<
-    T: Send,
+struct SystemDisposableState<
+    S: Send,
     R: ResourceSet,
     Q: QuerySet,
     F: FnMut(
-            &mut T,
+            &mut S,
             &mut CommandBuffer,
             &mut PreparedWorld,
             &mut <R as ResourceSet>::PreparedResources,
@@ -567,15 +566,16 @@ struct SystemDisposableStateful<
         ) + Send
         + Sync
         + 'static,
->(F, StateWrapper<T>, PhantomData<(R, Q)>);
+    D: FnOnce(S, &mut World, &mut Resources) + Send + Sync + 'static,
+>(F, D, StateWrapper<S>, PhantomData<(R, Q)>);
 
-impl<T, R, Q, F> SystemDisposable for SystemDisposableStateful<T, R, Q, F>
+impl<S, R, Q, F, D> SystemDisposable for SystemDisposableState<S, R, Q, F, D>
 where
-    T: Send,
+    S: Send,
     R: ResourceSet,
     Q: QuerySet,
     F: FnMut(
-            &mut T,
+            &mut S,
             &mut CommandBuffer,
             &mut PreparedWorld,
             &mut <R as ResourceSet>::PreparedResources,
@@ -583,6 +583,7 @@ where
         ) + Send
         + Sync
         + 'static,
+    D: FnOnce(S, &mut World, &mut Resources) + Send + Sync + 'static,
 {
     type Resources = R;
     type Queries = Q;
@@ -594,10 +595,12 @@ where
         resources: &mut <R as ResourceSet>::PreparedResources,
         queries: &mut <Q as QuerySet>::PreparedQueries,
     ) {
-        (self.0)(&mut self.1, commands, world, resources, queries)
+        (self.0)(&mut self.2, commands, world, resources, queries)
     }
 
-    fn dispose(self) {}
+    fn dispose(self, world: &mut World, resources: &mut Resources) {
+        (self.1)((self.2).0, world, resources)
+    }
 }
 
 // This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
@@ -640,8 +643,6 @@ pub struct SystemBuilder<Q = (), R = ()> {
     queries: Q,
     resources: R,
 
-    dispose_fn: Option<Box<dyn Fn(&mut World, &mut Resources) + Send + Sync + 'static>>,
-
     resource_access: Access<TypeId>,
     component_access: Access<ComponentTypeId>,
 }
@@ -655,7 +656,6 @@ where
     pub fn new(name: &str) -> SystemBuilder {
         SystemBuilder {
             name: name.to_string(),
-            dispose_fn: None,
             queries: (),
             resources: (),
             resource_access: Access::default(),
@@ -677,7 +677,6 @@ where
 
         SystemBuilder {
             name: self.name,
-            dispose_fn: self.dispose_fn,
             queries: ConsAppend::append(self.queries, query),
             resources: self.resources,
             resource_access: self.resource_access,
@@ -694,7 +693,6 @@ where
         self.resource_access.reads.push(TypeId::of::<T>());
 
         SystemBuilder {
-            dispose_fn: self.dispose_fn,
             resources: ConsAppend::append(self.resources, Read::<T>::default()),
             name: self.name,
             queries: self.queries,
@@ -711,7 +709,6 @@ where
         self.resource_access.writes.push(TypeId::of::<T>());
 
         SystemBuilder {
-            dispose_fn: self.dispose_fn,
             resources: ConsAppend::append(self.resources, Write::<T>::default()),
             name: self.name,
             queries: self.queries,
@@ -743,16 +740,7 @@ where
         self
     }
 
-    pub fn with_drop<D: Fn(&mut World, &mut Resources) + Send + Sync + 'static>(
-        mut self,
-        dispose_fn: D,
-    ) -> Self {
-        self.dispose_fn = Some(Box::new(dispose_fn));
-
-        self
-    }
-
-    fn build_disposable<F>(self, disposable: F) -> Box<dyn Schedulable>
+    fn build_system_disposable<F>(self, disposable: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
@@ -763,7 +751,6 @@ where
     {
         Box::new(System {
             run_fn: AtomicRefCell::new(disposable),
-            dispose_fn: None,
             resources: self.resources.flatten(),
             queries: AtomicRefCell::new(self.queries.flatten()),
             archetypes: BitSet::default(), //TODO:
@@ -776,7 +763,12 @@ where
         })
     }
 
-    pub fn build_stateful<F, S>(self, initial_state: S, run_fn: F) -> Box<dyn Schedulable>
+    pub fn build_disposable<F, D, S>(
+        self,
+        initial_state: S,
+        run_fn: F,
+        dispose_fn: D,
+    ) -> Box<dyn Schedulable>
     where
         S: 'static + Send,
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
@@ -790,9 +782,11 @@ where
             ) + Send
             + Sync
             + 'static,
+        D: FnOnce(S, &mut World, &mut Resources) + Send + Sync + 'static,
     {
-        self.build_disposable(SystemDisposableStateful(
+        self.build_system_disposable(SystemDisposableState(
             run_fn,
+            dispose_fn,
             StateWrapper(initial_state),
             Default::default(),
         ))
@@ -811,7 +805,7 @@ where
             + Sync
             + 'static,
     {
-        self.build_disposable(SystemDisposableFnMut(run_fn, Default::default()))
+        self.build_system_disposable(SystemDisposableFnMut(run_fn, Default::default()))
     }
 }
 
