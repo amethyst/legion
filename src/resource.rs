@@ -1,4 +1,5 @@
 use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
+use crate::query::{Read, Write};
 use derivative::Derivative;
 use mopa::Any;
 use std::{
@@ -27,55 +28,43 @@ mod __resource_mopafy_scope {
     mopafy!(Resource);
 }
 
-pub struct PreparedReadWrapper<T: Resource> {
+pub struct PreparedRead<T: Resource> {
     resource: *const T,
 }
-impl<T: Resource> PreparedReadWrapper<T> {
+impl<T: Resource> PreparedRead<T> {
     pub(crate) unsafe fn new(resource: *const T) -> Self { Self { resource } }
 }
-impl<T: Resource> Deref for PreparedReadWrapper<T> {
+impl<T: Resource> Deref for PreparedRead<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target { unsafe { &*self.resource } }
 }
-unsafe impl<T: Resource> Send for PreparedReadWrapper<T> {}
-unsafe impl<T: Resource> Sync for PreparedReadWrapper<T> {}
+unsafe impl<T: Resource> Send for PreparedRead<T> {}
+unsafe impl<T: Resource> Sync for PreparedRead<T> {}
 
-pub struct PreparedWriteWrapper<T: Resource> {
+pub struct PreparedWrite<T: Resource> {
     resource: *mut T,
 }
-impl<T: Resource> Deref for PreparedWriteWrapper<T> {
+impl<T: Resource> Deref for PreparedWrite<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target { unsafe { &*self.resource } }
 }
 
-impl<T: Resource> DerefMut for PreparedWriteWrapper<T> {
+impl<T: Resource> DerefMut for PreparedWrite<T> {
     fn deref_mut(&mut self) -> &mut T { unsafe { &mut *self.resource } }
 }
-impl<T: Resource> PreparedWriteWrapper<T> {
+impl<T: Resource> PreparedWrite<T> {
     pub(crate) unsafe fn new(resource: *mut T) -> Self { Self { resource } }
 }
-unsafe impl<T: Resource> Send for PreparedWriteWrapper<T> {}
-unsafe impl<T: Resource> Sync for PreparedWriteWrapper<T> {}
+unsafe impl<T: Resource> Send for PreparedWrite<T> {}
+unsafe impl<T: Resource> Sync for PreparedWrite<T> {}
 
-#[derive(Derivative)]
-#[derivative(Default(bound = ""))]
-pub struct ReadWrapper<T> {
-    _marker: PhantomData<T>,
-}
-
-#[derive(Derivative)]
-#[derivative(Default(bound = ""))]
-pub struct WriteWrapper<T> {
-    _marker: PhantomData<T>,
-}
-
-pub struct Read<'a, T: 'a + Resource> {
+pub struct Fetch<'a, T: 'a + Resource> {
     inner: Ref<'a, Shared<'a>, Box<dyn Resource>>,
     _marker: PhantomData<T>,
 }
-impl<'a, T: Resource> Deref for Read<'a, T> {
+impl<'a, T: Resource> Deref for Fetch<'a, T> {
     type Target = T;
 
     //  #[cfg(debug_assertions)]
@@ -92,11 +81,11 @@ impl<'a, T: Resource> Deref for Read<'a, T> {
     //  fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
-pub struct Write<'a, T: Resource> {
+pub struct FetchMut<'a, T: Resource> {
     inner: RefMut<'a, Exclusive<'a>, Box<dyn Resource>>,
     _marker: PhantomData<T>,
 }
-impl<'a, T: 'a + Resource> Deref for Write<'a, T> {
+impl<'a, T: 'a + Resource> Deref for FetchMut<'a, T> {
     type Target = T;
 
     //  #[cfg(debug_assertions)]
@@ -113,7 +102,7 @@ impl<'a, T: 'a + Resource> Deref for Write<'a, T> {
     //    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
-impl<'a, T: 'a + Resource> DerefMut for Write<'a, T> {
+impl<'a, T: 'a + Resource> DerefMut for FetchMut<'a, T> {
     //    #[cfg(debug_assertions)]
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
@@ -152,15 +141,15 @@ impl Resources {
         )
     }
 
-    pub fn get<T: Resource>(&self) -> Option<Read<'_, T>> {
-        Some(Read {
+    pub fn get<T: Resource>(&self) -> Option<Fetch<'_, T>> {
+        Some(Fetch {
             inner: self.storage.get(&TypeId::of::<T>())?.get(),
             _marker: Default::default(),
         })
     }
 
-    pub fn get_mut<T: Resource>(&self) -> Option<Write<'_, T>> {
-        Some(Write {
+    pub fn get_mut<T: Resource>(&self) -> Option<FetchMut<'_, T>> {
+        Some(FetchMut {
             inner: self.storage.get(&TypeId::of::<T>())?.get_mut(),
             _marker: Default::default(),
         })
@@ -173,26 +162,26 @@ impl ResourceSet for () {
     fn fetch(&self, _: &Resources) {}
 }
 
-impl<T: Resource> ResourceSet for ReadWrapper<T> {
-    type PreparedResources = PreparedReadWrapper<T>;
+impl<T: Resource> ResourceSet for Read<T> {
+    type PreparedResources = PreparedRead<T>;
 
     fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
         let resource = resources.get::<T>().expect(&format!(
             "Failed to fetch resource: {}",
             std::any::type_name::<T>()
         ));
-        unsafe { PreparedReadWrapper::new(resource.deref() as *const T) }
+        unsafe { PreparedRead::new(resource.deref() as *const T) }
     }
 }
-impl<T: Resource> ResourceSet for WriteWrapper<T> {
-    type PreparedResources = PreparedWriteWrapper<T>;
+impl<T: Resource> ResourceSet for Write<T> {
+    type PreparedResources = PreparedWrite<T>;
 
     fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
         let mut resource = resources.get_mut::<T>().expect(&format!(
             "Failed to fetch resource: {}",
             std::any::type_name::<T>()
         ));
-        unsafe { PreparedWriteWrapper::new(resource.deref_mut() as *mut T) }
+        unsafe { PreparedWrite::new(resource.deref_mut() as *mut T) }
     }
 }
 

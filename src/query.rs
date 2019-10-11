@@ -99,7 +99,8 @@ impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
 }
 
 /// Reads a single entity data component type from a chunk.
-#[derive(Debug)]
+#[derive(Derivative, Debug)]
+#[derivative(Default(bound = ""))]
 pub struct Read<T: Component>(PhantomData<T>);
 
 impl<'a, T: Component> DefaultFilter for Read<T> {
@@ -138,7 +139,8 @@ impl<T: Component> ViewElement for Read<T> {
 }
 
 /// Writes to a single entity data component type from a chunk.
-#[derive(Debug)]
+#[derive(Derivative, Debug)]
+#[derivative(Default(bound = ""))]
 pub struct Write<T: Component>(PhantomData<T>);
 
 impl<'a, T: Component> DefaultFilter for Write<T> {

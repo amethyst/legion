@@ -3,8 +3,10 @@ use crate::command::CommandBuffer;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::entity::Entity;
 use crate::filter::EntityFilter;
-use crate::query::{Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, View};
-use crate::resource::{ReadWrapper, Resource, ResourceSet, Resources, WriteWrapper};
+use crate::query::{
+    Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write,
+};
+use crate::resource::{Resource, ResourceSet, Resources};
 use crate::storage::{Component, ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
@@ -15,6 +17,7 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::repeat;
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Stages represent discrete steps of a game's loop, such as "start", "update", "draw", "end", etc.
@@ -405,7 +408,7 @@ pub struct System<R, Q, F>
 where
     R: ResourceSet,
     Q: QuerySet,
-    F: SystemDisposable<R, Q>,
+    F: SystemDisposable<Resources = R, Queries = Q>,
 {
     resources: R,
     queries: AtomicRefCell<Q>,
@@ -425,7 +428,7 @@ impl<R, Q, F> Schedulable for System<R, Q, F>
 where
     R: ResourceSet,
     Q: QuerySet,
-    F: SystemDisposable<R, Q>,
+    F: SystemDisposable<Resources = R, Queries = Q>,
 {
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
         (&self.access.resources.reads, &self.access.components.reads)
@@ -458,7 +461,7 @@ where
 
         use std::ops::DerefMut;
         let mut borrow = self.run_fn.get_mut();
-        SystemDisposable::<R, Q>::run(
+        SystemDisposable::run(
             borrow.deref_mut(),
             &mut self.command_buffer.get_mut(),
             &mut world_shim,
@@ -468,23 +471,35 @@ where
     }
 }
 
-pub trait SystemDisposable<R, Q>: 'static + Send + Sync
-where
-    R: ResourceSet,
-    Q: QuerySet,
-{
+pub trait SystemDisposable: Send + Sync {
+    type Resources: ResourceSet;
+    type Queries: QuerySet;
+
     fn run(
         &mut self,
         commands: &mut CommandBuffer,
         world: &mut PreparedWorld,
-        resources: &mut <R as ResourceSet>::PreparedResources,
-        queries: &mut <Q as QuerySet>::PreparedQueries,
+        resources: &mut <Self::Resources as ResourceSet>::PreparedResources,
+        queries: &mut <Self::Queries as QuerySet>::PreparedQueries,
     );
 
     fn dispose(self);
 }
 
-impl<R, Q, F> SystemDisposable<R, Q> for F
+struct SystemDisposableFnMut<
+    R: ResourceSet,
+    Q: QuerySet,
+    F: FnMut(
+            &mut CommandBuffer,
+            &mut PreparedWorld,
+            &mut <R as ResourceSet>::PreparedResources,
+            &mut <Q as QuerySet>::PreparedQueries,
+        ) + Send
+        + Sync
+        + 'static,
+>(F, PhantomData<(R, Q)>);
+
+impl<R, Q, F> SystemDisposable for SystemDisposableFnMut<R, Q, F>
 where
     R: ResourceSet,
     Q: QuerySet,
@@ -497,6 +512,9 @@ where
         + Sync
         + 'static,
 {
+    type Resources = R;
+    type Queries = Q;
+
     fn run(
         &mut self,
         commands: &mut CommandBuffer,
@@ -504,7 +522,7 @@ where
         resources: &mut <R as ResourceSet>::PreparedResources,
         queries: &mut <Q as QuerySet>::PreparedQueries,
     ) {
-        (self)(commands, world, resources, queries)
+        (self.0)(commands, world, resources, queries)
     }
 
     fn dispose(self) {}
@@ -595,36 +613,34 @@ where
         }
     }
 
-    pub fn read_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<ReadWrapper<T>>>::Output>
+    pub fn read_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<Read<T>>>::Output>
     where
         T: 'static + Resource,
-        R: ConsAppend<ReadWrapper<T>>,
-        <R as ConsAppend<ReadWrapper<T>>>::Output: ConsFlatten,
+        R: ConsAppend<Read<T>>,
+        <R as ConsAppend<Read<T>>>::Output: ConsFlatten,
     {
         self.resource_access.reads.push(TypeId::of::<T>());
 
         SystemBuilder {
             dispose_fn: self.dispose_fn,
-            resources: ConsAppend::append(self.resources, ReadWrapper::<T>::default()),
+            resources: ConsAppend::append(self.resources, Read::<T>::default()),
             name: self.name,
             queries: self.queries,
             resource_access: self.resource_access,
             component_access: self.component_access,
         }
     }
-    pub fn write_resource<T>(
-        mut self,
-    ) -> SystemBuilder<Q, <R as ConsAppend<WriteWrapper<T>>>::Output>
+    pub fn write_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<Write<T>>>::Output>
     where
         T: 'static + Resource,
-        R: ConsAppend<WriteWrapper<T>>,
-        <R as ConsAppend<WriteWrapper<T>>>::Output: ConsFlatten,
+        R: ConsAppend<Write<T>>,
+        <R as ConsAppend<Write<T>>>::Output: ConsFlatten,
     {
         self.resource_access.writes.push(TypeId::of::<T>());
 
         SystemBuilder {
             dispose_fn: self.dispose_fn,
-            resources: ConsAppend::append(self.resources, WriteWrapper::<T>::default()),
+            resources: ConsAppend::append(self.resources, Write::<T>::default()),
             name: self.name,
             queries: self.queries,
             resource_access: self.resource_access,
@@ -664,14 +680,17 @@ where
         self
     }
 
-    pub fn build_disposable<F>(self, run_fn: F) -> Box<dyn Schedulable>
+    pub fn build_disposable<F>(self, disposable: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
-        F: SystemDisposable<<R as ConsFlatten>::Output, <Q as ConsFlatten>::Output>,
+        F: SystemDisposable<
+                Resources = <R as ConsFlatten>::Output,
+                Queries = <Q as ConsFlatten>::Output,
+            > + 'static,
     {
         Box::new(System {
-            run_fn: AtomicRefCell::new(run_fn),
+            run_fn: AtomicRefCell::new(disposable),
             dispose_fn: None,
             resources: self.resources.flatten(),
             queries: AtomicRefCell::new(self.queries.flatten()),
@@ -698,19 +717,7 @@ where
             + Sync
             + 'static,
     {
-        Box::new(System {
-            run_fn: AtomicRefCell::new(run_fn),
-            dispose_fn: None,
-            resources: self.resources.flatten(),
-            queries: AtomicRefCell::new(self.queries.flatten()),
-            archetypes: BitSet::default(), //TODO:
-            access: SystemAccess {
-                resources: self.resource_access,
-                components: self.component_access,
-                tags: Access::default(),
-            },
-            command_buffer: AtomicRefCell::new(CommandBuffer::default()),
-        })
+        self.build_disposable(SystemDisposableFnMut(run_fn, Default::default()))
     }
 }
 
@@ -870,20 +877,22 @@ mod tests {
         system.run(&resources, &world);
     }
 
-    pub struct TestDisposable {
+    use crate::filter::{ComponentFilter, EntityFilterTuple, Passthrough};
+
+    struct TestDisposable {
         pub count: usize,
     }
-    impl<R, Q> SystemDisposable<R, Q> for TestDisposable
-    where
-        R: ResourceSet,
-        Q: QuerySet,
-    {
+    impl SystemDisposable for TestDisposable {
+        type Resources = Read<TestResource>;
+        type Queries =
+            Query<Read<Pos>, EntityFilterTuple<ComponentFilter<Pos>, Passthrough, Passthrough>>;
+
         fn run(
             &mut self,
             commands: &mut CommandBuffer,
             world: &mut PreparedWorld,
-            resources: &mut <R as ResourceSet>::PreparedResources,
-            queries: &mut <Q as QuerySet>::PreparedQueries,
+            resources: &mut <Self::Resources as ResourceSet>::PreparedResources,
+            queries: &mut <Self::Queries as QuerySet>::PreparedQueries,
         ) {
             self.count += 1;
         }
@@ -920,7 +929,6 @@ mod tests {
             let mut system = SystemBuilder::<()>::new("TestSystem")
                 .read_resource::<TestResource>()
                 .with_query(Read::<Pos>::query())
-                .with_query(Read::<Vel>::query())
                 .with_drop(|world, resources| {
                     println!("dropped!");
                 })
