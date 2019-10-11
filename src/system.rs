@@ -13,6 +13,7 @@ use bit_set::BitSet;
 use derivative::Derivative;
 use itertools::izip;
 use rayon::prelude::*;
+use shrinkwraprs::Shrinkwrap;
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -547,8 +548,14 @@ where
     fn dispose(self) {}
 }
 
+#[derive(Shrinkwrap)]
+#[shrinkwrap(mutable)]
+struct StateWrapper<T: Send>(pub T);
+// This is safe because systems are never called from 2 threads simultaneously.
+unsafe impl<T: Send> Sync for StateWrapper<T> {}
+
 struct SystemDisposableStateful<
-    T: Send + Sync,
+    T: Send,
     R: ResourceSet,
     Q: QuerySet,
     F: FnMut(
@@ -560,11 +567,11 @@ struct SystemDisposableStateful<
         ) + Send
         + Sync
         + 'static,
->(F, T, PhantomData<(R, Q)>);
+>(F, StateWrapper<T>, PhantomData<(R, Q)>);
 
 impl<T, R, Q, F> SystemDisposable for SystemDisposableStateful<T, R, Q, F>
 where
-    T: Send + Sync,
+    T: Send,
     R: ResourceSet,
     Q: QuerySet,
     F: FnMut(
@@ -771,7 +778,7 @@ where
 
     pub fn build_stateful<F, S>(self, initial_state: S, run_fn: F) -> Box<dyn Schedulable>
     where
-        S: 'static + Send + Sync,
+        S: 'static + Send,
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
         F: FnMut(
@@ -786,7 +793,7 @@ where
     {
         self.build_disposable(SystemDisposableStateful(
             run_fn,
-            initial_state,
+            StateWrapper(initial_state),
             Default::default(),
         ))
     }
