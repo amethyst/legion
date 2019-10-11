@@ -9,6 +9,7 @@ use crate::entity::EntityLocation;
 use crate::filter::ArchetypeFilterData;
 use crate::filter::ChunksetFilterData;
 use crate::filter::Filter;
+use crate::resource::Resources;
 use crate::storage::ArchetypeData;
 use crate::storage::ArchetypeDescription;
 use crate::storage::Component;
@@ -95,6 +96,8 @@ pub struct World {
 
     #[cfg(feature = "events")]
     channel: Channel<EntityEvent>,
+
+    pub resources: Resources,
 }
 
 unsafe impl Send for World {}
@@ -109,6 +112,7 @@ impl World {
             entity_allocator: allocator,
             defrag_progress: 0,
             channel: Channel::default(),
+            resources: Resources::default(),
         }
     }
 

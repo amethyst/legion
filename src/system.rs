@@ -113,7 +113,7 @@ impl<'a> StageExecutor<'a> {
 
     /// Execute this stage
     /// TODO: needs better description
-    pub fn execute(&mut self, resources: &Resources, world: &World) {
+    pub fn execute(&mut self, world: &World) {
         let systems = &mut self.systems;
         let static_dependancy_counts = &self.static_dependancy_counts;
         let awaiting = &mut self.awaiting;
@@ -156,13 +156,13 @@ impl<'a> StageExecutor<'a> {
             .into_par_iter()
             .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
             .for_each(|i| {
-                self.run_recursive(i, resources, world);
+                self.run_recursive(i, world);
             });
     }
 
     /// Recursively execute through the generated depedency cascade and exhaust it.
-    fn run_recursive(&self, i: usize, resources: &Resources, world: &World) {
-        self.systems[i].run(resources, world);
+    fn run_recursive(&self, i: usize, world: &World) {
+        self.systems[i].run(world);
 
         // notify dependants of the completion of this dependancy
         // execute all systems that became available upon the completion of this system
@@ -172,7 +172,7 @@ impl<'a> StageExecutor<'a> {
                 let fetch = self.awaiting[**dep].fetch_sub(1, Ordering::SeqCst);
                 fetch - 1 == 0
             })
-            .for_each(|dep| self.run_recursive(*dep, resources, world));
+            .for_each(|dep| self.run_recursive(*dep, world));
     }
 }
 
@@ -182,7 +182,7 @@ pub trait Schedulable: Send + Sync {
     fn writes(&self) -> (&[TypeId], &[ComponentTypeId]);
     fn prepare(&mut self, world: &World);
     fn accesses_archetypes(&self) -> &BitSet;
-    fn run(&self, resources: &Resources, world: &World);
+    fn run(&self, world: &World);
     fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;
 }
 
@@ -468,8 +468,8 @@ where
         self.command_buffer.get_mut()
     }
 
-    fn run(&self, resources: &Resources, world: &World) {
-        let mut resources = self.resources.fetch(resources);
+    fn run(&self, world: &World) {
+        let mut resources = self.resources.fetch(&world.resources);
         let mut queries = self.queries.get_mut();
         let mut prepared_queries = unsafe { queries.prepare(world) };
         let mut world_shim = unsafe { PreparedWorld::new(world, &self.access.components) };
@@ -502,7 +502,7 @@ pub trait SystemDisposable: Send + Sync {
         queries: &mut <Self::Queries as QuerySet>::PreparedQueries,
     );
 
-    fn dispose(self, world: &mut World, resources: &mut Resources);
+    fn dispose(self, world: &mut World);
 }
 
 struct SystemDisposableFnMut<
@@ -544,7 +544,7 @@ where
         (self.0)(commands, world, resources, queries)
     }
 
-    fn dispose(self, _: &mut World, _: &mut Resources) {}
+    fn dispose(self, _: &mut World) {}
 }
 
 #[derive(Shrinkwrap)]
@@ -566,7 +566,7 @@ struct SystemDisposableState<
         ) + Send
         + Sync
         + 'static,
-    D: FnOnce(S, &mut World, &mut Resources) + Send + Sync + 'static,
+    D: FnOnce(S, &mut World) + Send + Sync + 'static,
 >(F, D, StateWrapper<S>, PhantomData<(R, Q)>);
 
 impl<S, R, Q, F, D> SystemDisposable for SystemDisposableState<S, R, Q, F, D>
@@ -583,7 +583,7 @@ where
         ) + Send
         + Sync
         + 'static,
-    D: FnOnce(S, &mut World, &mut Resources) + Send + Sync + 'static,
+    D: FnOnce(S, &mut World) + Send + Sync + 'static,
 {
     type Resources = R;
     type Queries = Q;
@@ -598,9 +598,7 @@ where
         (self.0)(&mut self.2, commands, world, resources, queries)
     }
 
-    fn dispose(self, world: &mut World, resources: &mut Resources) {
-        (self.1)((self.2).0, world, resources)
-    }
+    fn dispose(self, world: &mut World) { (self.1)((self.2).0, world) }
 }
 
 // This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
@@ -782,7 +780,7 @@ where
             ) + Send
             + Sync
             + 'static,
-        D: FnOnce(S, &mut World, &mut Resources) + Send + Sync + 'static,
+        D: FnOnce(S, &mut World) + Send + Sync + 'static,
     {
         self.build_system_disposable(SystemDisposableState(
             run_fn,
@@ -988,7 +986,7 @@ mod tests {
             self.count += 1;
         }
 
-        fn dispose(self) {
+        fn dispose(self, world: &mut World) {
             assert_eq!(self.count, 4);
         }
     }
