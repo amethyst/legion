@@ -211,6 +211,25 @@ impl_resource_tuple!(A, B, C, D);
 impl_resource_tuple!(A, B, C, D, E);
 impl_resource_tuple!(A, B, C, D, E, F);
 impl_resource_tuple!(A, B, C, D, E, F, G);
+impl_resource_tuple!(A, B, C, D, E, F, G, H);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y);
+impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
 
 #[cfg(test)]
 mod tests {

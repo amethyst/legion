@@ -42,6 +42,30 @@ impl<T: Copy> Channel<T> {
         self.queues[listener_id.0].pop()
     }
 
+    #[cfg(not(feature = "par-iter"))]
+    pub fn write_iter(&self, iter: impl Iterator<Item = T>) -> Result<(), PushError<T>>
+    where
+        T: Send,
+    {
+        for event in iter {
+            self.write(event)?;
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "par-iter")]
+    pub fn write_iter(&self, iter: impl Iterator<Item = T>) -> Result<(), PushError<T>>
+    where
+        T: Sync + Send,
+    {
+        for event in iter {
+            self.write(event)?;
+        }
+
+        Ok(())
+    }
+
     /// par_write requires the event type be `Sync` and `Send` as well as `Copy`
     #[cfg(feature = "par-iter")]
     pub fn write(&self, event: T) -> Result<(), PushError<T>>
