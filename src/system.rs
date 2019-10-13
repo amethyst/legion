@@ -643,6 +643,8 @@ pub struct SystemBuilder<Q = (), R = ()> {
 
     resource_access: Access<TypeId>,
     component_access: Access<ComponentTypeId>,
+
+    explicit_deps: Vec<String>,
 }
 
 impl<Q, R> SystemBuilder<Q, R>
@@ -654,6 +656,7 @@ where
     pub fn new(name: &str) -> SystemBuilder {
         SystemBuilder {
             name: name.to_string(),
+            explicit_deps: Vec::new(),
             queries: (),
             resources: (),
             resource_access: Access::default(),
@@ -675,6 +678,7 @@ where
 
         SystemBuilder {
             name: self.name,
+            explicit_deps: self.explicit_deps,
             queries: ConsAppend::append(self.queries, query),
             resources: self.resources,
             resource_access: self.resource_access,
@@ -693,6 +697,7 @@ where
         SystemBuilder {
             resources: ConsAppend::append(self.resources, Read::<T>::default()),
             name: self.name,
+            explicit_deps: self.explicit_deps,
             queries: self.queries,
             resource_access: self.resource_access,
             component_access: self.component_access,
@@ -709,6 +714,7 @@ where
         SystemBuilder {
             resources: ConsAppend::append(self.resources, Write::<T>::default()),
             name: self.name,
+            explicit_deps: self.explicit_deps,
             queries: self.queries,
             resource_access: self.resource_access,
             component_access: self.component_access,
