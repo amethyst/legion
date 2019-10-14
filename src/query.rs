@@ -300,26 +300,6 @@ impl_view_tuple!(A, B, C);
 impl_view_tuple!(A, B, C, D);
 impl_view_tuple!(A, B, C, D, E);
 impl_view_tuple!(A, B, C, D, E, F);
-impl_view_tuple!(A, B, C, D, E, F, G);
-impl_view_tuple!(A, B, C, D, E, F, G, H);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y);
-impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
 
 /// A type-safe view of a chunk of entities all of the same data layout.
 pub struct Chunk<'a, V: for<'b> View<'b>> {

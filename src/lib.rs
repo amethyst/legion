@@ -233,6 +233,8 @@ pub mod storage;
 pub mod system;
 pub mod world;
 
+pub use bit_set;
+
 #[cfg(feature = "events")]
 pub mod event;
 
@@ -244,4 +246,5 @@ pub mod prelude {
     pub use crate::resource::Resources;
     pub use crate::system::{Schedulable, StageExecutor, System, SystemBuilder};
     pub use crate::world::{Universe, World};
+    pub use bit_set::BitSet;
 }
