@@ -6,7 +6,7 @@ use crate::filter::EntityFilter;
 use crate::query::{
     Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write,
 };
-use crate::resource::{Resource, ResourceSet, Resources};
+use crate::resource::{Resource, ResourceSet};
 use crate::storage::{Component, ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
@@ -170,7 +170,7 @@ impl<'a> StageExecutor<'a> {
             .par_iter()
             .filter(|dep| {
                 let fetch = self.awaiting[**dep].fetch_sub(1, Ordering::SeqCst);
-                fetch - 1 == 0
+                fetch.checked_sub(1).unwrap_or(0) == 0
             })
             .for_each(|dep| self.run_recursive(*dep, world));
     }
@@ -469,7 +469,7 @@ where
     }
 
     fn run(&self, world: &World) {
-        let mut resources = self.resources.fetch(&world.resources);
+        let mut resources = R::fetch(&world.resources);
         let mut queries = self.queries.get_mut();
         let mut prepared_queries = unsafe { queries.prepare(world) };
         let mut world_shim = unsafe { PreparedWorld::new(world, &self.access.components) };
