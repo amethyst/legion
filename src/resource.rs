@@ -11,7 +11,7 @@ use std::{
 pub trait ResourceSet: Send + Sync {
     type PreparedResources;
 
-    fn fetch<'a>(&self, resources: &'a Resources) -> Self::PreparedResources;
+    fn fetch(resources: &Resources) -> Self::PreparedResources;
 }
 
 pub trait Resource: 'static + Any + Send + Sync {}
@@ -159,18 +159,76 @@ impl Resources {
             _marker: Default::default(),
         })
     }
+
+    pub fn get_or_insert_with<T: Resource, F: FnOnce() -> T>(
+        &mut self,
+        f: F,
+    ) -> Option<Fetch<'_, T>> {
+        self.get_or_insert((f)())
+    }
+
+    pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(
+        &mut self,
+        f: F,
+    ) -> Option<FetchMut<'_, T>> {
+        self.get_mut_or_insert((f)())
+    }
+
+    pub fn get_or_insert<T: Resource>(&mut self, value: T) -> Option<Fetch<'_, T>> {
+        Some(Fetch {
+            inner: self
+                .storage
+                .entry(TypeId::of::<T>())
+                .or_insert_with(|| AtomicRefCell::new(Box::new(value)))
+                .get(),
+            _marker: Default::default(),
+        })
+    }
+
+    pub fn get_mut_or_insert<T: Resource>(&mut self, value: T) -> Option<FetchMut<'_, T>> {
+        Some(FetchMut {
+            inner: self
+                .storage
+                .entry(TypeId::of::<T>())
+                .or_insert_with(|| AtomicRefCell::new(Box::new(value)))
+                .get_mut(),
+            _marker: Default::default(),
+        })
+    }
+
+    pub fn get_or_default<T: Resource + Default>(&mut self) -> Option<Fetch<'_, T>> {
+        Some(Fetch {
+            inner: self
+                .storage
+                .entry(TypeId::of::<T>())
+                .or_insert_with(|| AtomicRefCell::new(Box::new(T::default())))
+                .get(),
+            _marker: Default::default(),
+        })
+    }
+
+    pub fn get_mut_or_default<T: Resource + Default>(&mut self) -> Option<FetchMut<'_, T>> {
+        Some(FetchMut {
+            inner: self
+                .storage
+                .entry(TypeId::of::<T>())
+                .or_insert_with(|| AtomicRefCell::new(Box::new(T::default())))
+                .get_mut(),
+            _marker: Default::default(),
+        })
+    }
 }
 
 impl ResourceSet for () {
     type PreparedResources = ();
 
-    fn fetch(&self, _: &Resources) {}
+    fn fetch(_: &Resources) {}
 }
 
 impl<T: Resource> ResourceSet for Read<T> {
     type PreparedResources = PreparedRead<T>;
 
-    fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
+    fn fetch(resources: &Resources) -> Self::PreparedResources {
         let resource = resources
             .get::<T>()
             .unwrap_or_else(|| panic!("Failed to fetch resource!: {}", std::any::type_name::<T>()));
@@ -180,7 +238,7 @@ impl<T: Resource> ResourceSet for Read<T> {
 impl<T: Resource> ResourceSet for Write<T> {
     type PreparedResources = PreparedWrite<T>;
 
-    fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
+    fn fetch(resources: &Resources) -> Self::PreparedResources {
         let mut resource = resources
             .get_mut::<T>()
             .unwrap_or_else(|| panic!("Failed to fetch resource!: {}", std::any::type_name::<T>()));
@@ -195,9 +253,8 @@ macro_rules! impl_resource_tuple {
         {
             type PreparedResources = ($( $ty::PreparedResources, )*);
 
-            fn fetch(&self, resources: &Resources) -> Self::PreparedResources {
-                let ($($ty,)*) = self;
-                ($( $ty.fetch(resources), )*)
+            fn fetch(resources: &Resources) -> Self::PreparedResources {
+                ($( $ty::fetch(resources), )*)
              }
         }
     };
