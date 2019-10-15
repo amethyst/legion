@@ -1,4 +1,5 @@
 use std::cell::UnsafeCell;
+use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -201,6 +202,36 @@ impl<'a, State: 'a + Clone, T: 'a> std::borrow::Borrow<T> for Ref<'a, State, T> 
     fn borrow(&self) -> &T { self.value }
 }
 
+impl<'a, State: 'a + Clone, T> PartialEq for Ref<'a, State, T>
+where
+    T: 'a + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool { self.value == other.value }
+}
+impl<'a, State: 'a + Clone, T> Eq for Ref<'a, State, T> where T: 'a + Eq {}
+
+impl<'a, State: 'a + Clone, T> PartialOrd for Ref<'a, State, T>
+where
+    T: 'a + PartialOrd,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.value.partial_cmp(&other.value)
+    }
+}
+impl<'a, State: 'a + Clone, T> Ord for Ref<'a, State, T>
+where
+    T: 'a + Ord,
+{
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.value.cmp(&other.value) }
+}
+
+impl<'a, State: 'a + Clone, T> Hash for Ref<'a, State, T>
+where
+    T: 'a + Hash,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) { self.value.hash(state); }
+}
+
 #[derive(Debug)]
 pub struct RefMut<'a, State: 'a + UnsafeClone, T: 'a> {
     #[allow(dead_code)]
@@ -254,6 +285,36 @@ impl<'a, State: 'a + UnsafeClone, T: 'a> AsRef<T> for RefMut<'a, State, T> {
 impl<'a, State: 'a + UnsafeClone, T: 'a> std::borrow::Borrow<T> for RefMut<'a, State, T> {
     #[inline(always)]
     fn borrow(&self) -> &T { self.value }
+}
+
+impl<'a, State: 'a + UnsafeClone, T> PartialEq for RefMut<'a, State, T>
+where
+    T: 'a + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool { self.value == other.value }
+}
+impl<'a, State: 'a + UnsafeClone, T> Eq for RefMut<'a, State, T> where T: 'a + Eq {}
+
+impl<'a, State: 'a + UnsafeClone, T> PartialOrd for RefMut<'a, State, T>
+where
+    T: 'a + PartialOrd,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.value.partial_cmp(&other.value)
+    }
+}
+impl<'a, State: 'a + UnsafeClone, T> Ord for RefMut<'a, State, T>
+where
+    T: 'a + Ord,
+{
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.value.cmp(&other.value) }
+}
+
+impl<'a, State: 'a + UnsafeClone, T> Hash for RefMut<'a, State, T>
+where
+    T: 'a + Hash,
+{
+    fn hash<H: Hasher>(&self, state: &mut H) { self.value.hash(state); }
 }
 
 #[derive(Debug)]

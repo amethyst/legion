@@ -31,6 +31,7 @@ trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq {}
 /// Executes all systems that are to be run within a single given stage.
 pub struct StageExecutor<'a> {
     systems: &'a mut [Box<dyn Schedulable>],
+    pool: &'a rayon::ThreadPool,
     static_dependants: Vec<Vec<usize>>,
     dynamic_dependants: Vec<Vec<usize>>,
     static_dependancy_counts: Vec<AtomicUsize>,
@@ -42,7 +43,7 @@ impl<'a> StageExecutor<'a> {
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
-    pub fn new(systems: &'a mut [Box<dyn Schedulable>]) -> Self {
+    pub fn new(systems: &'a mut [Box<dyn Schedulable>], pool: &'a rayon::ThreadPool) -> Self {
         let mut static_dependants: Vec<Vec<_>> = repeat(Vec::new()).take(systems.len()).collect();
         let mut dynamic_dependants: Vec<Vec<_>> = repeat(Vec::new()).take(systems.len()).collect();
         let mut static_dependancy_counts = Vec::new();
@@ -103,6 +104,7 @@ impl<'a> StageExecutor<'a> {
             .for_each(|_| awaiting.push(AtomicUsize::new(0)));
 
         Self {
+            pool,
             awaiting,
             static_dependants,
             dynamic_dependants,
@@ -114,50 +116,52 @@ impl<'a> StageExecutor<'a> {
     /// Execute this stage
     /// TODO: needs better description
     pub fn execute(&mut self, world: &World) {
-        let systems = &mut self.systems;
-        let static_dependancy_counts = &self.static_dependancy_counts;
-        let awaiting = &mut self.awaiting;
+        self.pool.install(|| {
+            let systems = &mut self.systems;
+            let static_dependancy_counts = &self.static_dependancy_counts;
+            let awaiting = &mut self.awaiting;
 
-        // prepare all systems - archetype filters are pre-executed here
-        systems.par_iter_mut().for_each(|sys| sys.prepare(world));
+            // prepare all systems - archetype filters are pre-executed here
+            systems.par_iter_mut().for_each(|sys| sys.prepare(world));
 
-        // determine dynamic dependancies
-        izip!(
-            systems.iter(),
-            self.static_dependants.iter_mut(),
-            self.dynamic_dependants.iter_mut()
-        )
-        .par_bridge()
-        .for_each(|(sys, static_dep, dyn_dep)| {
-            let archetypes = sys.accesses_archetypes();
-            for i in (0..dyn_dep.len()).rev() {
-                let dep = dyn_dep[i];
-                let other = &systems[dep];
+            // determine dynamic dependancies
+            izip!(
+                systems.iter(),
+                self.static_dependants.iter_mut(),
+                self.dynamic_dependants.iter_mut()
+            )
+            .par_bridge()
+            .for_each(|(sys, static_dep, dyn_dep)| {
+                let archetypes = sys.accesses_archetypes();
+                for i in (0..dyn_dep.len()).rev() {
+                    let dep = dyn_dep[i];
+                    let other = &systems[dep];
 
-                // if the archetype sets intersect,
-                // then we can move the dynamic dependant into the static dependants set
-                if !other.accesses_archetypes().is_disjoint(archetypes) {
-                    static_dep.push(dep);
-                    dyn_dep.swap_remove(i);
-                    static_dependancy_counts[dep].fetch_add(1, Ordering::SeqCst);
+                    // if the archetype sets intersect,
+                    // then we can move the dynamic dependant into the static dependants set
+                    if !other.accesses_archetypes().is_disjoint(archetypes) {
+                        static_dep.push(dep);
+                        dyn_dep.swap_remove(i);
+                        static_dependancy_counts[dep].fetch_add(1, Ordering::SeqCst);
+                    }
                 }
-            }
-        });
-
-        // initialize dependancy tracking
-        for (i, count) in static_dependancy_counts.iter().enumerate() {
-            awaiting[i].store(count.load(Ordering::SeqCst), Ordering::SeqCst);
-        }
-
-        let awaiting = &self.awaiting;
-
-        // execute all systems with no outstanding dependancies
-        (0..systems.len())
-            .into_par_iter()
-            .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
-            .for_each(|i| {
-                self.run_recursive(i, world);
             });
+
+            // initialize dependancy tracking
+            for (i, count) in static_dependancy_counts.iter().enumerate() {
+                awaiting[i].store(count.load(Ordering::SeqCst), Ordering::SeqCst);
+            }
+
+            let awaiting = &self.awaiting;
+
+            // execute all systems with no outstanding dependancies
+            (0..systems.len())
+                .into_par_iter()
+                .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
+                .for_each(|i| {
+                    self.run_recursive(i, world);
+                });
+        })
     }
 
     /// Recursively execute through the generated depedency cascade and exhaust it.
@@ -836,8 +840,7 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        let mut resources = Resources::default();
-        resources.insert(TestResource(123));
+        world.resources.insert(TestResource(123));
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -890,8 +893,13 @@ mod tests {
 
         let mut systems = vec![system_one, system_two];
 
-        let mut executor = StageExecutor::new(&mut systems);
-        executor.execute(&resources, &world);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(8)
+            .build()
+            .unwrap();
+
+        let mut executor = StageExecutor::new(&mut systems, &pool);
+        executor.execute(&world);
         assert_eq!(order, *(runs.lock().unwrap()));
     }
 
@@ -901,8 +909,7 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        let mut resources = Resources::default();
-        resources.insert(TestResource(123));
+        world.resources.insert(TestResource(123));
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -934,7 +941,7 @@ mod tests {
                 assert_eq!(components.len(), count);
             });
         system.prepare(&world);
-        system.run(&resources, &world);
+        system.run(&world);
     }
 
     #[test]
@@ -943,8 +950,7 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        let mut resources = Resources::default();
-        resources.insert(TestResource(123));
+        world.resources.insert(TestResource(123));
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -969,119 +975,6 @@ mod tests {
             });
 
         system.prepare(&world);
-        system.run(&resources, &world);
-    }
-
-    use crate::filter::{ComponentFilter, EntityFilterTuple, Passthrough};
-
-    struct TestDisposable {
-        pub count: usize,
-    }
-    impl SystemDisposable for TestDisposable {
-        type Resources = Read<TestResource>;
-        type Queries =
-            Query<Read<Pos>, EntityFilterTuple<ComponentFilter<Pos>, Passthrough, Passthrough>>;
-
-        fn run(
-            &mut self,
-            _: &mut CommandBuffer,
-            _: &mut PreparedWorld,
-            _: &mut <Self::Resources as ResourceSet>::PreparedResources,
-            _: &mut <Self::Queries as QuerySet>::PreparedQueries,
-        ) {
-            self.count += 1;
-        }
-
-        fn dispose(self, world: &mut World) {
-            assert_eq!(self.count, 4);
-        }
-    }
-
-    #[test]
-    fn system_disposable_test() {
-        let _ = env_logger::builder().is_test(true).try_init();
-
-        let universe = Universe::new();
-        let mut world = universe.create_world();
-        let mut resources = Resources::default();
-        resources.insert(TestResource(123));
-
-        let components = vec![
-            (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
-            (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
-        ];
-
-        let mut expected = HashMap::<Entity, (Pos, Vel)>::new();
-
-        for (i, e) in world.insert((), components.clone()).iter().enumerate() {
-            if let Some((pos, rot)) = components.get(i) {
-                expected.insert(*e, (*pos, *rot));
-            }
-        }
-
-        let mut state = 0;
-        {
-            let mut system = SystemBuilder::<()>::new("TestSystem")
-                .read_resource::<TestResource>()
-                .with_query(Read::<Pos>::query())
-                .with_drop(|world, resources| {
-                    println!("dropped!");
-                })
-                .build_disposable(TestDisposable { count: 0 });
-
-            system.prepare(&world);
-            system.run(&resources, &world);
-            system.run(&resources, &world);
-            system.run(&resources, &world);
-            system.run(&resources, &world);
-        }
-    }
-
-    #[test]
-    fn system_drop_test() {
-        let _ = env_logger::builder().is_test(true).try_init();
-
-        let universe = Universe::new();
-        let mut world = universe.create_world();
-        let mut resources = Resources::default();
-        resources.insert(TestResource(123));
-
-        let components = vec![
-            (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
-            (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
-        ];
-
-        let mut expected = HashMap::<Entity, (Pos, Vel)>::new();
-
-        for (i, e) in world.insert((), components.clone()).iter().enumerate() {
-            if let Some((pos, rot)) = components.get(i) {
-                expected.insert(*e, (*pos, *rot));
-            }
-        }
-
-        let mut state = Arc::new(AtomicUsize::new(0));
-        {
-            let mut system = SystemBuilder::<()>::new("TestSystem")
-                .read_resource::<TestResource>()
-                .with_query(Read::<Pos>::query())
-                .with_query(Read::<Vel>::query())
-                .with_drop(|world, resources| {
-                    println!("dropped!");
-                })
-                .build_stateful(
-                    state.clone(),
-                    move |state, _commands, _world, resource, queries| {
-                        state.fetch_add(1, Ordering::SeqCst);
-                    },
-                );
-
-            system.prepare(&world);
-            system.run(&resources, &world);
-            system.run(&resources, &world);
-            system.run(&resources, &world);
-            system.run(&resources, &world);
-
-            assert_eq!(state.load(Ordering::SeqCst), 4);
-        }
+        system.run(&world);
     }
 }
