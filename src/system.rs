@@ -298,6 +298,14 @@ where
         self.iter().for_each(&mut f);
     }
 
+    /// Iterates through all entity data that matches the query in parallel, including entities
+    pub fn par_entities_for_each<'a, T>(&'a mut self, f: T)
+    where
+        T: Fn((Entity, <<V as View<'_>>::Iter as std::iter::Iterator>::Item)) + Send + Sync,
+    {
+        unsafe { (&mut *self.query).par_entities_for_each(&*self.world, f) }
+    }
+
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
     pub fn par_for_each<'a, T>(&'a mut self, f: T)
@@ -416,6 +424,9 @@ impl PreparedWorld {
         }
     }
 }
+
+unsafe impl Sync for PreparedWorld {}
+unsafe impl Send for PreparedWorld {}
 
 // TODO: these assertions should have better errors
 impl PreparedWorld {
