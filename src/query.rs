@@ -806,6 +806,19 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
+    pub fn par_entities_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
+    where
+        T: Fn((Entity, <<V as View<'_>>::Iter as std::iter::Iterator>::Item)) + Send + Sync,
+    {
+        self.par_iter_chunks(world).for_each(|mut chunk| {
+            for data in chunk.iter_entities() {
+                f(data);
+            }
+        });
+    }
+
+    /// Iterates through all entity data that matches the query in parallel.
+    #[cfg(feature = "par-iter")]
     pub fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
