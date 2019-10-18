@@ -7,205 +7,15 @@ use crate::query::{
     Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write,
 };
 use crate::resource::{Resource, ResourceSet};
+use crate::schedule::Schedulable;
 use crate::storage::{Component, ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
 use derivative::Derivative;
-use itertools::izip;
 use rayon::prelude::*;
 use shrinkwraprs::Shrinkwrap;
 use std::any::TypeId;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::iter::repeat;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-/// Stages represent discrete steps of a game's loop, such as "start", "update", "draw", "end", etc.
-/// Stages have a defined execution order.
-///
-/// Systems run within a stage, and commit any buffered changes to the ecs at the end of a stage
-/// (which may or may not be the stage within which they run, but cannot be an earlier stage).
-trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq {}
-
-/// Executes all systems that are to be run within a single given stage.
-pub struct StageExecutor<'a> {
-    systems: &'a mut [Box<dyn Schedulable>],
-    pool: &'a rayon::ThreadPool,
-    static_dependants: Vec<Vec<usize>>,
-    dynamic_dependants: Vec<Vec<usize>>,
-    static_dependancy_counts: Vec<AtomicUsize>,
-    awaiting: Vec<AtomicUsize>,
-}
-
-impl<'a> StageExecutor<'a> {
-    /// Constructs a new executor for all systems to be run in a single stage.
-    ///
-    /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
-    /// are to be observed.
-    pub fn new(systems: &'a mut [Box<dyn Schedulable>], pool: &'a rayon::ThreadPool) -> Self {
-        if systems.len() > 1 {
-            let mut static_dependants: Vec<Vec<_>> =
-                repeat(Vec::new()).take(systems.len()).collect();
-            let mut dynamic_dependants: Vec<Vec<_>> =
-                repeat(Vec::new()).take(systems.len()).collect();
-            let mut static_dependancy_counts = Vec::new();
-
-            let mut resource_last_mutated = HashMap::<TypeId, usize>::new();
-            let mut component_mutated = HashMap::<ComponentTypeId, Vec<usize>>::new();
-
-            for (i, system) in systems.iter().enumerate() {
-                let (read_res, read_comp) = system.reads();
-                let (write_res, write_comp) = system.writes();
-
-                // find resource access dependancies
-                let mut dependancies = HashSet::new();
-                for res in read_res {
-                    if let Some(n) = resource_last_mutated.get(res) {
-                        dependancies.insert(*n);
-                    }
-                }
-                for res in write_res {
-                    if let Some(n) = resource_last_mutated.get(res) {
-                        dependancies.insert(*n);
-                    }
-                    resource_last_mutated.insert(*res, i);
-                }
-                static_dependancy_counts.push(AtomicUsize::from(dependancies.len()));
-                for dep in dependancies {
-                    static_dependants[dep].push(i);
-                }
-
-                // find component access dependancies
-                let mut comp_dependancies = HashSet::new();
-                for comp in read_comp {
-                    if let Some(ns) = component_mutated.get(comp) {
-                        for n in ns {
-                            comp_dependancies.insert(*n);
-                        }
-                    }
-                }
-                for comp in write_comp {
-                    if let Some(ns) = component_mutated.get(comp) {
-                        for n in ns {
-                            comp_dependancies.insert(*n);
-                        }
-                    }
-                    component_mutated
-                        .entry(*comp)
-                        .or_insert_with(Vec::new)
-                        .push(i);
-                }
-                for dep in comp_dependancies {
-                    dynamic_dependants[dep].push(i);
-                }
-            }
-
-            let mut awaiting = Vec::with_capacity(systems.len());
-            systems
-                .iter()
-                .for_each(|_| awaiting.push(AtomicUsize::new(0)));
-
-            Self {
-                pool,
-                awaiting,
-                static_dependants,
-                dynamic_dependants,
-                static_dependancy_counts,
-                systems,
-            }
-        } else {
-            Self {
-                pool,
-                awaiting: Vec::with_capacity(0),
-                static_dependants: Vec::with_capacity(0),
-                dynamic_dependants: Vec::with_capacity(0),
-                static_dependancy_counts: Vec::with_capacity(0),
-                systems,
-            }
-        }
-    }
-
-    /// Execute this stage
-    /// TODO: needs better description
-    pub fn execute(&mut self, world: &World) {
-        self.pool.install(|| {
-            if self.systems.len() == 1 {
-                self.systems[0].run(world);
-            } else if self.systems.len() > 1 {
-                let systems = &mut self.systems;
-                let static_dependancy_counts = &self.static_dependancy_counts;
-                let awaiting = &mut self.awaiting;
-
-                // prepare all systems - archetype filters are pre-executed here
-                systems.par_iter_mut().for_each(|sys| sys.prepare(world));
-
-                // determine dynamic dependancies
-                izip!(
-                    systems.iter(),
-                    self.static_dependants.iter_mut(),
-                    self.dynamic_dependants.iter_mut()
-                )
-                .par_bridge()
-                .for_each(|(sys, static_dep, dyn_dep)| {
-                    let archetypes = sys.accesses_archetypes();
-                    for i in (0..dyn_dep.len()).rev() {
-                        let dep = dyn_dep[i];
-                        let other = &systems[dep];
-
-                        // if the archetype sets intersect,
-                        // then we can move the dynamic dependant into the static dependants set
-                        if !other.accesses_archetypes().is_disjoint(archetypes) {
-                            static_dep.push(dep);
-                            dyn_dep.swap_remove(i);
-                            static_dependancy_counts[dep].fetch_add(1, Ordering::SeqCst);
-                        }
-                    }
-                });
-
-                // initialize dependancy tracking
-                for (i, count) in static_dependancy_counts.iter().enumerate() {
-                    awaiting[i].store(count.load(Ordering::SeqCst), Ordering::SeqCst);
-                }
-
-                let awaiting = &self.awaiting;
-
-                // execute all systems with no outstanding dependancies
-                (0..systems.len())
-                    .into_par_iter()
-                    .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
-                    .for_each(|i| {
-                        self.run_recursive(i, world);
-                    });
-            }
-        })
-    }
-
-    /// Recursively execute through the generated depedency cascade and exhaust it.
-    fn run_recursive(&self, i: usize, world: &World) {
-        self.systems[i].run(world);
-
-        // notify dependants of the completion of this dependancy
-        // execute all systems that became available upon the completion of this system
-        self.static_dependants[i]
-            .par_iter()
-            .filter(|dep| {
-                let fetch = self.awaiting[**dep].fetch_sub(1, Ordering::SeqCst);
-                fetch.checked_sub(1).unwrap_or(0) == 0
-            })
-            .for_each(|dep| self.run_recursive(*dep, world));
-    }
-}
-
-/// Trait describing a schedulable type. This is implemented by `System`
-pub trait Schedulable: Send + Sync {
-    fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
-    fn writes(&self) -> (&[TypeId], &[ComponentTypeId]);
-    fn prepare(&mut self, world: &World);
-    fn accesses_archetypes(&self) -> &BitSet;
-    fn run(&self, world: &World);
-    fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;
-}
 
 /// Structure used by `SystemAccess` for describing access to the provided `T`
 #[derive(Derivative, Debug, Clone)]
@@ -298,10 +108,10 @@ where
         self.iter().for_each(&mut f);
     }
 
-    /// Iterates through all entity data that matches the query in parallel, including entities
+    /// Iterates through all entities that matches the query in parallel by chunk
     pub fn par_entities_for_each<'a, T>(&'a mut self, f: T)
     where
-        T: Fn((Entity, <<V as View<'_>>::Iter as std::iter::Iterator>::Item)) + Send + Sync,
+        T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
     {
         unsafe { (&mut *self.query).par_entities_for_each(&*self.world, f) }
     }
@@ -462,6 +272,7 @@ where
     Q: QuerySet,
     F: SystemDisposable<Resources = R, Queries = Q>,
 {
+    name: String,
     resources: R,
     queries: AtomicRefCell<Q>,
     run_fn: AtomicRefCell<F>,
@@ -473,6 +284,8 @@ where
 
     // We pre-allocate a commnad buffer for ourself. Writes are self-draining so we never have to rellocate.
     command_buffer: AtomicRefCell<CommandBuffer>,
+
+    explicit_dependencies: Vec<String>,
 }
 
 impl<R, Q, F> Schedulable for System<R, Q, F>
@@ -481,6 +294,10 @@ where
     Q: QuerySet,
     F: SystemDisposable<Resources = R, Queries = Q>,
 {
+    fn explicit_dependencies(&self) -> &[String] { &self.explicit_dependencies }
+
+    fn name(&self) -> &str { &self.name }
+
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
         (&self.access.resources.reads, &self.access.components.reads)
     }
@@ -657,7 +474,7 @@ where
 ///            .read_resource::<TestResource>()
 ///            .with_query(<(Read<Position>, Tagged<Model>)>::query()
 ///                         .filter(!tag::<Static>() | changed::<Position>()))
-///            .build(move |commands, resource, queries| {
+///            .build(move |commands, prepared_world, resource, queries| {
 ///                log::trace!("Hello world");
 ///               let mut count = 0;
 ///                {
@@ -676,7 +493,7 @@ pub struct SystemBuilder<Q = (), R = ()> {
     resource_access: Access<TypeId>,
     component_access: Access<ComponentTypeId>,
 
-    explicit_deps: Vec<String>,
+    explicit_dependencies: Vec<String>,
 }
 
 impl<Q, R> SystemBuilder<Q, R>
@@ -688,7 +505,7 @@ where
     pub fn new(name: &str) -> SystemBuilder {
         SystemBuilder {
             name: name.to_string(),
-            explicit_deps: Vec::new(),
+            explicit_dependencies: Vec::new(),
             queries: (),
             resources: (),
             resource_access: Access::default(),
@@ -710,7 +527,7 @@ where
 
         SystemBuilder {
             name: self.name,
-            explicit_deps: self.explicit_deps,
+            explicit_dependencies: self.explicit_dependencies,
             queries: ConsAppend::append(self.queries, query),
             resources: self.resources,
             resource_access: self.resource_access,
@@ -729,7 +546,7 @@ where
         SystemBuilder {
             resources: ConsAppend::append(self.resources, Read::<T>::default()),
             name: self.name,
-            explicit_deps: self.explicit_deps,
+            explicit_dependencies: self.explicit_dependencies,
             queries: self.queries,
             resource_access: self.resource_access,
             component_access: self.component_access,
@@ -746,7 +563,7 @@ where
         SystemBuilder {
             resources: ConsAppend::append(self.resources, Write::<T>::default()),
             name: self.name,
-            explicit_deps: self.explicit_deps,
+            explicit_dependencies: self.explicit_dependencies,
             queries: self.queries,
             resource_access: self.resource_access,
             component_access: self.component_access,
@@ -786,6 +603,7 @@ where
             > + 'static,
     {
         Box::new(System {
+            name: self.name,
             run_fn: AtomicRefCell::new(disposable),
             resources: self.resources.flatten(),
             queries: AtomicRefCell::new(self.queries.flatten()),
@@ -796,6 +614,7 @@ where
                 tags: Access::default(),
             },
             command_buffer: AtomicRefCell::new(CommandBuffer::default()),
+            explicit_dependencies: self.explicit_dependencies,
         })
     }
 
@@ -849,18 +668,30 @@ where
 mod tests {
     use super::*;
     use crate::prelude::*;
-    use crate::resource::Resources;
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
-    };
+    use crate::schedule::*;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Vel(f32, f32, f32);
+
     #[derive(Default)]
     struct TestResource(pub i32);
+    #[derive(Default)]
+    struct TestResourceTwo(pub i32);
+    #[derive(Default)]
+    struct TestResourceThree(pub i32);
+    #[derive(Default)]
+    struct TestResourceFour(pub i32);
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct TestComp(f32, f32, f32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct TestCompTwo(f32, f32, f32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct TestCompThree(f32, f32, f32);
 
     #[test]
     fn builder_schedule_execute() {
@@ -869,6 +700,7 @@ mod tests {
         let universe = Universe::new();
         let mut world = universe.create_world();
         world.resources.insert(TestResource(123));
+        world.resources.insert(TestResourceTwo(123));
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -888,6 +720,7 @@ mod tests {
             TestSystemOne,
             TestSystemTwo,
             TestSystemThree,
+            TestSystemFour,
         }
 
         let runs = Arc::new(Mutex::new(Vec::new()));
@@ -898,7 +731,7 @@ mod tests {
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
             .build(move |_commands, _world, _resource, _queries| {
-                log::trace!("TestSystem1");
+                log::trace!("system_one");
                 system_one_runs
                     .lock()
                     .unwrap()
@@ -907,19 +740,48 @@ mod tests {
 
         let system_two_runs = runs.clone();
         let system_two = SystemBuilder::<()>::new("TestSystem2")
-            .read_resource::<TestResource>()
+            .write_resource::<TestResourceTwo>()
             .with_query(Read::<Vel>::query())
             .build(move |_commands, _world, _resource, _queries| {
-                log::trace!("TestSystem2");
+                log::trace!("system_two");
                 system_two_runs
                     .lock()
                     .unwrap()
                     .push(TestSystems::TestSystemTwo);
             });
 
-        let order = vec![TestSystems::TestSystemOne, TestSystems::TestSystemTwo];
+        let system_three_runs = runs.clone();
+        let system_three = SystemBuilder::<()>::new("TestSystem3")
+            .read_resource::<TestResourceTwo>()
+            .with_query(Read::<Vel>::query())
+            .build(move |_commands, _world, _resource, _queries| {
+                log::trace!("system_three");
+                system_three_runs
+                    .lock()
+                    .unwrap()
+                    .push(TestSystems::TestSystemThree);
+            });
 
-        let mut systems = vec![system_one, system_two];
+        let system_four_runs = runs.clone();
+        let system_four = SystemBuilder::<()>::new("TestSystem4")
+            .write_resource::<TestResourceTwo>()
+            .with_query(Read::<Vel>::query())
+            .build(move |_commands, _world, _resource, _queries| {
+                log::trace!("system_four");
+                system_four_runs
+                    .lock()
+                    .unwrap()
+                    .push(TestSystems::TestSystemFour);
+            });
+
+        let order = vec![
+            TestSystems::TestSystemOne,
+            TestSystems::TestSystemTwo,
+            TestSystems::TestSystemThree,
+            TestSystems::TestSystemFour,
+        ];
+
+        let mut systems = vec![system_one, system_two, system_three, system_four];
 
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(8)
@@ -928,7 +790,8 @@ mod tests {
 
         let mut executor = StageExecutor::new(&mut systems, &pool);
         executor.execute(&world);
-        assert_eq!(order, *(runs.lock().unwrap()));
+
+        assert_eq!(*(runs.lock().unwrap()), order);
     }
 
     #[test]
@@ -998,7 +861,7 @@ mod tests {
             .read_resource::<TestResource>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(move |_commands, _world, resource, queries| {
+            .build(move |_, _, _, _| {
                 state += 1;
             });
 
