@@ -229,6 +229,7 @@ pub mod entity;
 pub mod filter;
 pub mod query;
 pub mod resource;
+pub mod schedule;
 pub mod storage;
 pub mod system;
 pub mod world;
@@ -244,7 +245,8 @@ pub mod prelude {
     pub use crate::filter::filter_fns::*;
     pub use crate::query::{IntoQuery, Query, Read, Tagged, Write};
     pub use crate::resource::{ResourceSet, Resources};
-    pub use crate::system::{Schedulable, StageExecutor, System, SystemBuilder};
+    pub use crate::schedule::{Schedulable, StageExecutor};
+    pub use crate::system::{System, SystemBuilder};
     pub use crate::world::{Universe, World};
     pub use bit_set::BitSet;
 }
