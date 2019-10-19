@@ -216,5 +216,6 @@ pub trait Runnable {
     fn prepare(&mut self, world: &World);
     fn accesses_archetypes(&self) -> &BitSet;
     fn run(&self, world: &World);
+    fn dispose(self: Box<Self>, world: &mut World);
     fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;
 }
