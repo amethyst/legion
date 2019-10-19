@@ -23,7 +23,7 @@ trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq {}
 
 /// Executes all systems that are to be run within a single given stage.
 pub struct StageExecutor<'a> {
-    systems: &'a mut [Box<dyn Schedulable>],
+    systems: &'a mut [Box<dyn Schedulable + Send + Sync>],
     pool: &'a rayon::ThreadPool,
     static_dependants: Vec<Vec<usize>>,
     dynamic_dependants: Vec<Vec<usize>>,
@@ -36,15 +36,12 @@ impl<'a> StageExecutor<'a> {
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
-    pub fn new(systems: &'a mut [Box<dyn Schedulable>], pool: &'a rayon::ThreadPool) -> Self {
+    pub fn new(
+        systems: &'a mut [Box<dyn Schedulable + Send + Sync>],
+        pool: &'a rayon::ThreadPool,
+    ) -> Self {
         if systems.len() > 1 {
             let mut static_dependancy_counts = Vec::new();
-
-            // gather names to index
-            let mut name_id_map = HashMap::with_capacity(systems.len());
-            systems.iter().enumerate().for_each(|(i, system)| {
-                name_id_map.insert(system.name(), i);
-            });
 
             let mut static_dependants: Vec<Vec<_>> =
                 repeat(Vec::new()).take(systems.len()).collect();
@@ -71,11 +68,6 @@ impl<'a> StageExecutor<'a> {
                     }
                     resource_last_mutated.insert(*res, i);
                 }
-
-                // Write explicit dependencies as static
-                system.explicit_dependencies().iter().for_each(|dep_name| {
-                    dependancies.insert(*name_id_map.get(&dep_name.as_str()).unwrap());
-                });
 
                 static_dependancy_counts.push(AtomicUsize::from(dependancies.len()));
                 for dep in dependancies {
@@ -215,7 +207,7 @@ impl<'a> StageExecutor<'a> {
 }
 
 /// Trait describing a schedulable type. This is implemented by `System`
-pub trait Schedulable: Send + Sync {
+pub trait Schedulable {
     fn name(&self) -> &str;
     fn explicit_dependencies(&self) -> &[String];
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
