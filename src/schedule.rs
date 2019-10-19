@@ -23,7 +23,7 @@ trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq {}
 
 /// Executes all systems that are to be run within a single given stage.
 pub struct StageExecutor<'a> {
-    systems: &'a mut [Box<dyn Schedulable + Send + Sync>],
+    systems: &'a mut [Box<dyn Schedulable>],
     pool: &'a rayon::ThreadPool,
     static_dependants: Vec<Vec<usize>>,
     dynamic_dependants: Vec<Vec<usize>>,
@@ -36,10 +36,7 @@ impl<'a> StageExecutor<'a> {
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
-    pub fn new(
-        systems: &'a mut [Box<dyn Schedulable + Send + Sync>],
-        pool: &'a rayon::ThreadPool,
-    ) -> Self {
+    pub fn new(systems: &'a mut [Box<dyn Schedulable>], pool: &'a rayon::ThreadPool) -> Self {
         if systems.len() > 1 {
             let mut static_dependancy_counts = Vec::new();
 
@@ -207,7 +204,11 @@ impl<'a> StageExecutor<'a> {
 }
 
 /// Trait describing a schedulable type. This is implemented by `System`
-pub trait Schedulable {
+pub trait Schedulable: Runnable + Send + Sync {}
+impl<T> Schedulable for T where T: Runnable + Send + Sync {}
+
+/// Trait describing a schedulable type. This is implemented by `System`
+pub trait Runnable {
     fn name(&self) -> &str;
     fn explicit_dependencies(&self) -> &[String];
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
