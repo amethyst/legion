@@ -7,7 +7,7 @@ use crate::query::{
     Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write,
 };
 use crate::resource::{Resource, ResourceSet};
-use crate::schedule::Schedulable;
+use crate::schedule::{Runnable, Schedulable};
 use crate::storage::{Component, ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
@@ -288,7 +288,7 @@ where
     explicit_dependencies: Vec<String>,
 }
 
-impl<R, Q, F> Schedulable for System<R, Q, F>
+impl<R, Q, F> Runnable for System<R, Q, F>
 where
     R: ResourceSet,
     Q: QuerySet,
@@ -584,7 +584,7 @@ where
         self
     }
 
-    fn build_system_disposable<F>(self, disposable: F) -> Box<dyn Schedulable + Send + Sync>
+    fn build_system_disposable<F>(self, disposable: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
@@ -616,7 +616,7 @@ where
         initial_state: S,
         run_fn: F,
         dispose_fn: D,
-    ) -> Box<dyn Schedulable + Send + Sync>
+    ) -> Box<dyn Schedulable>
     where
         S: Send + Sync + 'static,
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
@@ -640,7 +640,7 @@ where
         ))
     }
 
-    pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable + Send + Sync>
+    pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
@@ -656,7 +656,7 @@ where
         self.build_system_disposable(SystemDisposableFnMut(run_fn, Default::default()))
     }
 
-    pub fn build_thread_local<F>(self, run_fn: F) -> Box<dyn Schedulable>
+    pub fn build_thread_local<F>(self, run_fn: F) -> Box<dyn Runnable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
@@ -667,7 +667,63 @@ where
                 &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
             ) + 'static,
     {
-        unimplemented!()
+        let disposable = SystemDisposableFnMut(run_fn, Default::default());
+        Box::new(System {
+            name: self.name,
+            run_fn: AtomicRefCell::new(disposable),
+            resources: self.resources.flatten(),
+            queries: AtomicRefCell::new(self.queries.flatten()),
+            archetypes: BitSet::default(), //TODO:
+            access: SystemAccess {
+                resources: self.resource_access,
+                components: self.component_access,
+                tags: Access::default(),
+            },
+            command_buffer: AtomicRefCell::new(CommandBuffer::default()),
+            explicit_dependencies: self.explicit_dependencies,
+        })
+    }
+
+    pub fn build_thread_local_disposable<S, F, D>(
+        self,
+        initial_state: S,
+        run_fn: F,
+        dispose_fn: D,
+    ) -> Box<dyn Runnable>
+    where
+        S: 'static,
+        <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
+        <Q as ConsFlatten>::Output: QuerySet,
+        F: FnMut(
+                &mut S,
+                &mut CommandBuffer,
+                &mut PreparedWorld,
+                &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
+                &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
+            ) + 'static,
+        D: FnOnce(S, &mut World) + 'static,
+    {
+        let disposable = SystemDisposableState(
+            run_fn,
+            dispose_fn,
+            StateWrapper(initial_state),
+            Default::default(),
+        );
+
+        Box::new(System {
+            name: self.name,
+            run_fn: AtomicRefCell::new(disposable),
+            resources: self.resources.flatten(),
+            queries: AtomicRefCell::new(self.queries.flatten()),
+            archetypes: BitSet::default(), //TODO:
+            access: SystemAccess {
+                resources: self.resource_access,
+                components: self.component_access,
+                tags: Access::default(),
+            },
+            command_buffer: AtomicRefCell::new(CommandBuffer::default()),
+            explicit_dependencies: self.explicit_dependencies,
+        })
     }
 }
 
