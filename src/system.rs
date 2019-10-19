@@ -339,7 +339,7 @@ where
     }
 }
 
-pub trait SystemDisposable: Send + Sync {
+pub trait SystemDisposable {
     type Resources: ResourceSet;
     type Queries: QuerySet;
 
@@ -362,9 +362,7 @@ struct SystemDisposableFnMut<
             &mut PreparedWorld,
             &mut <R as ResourceSet>::PreparedResources,
             &mut <Q as QuerySet>::PreparedQueries,
-        ) + Send
-        + Sync
-        + 'static,
+        ) + 'static,
 >(F, PhantomData<(R, Q)>);
 
 impl<R, Q, F> SystemDisposable for SystemDisposableFnMut<R, Q, F>
@@ -376,9 +374,7 @@ where
             &mut PreparedWorld,
             &mut <R as ResourceSet>::PreparedResources,
             &mut <Q as QuerySet>::PreparedQueries,
-        ) + Send
-        + Sync
-        + 'static,
+        ) + 'static,
 {
     type Resources = R;
     type Queries = Q;
@@ -398,12 +394,12 @@ where
 
 #[derive(Shrinkwrap)]
 #[shrinkwrap(mutable)]
-struct StateWrapper<T: Send>(pub T);
+struct StateWrapper<T>(pub T);
 // This is safe because systems are never called from 2 threads simultaneously.
 unsafe impl<T: Send> Sync for StateWrapper<T> {}
 
 struct SystemDisposableState<
-    S: Send,
+    S,
     R: ResourceSet,
     Q: QuerySet,
     F: FnMut(
@@ -412,15 +408,12 @@ struct SystemDisposableState<
             &mut PreparedWorld,
             &mut <R as ResourceSet>::PreparedResources,
             &mut <Q as QuerySet>::PreparedQueries,
-        ) + Send
-        + Sync
-        + 'static,
-    D: FnOnce(S, &mut World) + Send + Sync + 'static,
+        ) + 'static,
+    D: FnOnce(S, &mut World) + 'static,
 >(F, D, StateWrapper<S>, PhantomData<(R, Q)>);
 
 impl<S, R, Q, F, D> SystemDisposable for SystemDisposableState<S, R, Q, F, D>
 where
-    S: Send,
     R: ResourceSet,
     Q: QuerySet,
     F: FnMut(
@@ -429,10 +422,8 @@ where
             &mut PreparedWorld,
             &mut <R as ResourceSet>::PreparedResources,
             &mut <Q as QuerySet>::PreparedQueries,
-        ) + Send
-        + Sync
-        + 'static,
-    D: FnOnce(S, &mut World) + Send + Sync + 'static,
+        ) + 'static,
+    D: FnOnce(S, &mut World) + 'static,
 {
     type Resources = R;
     type Queries = Q;
@@ -593,14 +584,16 @@ where
         self
     }
 
-    fn build_system_disposable<F>(self, disposable: F) -> Box<dyn Schedulable>
+    fn build_system_disposable<F>(self, disposable: F) -> Box<dyn Schedulable + Send + Sync>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
         F: SystemDisposable<
                 Resources = <R as ConsFlatten>::Output,
                 Queries = <Q as ConsFlatten>::Output,
-            > + 'static,
+            > + Send
+            + Sync
+            + 'static,
     {
         Box::new(System {
             name: self.name,
@@ -623,9 +616,9 @@ where
         initial_state: S,
         run_fn: F,
         dispose_fn: D,
-    ) -> Box<dyn Schedulable>
+    ) -> Box<dyn Schedulable + Send + Sync>
     where
-        S: 'static + Send,
+        S: Send + Sync + 'static,
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
         F: FnMut(
@@ -647,7 +640,7 @@ where
         ))
     }
 
-    pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
+    pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable + Send + Sync>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
@@ -661,6 +654,20 @@ where
             + 'static,
     {
         self.build_system_disposable(SystemDisposableFnMut(run_fn, Default::default()))
+    }
+
+    pub fn build_thread_local<F>(self, run_fn: F) -> Box<dyn Schedulable>
+    where
+        <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
+        <Q as ConsFlatten>::Output: QuerySet,
+        F: FnMut(
+                &mut CommandBuffer,
+                &mut PreparedWorld,
+                &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
+                &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
+            ) + 'static,
+    {
+        unimplemented!()
     }
 }
 
