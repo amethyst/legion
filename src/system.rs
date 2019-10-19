@@ -337,6 +337,11 @@ where
             &mut prepared_queries,
         );
     }
+
+    fn dispose(self: Box<Self>, world: &mut World) {
+        use std::ops::DerefMut;
+        SystemDisposable::dispose(self.run_fn.into_inner(), world);
+    }
 }
 
 pub trait SystemDisposable {
