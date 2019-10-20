@@ -42,9 +42,9 @@ pub struct SystemAccess {
 /// * per-query archetype matches stored as simple Vec<usize> - filter_archetypes() updates them and writes
 /// the union of all queries into the BitSet provided, to be used to schedule the system as a whole
 ///
-/// FIXME: This would have an associated lifetime and would hold references instead of pointers,
-/// but this is a workaround for lack of GATs and bugs around HRTBs combined with associated types.
-/// See https://github.com/rust-lang/rust/issues/62529
+// FIXME: This would have an associated lifetime and would hold references instead of pointers,
+// but this is a workaround for lack of GATs and bugs around HRTBs combined with associated types.
+// See https://github.com/rust-lang/rust/issues/62529
 pub struct PreparedQuery<V, F>
 where
     V: for<'v> View<'v>,
@@ -136,10 +136,18 @@ where
     }
 }
 
+/// This trait is for providing abstraction across tuples of queries for populating the type
+/// information in the system closure. This trait also provides access to the underlying query
+/// information.
 pub trait QuerySet: Send + Sync {
     type PreparedQueries;
+
+    /// Returns the archetypes accessed by this collection of queries. This allows for caching
+    /// effiency and granularity for system dispatching.
     fn filter_archetypes(&mut self, world: &World, archetypes: &mut BitSet);
-    /// Safety: prepare call doesn't respect lifetimes of `self` and `world.
+
+    /// # Safety
+    /// prepare call doesn't respect lifetimes of `self` and `world`.
     /// The returned value cannot outlive them.
     unsafe fn prepare(&mut self, world: &World) -> Self::PreparedQueries;
     // fn unprepare(prepared: Self::PreparedQueries) -> Self;
@@ -222,6 +230,9 @@ impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T,
 impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y);
 impl_queryset_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
 
+/// Wrapper type around `World` for providing safe global access to a component for a system.
+/// This is mainly useful when needing to conduct sparse access of a component.
+// This wrapper is safe because the dispatcher flags this as as global access on the component type.
 pub struct PreparedWorld {
     world: *const World,
     access: *const Access<ComponentTypeId>,
@@ -240,18 +251,47 @@ unsafe impl Send for PreparedWorld {}
 
 // TODO: these assertions should have better errors
 impl PreparedWorld {
+    /// Borrows component data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    ///
+    /// # Panics
+    ///
+    /// This function borrows all components of type `T` in the world. It may panic if
+    /// any other code is currently borrowing `T` mutable or if the component was not declared
+    /// as written by this system..
     #[inline]
     pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
-        assert!(unsafe { (&*self.access) }
-            .reads
-            .contains(&ComponentTypeId::of::<T>()));
+        if !unsafe { (&*self.access) }
+            .writes
+            .contains(&ComponentTypeId::of::<T>())
+        {
+            panic!("asdf")
+        }
+
         unsafe { (&*self.world) }.get_component::<T>(entity)
     }
+
+    /// Borrows component data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    ///
+    /// # Panics
+    ///
+    /// This function borrows all components of type `T` in the world. It may panic if
+    /// any other code is currently borrowing `T` mutable or if the component was not declared
+    /// as written by this system..
     #[inline]
     pub fn get_component_mut<T: Component>(&self, entity: Entity) -> Option<RefMut<Exclusive, T>> {
-        assert!(unsafe { (&*self.access) }
+        if !unsafe { (&*self.access) }
             .writes
-            .contains(&ComponentTypeId::of::<T>()));
+            .contains(&ComponentTypeId::of::<T>())
+        {
+            panic!("asdf")
+        }
+
         unsafe { (&*self.world) }.get_component_mut::<T>(entity)
     }
 }
@@ -284,8 +324,6 @@ where
 
     // We pre-allocate a commnad buffer for ourself. Writes are self-draining so we never have to rellocate.
     command_buffer: AtomicRefCell<CommandBuffer>,
-
-    explicit_dependencies: Vec<String>,
 }
 
 impl<R, Q, F> Runnable for System<R, Q, F>
@@ -294,8 +332,6 @@ where
     Q: QuerySet,
     F: SystemDisposable<Resources = R, Queries = Q>,
 {
-    fn explicit_dependencies(&self) -> &[String] { &self.explicit_dependencies }
-
     fn name(&self) -> &str { &self.name }
 
     fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
@@ -339,11 +375,13 @@ where
     }
 
     fn dispose(self: Box<Self>, world: &mut World) {
-        use std::ops::DerefMut;
         SystemDisposable::dispose(self.run_fn.into_inner(), world);
     }
 }
 
+/// Supertrait used for defining systems. All wrapper objects for systems implement this trait.
+///
+/// This trait will generally not be used by users.
 pub trait SystemDisposable {
     type Resources: ResourceSet;
     type Queries: QuerySet;
@@ -359,6 +397,7 @@ pub trait SystemDisposable {
     fn dispose(self, world: &mut World);
 }
 
+// Wrapper type for storing disposable systems
 struct SystemDisposableFnMut<
     R: ResourceSet,
     Q: QuerySet,
@@ -397,12 +436,14 @@ where
     fn dispose(self, _: &mut World) {}
 }
 
+// Wrapper type for state storage to be saved
 #[derive(Shrinkwrap)]
 #[shrinkwrap(mutable)]
 struct StateWrapper<T>(pub T);
 // This is safe because systems are never called from 2 threads simultaneously.
 unsafe impl<T: Send> Sync for StateWrapper<T> {}
 
+// Wrapper type for storing disposable systems
 struct SystemDisposableState<
     S,
     R: ResourceSet,
@@ -488,8 +529,6 @@ pub struct SystemBuilder<Q = (), R = ()> {
 
     resource_access: Access<TypeId>,
     component_access: Access<ComponentTypeId>,
-
-    explicit_dependencies: Vec<String>,
 }
 
 impl<Q, R> SystemBuilder<Q, R>
@@ -497,11 +536,14 @@ where
     Q: 'static + Send + ConsFlatten,
     R: 'static + Send + ConsFlatten,
 {
+    /// Create a new system builder to construct a new system.
+    ///
+    /// Please note, the `name` argument for this method is just for debugging and visualization
+    /// purposes and is not logically used anywhere.
     #[allow(clippy::new_ret_no_self)]
     pub fn new(name: &str) -> SystemBuilder {
         SystemBuilder {
             name: name.to_string(),
-            explicit_dependencies: Vec::new(),
             queries: (),
             resources: (),
             resource_access: Access::default(),
@@ -509,6 +551,11 @@ where
         }
     }
 
+    /// Defines a query to provide this system for its execution. Multiple queries can be provided,
+    /// and queries are cached internally for efficiency for filtering and archetype ID handling.
+    ///
+    /// It is best practice to define your queries here, to allow for the caching to take place.
+    /// These queries are then provided to the executing closure as a tuple of queries.
     pub fn with_query<V, F>(
         mut self,
         query: Query<V, F>,
@@ -523,7 +570,7 @@ where
 
         SystemBuilder {
             name: self.name,
-            explicit_dependencies: self.explicit_dependencies,
+
             queries: ConsAppend::append(self.queries, query),
             resources: self.resources,
             resource_access: self.resource_access,
@@ -531,6 +578,10 @@ where
         }
     }
 
+    /// Flag this resource type as being read by this system.
+    ///
+    /// This will inform the dispatcher to not allow any writes access to this resource while
+    /// this system is running. Parralel reads still occur during execution.
     pub fn read_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<Read<T>>>::Output>
     where
         T: 'static + Resource,
@@ -542,12 +593,17 @@ where
         SystemBuilder {
             resources: ConsAppend::append(self.resources, Read::<T>::default()),
             name: self.name,
-            explicit_dependencies: self.explicit_dependencies,
+
             queries: self.queries,
             resource_access: self.resource_access,
             component_access: self.component_access,
         }
     }
+
+    /// Flag this resource type as being written by this system.
+    ///
+    /// This will inform the dispatcher to not allow any parralel access to this resource while
+    /// this system is running.
     pub fn write_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<Write<T>>>::Output>
     where
         T: 'static + Resource,
@@ -559,14 +615,23 @@ where
         SystemBuilder {
             resources: ConsAppend::append(self.resources, Write::<T>::default()),
             name: self.name,
-            explicit_dependencies: self.explicit_dependencies,
+
             queries: self.queries,
             resource_access: self.resource_access,
             component_access: self.component_access,
         }
     }
 
-    /// This performs a shared lock on the component for reading
+    /// This performs a soft resource block on the component for writing. The dispatcher will
+    /// generally handle dispatching read and writes on components based on archetype, allowing
+    /// for more granular access and more parralelization of systems.
+    ///
+    /// Using this method will mark the entire component as read by this system, blocking writing
+    /// systems from accessing any archetypes which contain this component for the duration of its
+    /// execution.
+    ///
+    /// This type of access with `PreparedWorld` is provided for cases where sparse component access
+    /// is required and searching entire query spaces for entities is inneficient.
     pub fn read_component<T>(mut self) -> Self
     where
         T: Component,
@@ -576,8 +641,16 @@ where
         self
     }
 
-    /// This performs a exclusive lock on the component for writing
-    /// TOOD: doc implications
+    /// This performs a exclusive resource block on the component for writing. The dispatcher will
+    /// generally handle dispatching read and writes on components based on archetype, allowing
+    /// for more granular access and more parralelization of systems.
+    ///
+    /// Using this method will mark the entire component as written by this system, blocking other
+    /// systems from accessing any archetypes which contain this component for the duration of its
+    /// execution.
+    ///
+    /// This type of access with `PreparedWorld` is provided for cases where sparse component access
+    /// is required and searching entire query spaces for entities is inneficient.
     pub fn write_component<T>(mut self) -> Self
     where
         T: Component,
@@ -612,10 +685,13 @@ where
                 tags: Access::default(),
             },
             command_buffer: AtomicRefCell::new(CommandBuffer::default()),
-            explicit_dependencies: self.explicit_dependencies,
         })
     }
 
+    /// Builds a system which is considered `disposable`, which also means it carries an independent
+    /// state object. This type of system construction allows for systems which may need to
+    /// dispose of resources at the end of the process, which you cannot do from only `FnMut` capture
+    /// variables.
     pub fn build_disposable<F, D, S>(
         self,
         initial_state: S,
@@ -645,6 +721,11 @@ where
         ))
     }
 
+    /// Builds a standard legion `System`. a system is considered a closure for all purposes. This
+    /// closure is `FnMut`, allowing for capture of variables for tracking state for this system.
+    /// Instead of the classic OOP architecture of a system, this lets you still maintain state
+    /// across execution of the systems while leveraging the type simantics of closures for better
+    /// ergonomics.
     pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
@@ -661,6 +742,10 @@ where
         self.build_system_disposable(SystemDisposableFnMut(run_fn, Default::default()))
     }
 
+    /// Builds a system which is not `Schedulable`, as it is not thread safe (!Send and !Sync),
+    /// but still implements all the calling infastructure of the `Runnable` trait. This provides
+    /// a way for legion consumers to leverage the `System` construction and type-handling of
+    /// this build for thread local systems which cannot leave the main initializating thread.
     pub fn build_thread_local<F>(self, run_fn: F) -> Box<dyn Runnable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
@@ -685,10 +770,16 @@ where
                 tags: Access::default(),
             },
             command_buffer: AtomicRefCell::new(CommandBuffer::default()),
-            explicit_dependencies: self.explicit_dependencies,
         })
     }
 
+    /// Builds a system which is considered `disposable`, which also means it carries an independent
+    /// state object. This type of system construction allows for systems which may need to
+    /// dispose of resources at the end of the process, which you cannot do from only `FnMut` capture
+    /// variables.
+    ///
+    /// This variant of the function is like the `build_thread_local` function, allowing for constructing
+    /// a thread local system which is !Send and !Sync.
     pub fn build_thread_local_disposable<S, F, D>(
         self,
         initial_state: S,
@@ -727,7 +818,6 @@ where
                 tags: Access::default(),
             },
             command_buffer: AtomicRefCell::new(CommandBuffer::default()),
-            explicit_dependencies: self.explicit_dependencies,
         })
     }
 }
