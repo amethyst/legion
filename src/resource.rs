@@ -8,15 +8,43 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+/// Trait which is implemented for tuples of resources and singular resources. This abstracts
+/// fetching resources to allow for ergonomic fetching.
+///
+/// # Example:
+/// ```
+///
+/// struct TypeA(usize);
+/// struct TypeB(usize);
+///
+/// use legion::prelude::*;
+/// let mut resources = Resources::default();
+/// resources.insert(TypeA(55));
+/// resources.insert(TypeB(12));
+///
+/// {
+///     let (a, mut b) = <(Read<TypeA>, Write<TypeB>)>::fetch(&resources);
+///     assert_ne!(a.0, b.0);
+///     b.0 = a.0;
+/// }
+///
+/// {
+///     let (a, b) = <(Read<TypeA>, Read<TypeB>)>::fetch(&resources);
+///     assert_eq!(a.0, b.0);
+/// }
+///
+/// ```
 pub trait ResourceSet: Send + Sync {
     type PreparedResources;
 
     fn fetch(resources: &Resources) -> Self::PreparedResources;
 }
 
+/// Blanket trait for resource types.
 pub trait Resource: 'static + Any + Send + Sync {}
 impl<T> Resource for T where T: 'static + Any + Send + Sync {}
 
+// This magically makes Any work. Ur an Any harry
 mod __resource_mopafy_scope {
     #![allow(clippy::all)]
 
@@ -27,6 +55,13 @@ mod __resource_mopafy_scope {
     mopafy!(Resource);
 }
 
+/// Wrapper type for safe, lifetime-garunteed immutable access to a resource of type `T'. This
+/// is the wrapper type which is provided to the closure in a `System`, meaning it is only scoped
+/// to that system execution.
+///
+/// # Safety
+///
+/// This type contains an immutable pointer to `T`, and must not outlive its lifetime
 pub struct PreparedRead<T: Resource> {
     resource: *const T,
 }
@@ -41,6 +76,13 @@ impl<T: Resource> Deref for PreparedRead<T> {
 unsafe impl<T: Resource> Send for PreparedRead<T> {}
 unsafe impl<T: Resource> Sync for PreparedRead<T> {}
 
+/// Wrapper type for safe, lifetime-garunteed mutable access to a resource of type `T'. This
+/// is the wrapper type which is provided to the closure in a `System`, meaning it is only scoped
+/// to that system execution.
+///
+/// # Safety
+///
+/// This type contains an mutable pointer to `T`, and must not outlive its lifetime
 pub struct PreparedWrite<T: Resource> {
     resource: *mut T,
 }
@@ -59,6 +101,7 @@ impl<T: Resource> PreparedWrite<T> {
 unsafe impl<T: Resource> Send for PreparedWrite<T> {}
 unsafe impl<T: Resource> Sync for PreparedWrite<T> {}
 
+/// Ergonomic wrapper type which contains a `Ref` type.
 pub struct Fetch<'a, T: 'a + Resource> {
     inner: Ref<'a, Shared<'a>, Box<dyn Resource>>,
     _marker: PhantomData<T>,
@@ -66,7 +109,7 @@ pub struct Fetch<'a, T: 'a + Resource> {
 impl<'a, T: Resource> Deref for Fetch<'a, T> {
     type Target = T;
 
-    //  #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)]
     #[inline]
     fn deref(&self) -> &Self::Target {
         self.inner.downcast_ref::<T>().unwrap_or_else(|| {
@@ -77,11 +120,12 @@ impl<'a, T: Resource> Deref for Fetch<'a, T> {
         })
     }
 
-    //  #[cfg(not(debug_assertions))]
-    //  #[inline]
-    //  fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
+    #[cfg(not(debug_assertions))]
+    #[inline]
+    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
+/// Ergonomic wrapper type which contains a `RefMut` type.
 pub struct FetchMut<'a, T: Resource> {
     inner: RefMut<'a, Exclusive<'a>, Box<dyn Resource>>,
     _marker: PhantomData<T>,
@@ -89,7 +133,7 @@ pub struct FetchMut<'a, T: Resource> {
 impl<'a, T: 'a + Resource> Deref for FetchMut<'a, T> {
     type Target = T;
 
-    //  #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)]
     #[inline]
     fn deref(&self) -> &Self::Target {
         self.inner.downcast_ref::<T>().unwrap_or_else(|| {
@@ -100,13 +144,13 @@ impl<'a, T: 'a + Resource> Deref for FetchMut<'a, T> {
         })
     }
 
-    //    #[cfg(not(debug_assertions))]
-    //    #[inline]
-    //    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
+    #[cfg(not(debug_assertions))]
+    #[inline]
+    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
 impl<'a, T: 'a + Resource> DerefMut for FetchMut<'a, T> {
-    //    #[cfg(debug_assertions)]
+    #[cfg(debug_assertions)]
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
         self.inner.downcast_mut::<T>().unwrap_or_else(|| {
@@ -117,24 +161,34 @@ impl<'a, T: 'a + Resource> DerefMut for FetchMut<'a, T> {
         })
     }
 
-    //   #[cfg(not(debug_assertions))]
-    //   #[inline]
-    //   fn deref_mut(&mut self) -> &mut T { unsafe { self.inner.downcast_mut_unchecked::<T>() } }
+    #[cfg(not(debug_assertions))]
+    #[inline]
+    fn deref_mut(&mut self) -> &mut T { unsafe { self.inner.downcast_mut_unchecked::<T>() } }
 }
 
+/// Resources container. This container stores its underlying resources in a `HashMap` keyed on
+/// `TypeId`. This means that the ID's used in this storage will not persist between recompiles.
 #[derive(Default)]
 pub struct Resources {
     storage: HashMap<TypeId, AtomicRefCell<Box<dyn Resource>>>,
 }
 
 impl Resources {
+    /// Returns `true` if type `T` exists in the store. Otherwise, returns `false`
     pub fn contains<T: Resource>(&self) -> bool { self.storage.contains_key(&TypeId::of::<T>()) }
 
+    /// Inserts the instance of `T` into the store. If the type already exists, it will be silently
+    /// overwritten. If you would like to retain the instance of the resource that already exists,
+    /// call `remove` first to retrieve it.
     pub fn insert<T: Resource>(&mut self, value: T) {
         self.storage
             .insert(TypeId::of::<T>(), AtomicRefCell::new(Box::new(value)));
     }
 
+    /// Removes the type `T` from this store if it exists.
+    ///
+    /// # Returns
+    /// If the type `T` was stored, the inner instance of `T is returned. Otherwise, `None`
     pub fn remove<T: Resource>(&mut self) -> Option<T> {
         Some(
             *self
@@ -146,6 +200,7 @@ impl Resources {
         )
     }
 
+    /// Retrieve an immutable reference to  `T` from the store if it exists. Otherwise, return `None`
     pub fn get<T: Resource>(&self) -> Option<Fetch<'_, T>> {
         Some(Fetch {
             inner: self.storage.get(&TypeId::of::<T>())?.get(),
@@ -153,6 +208,7 @@ impl Resources {
         })
     }
 
+    /// Retrieve a mutable reference to  `T` from the store if it exists. Otherwise, return `None`
     pub fn get_mut<T: Resource>(&self) -> Option<FetchMut<'_, T>> {
         Some(FetchMut {
             inner: self.storage.get(&TypeId::of::<T>())?.get_mut(),
@@ -160,6 +216,8 @@ impl Resources {
         })
     }
 
+    /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
+    /// the closure `f` is called to construct the object and it is then inserted into the store.
     pub fn get_or_insert_with<T: Resource, F: FnOnce() -> T>(
         &mut self,
         f: F,
@@ -167,6 +225,8 @@ impl Resources {
         self.get_or_insert((f)())
     }
 
+    /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
+    /// the closure `f` is called to construct the object and it is then inserted into the store.
     pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(
         &mut self,
         f: F,
@@ -174,6 +234,8 @@ impl Resources {
         self.get_mut_or_insert((f)())
     }
 
+    /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
+    /// the provided value is inserted and then a reference to it is returned.
     pub fn get_or_insert<T: Resource>(&mut self, value: T) -> Option<Fetch<'_, T>> {
         Some(Fetch {
             inner: self
@@ -185,6 +247,8 @@ impl Resources {
         })
     }
 
+    /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
+    /// the provided value is inserted and then a reference to it is returned.
     pub fn get_mut_or_insert<T: Resource>(&mut self, value: T) -> Option<FetchMut<'_, T>> {
         Some(FetchMut {
             inner: self
@@ -196,6 +260,10 @@ impl Resources {
         })
     }
 
+    /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
+    /// the default constructor for `T` is called.
+    ///
+    /// `T` must implement `Default` for this method.
     pub fn get_or_default<T: Resource + Default>(&mut self) -> Option<Fetch<'_, T>> {
         Some(Fetch {
             inner: self
@@ -207,6 +275,10 @@ impl Resources {
         })
     }
 
+    /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
+    /// the default constructor for `T` is called.
+    ///
+    /// `T` must implement `Default` for this method.
     pub fn get_mut_or_default<T: Resource + Default>(&mut self) -> Option<FetchMut<'_, T>> {
         Some(FetchMut {
             inner: self
