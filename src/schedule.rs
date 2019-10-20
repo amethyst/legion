@@ -14,6 +14,25 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+/// Empty trait which defines a `System` as schedulable by the dispatcher - this requires that the
+/// type is both `Send` and `Sync`.
+///
+/// This is automatically implemented for all types that implement `Runnable` which meet the requirements.
+pub trait Schedulable: Runnable + Send + Sync {}
+impl<T> Schedulable for T where T: Runnable + Send + Sync {}
+
+/// Trait describing a schedulable type. This is implemented by `System`
+pub trait Runnable {
+    fn name(&self) -> &str;
+    fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
+    fn writes(&self) -> (&[TypeId], &[ComponentTypeId]);
+    fn prepare(&mut self, world: &World);
+    fn accesses_archetypes(&self) -> &BitSet;
+    fn run(&self, world: &World);
+    fn dispose(self: Box<Self>, world: &mut World);
+    fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;
+}
+
 /// Stages represent discrete steps of a game's loop, such as "start", "update", "draw", "end", etc.
 /// Stages have a defined execution order.
 ///
@@ -121,8 +140,10 @@ impl<'a> StageExecutor<'a> {
         }
     }
 
-    /// Execute this stage
-    /// TODO: needs better description
+    /// Executes this stage. Execution is recursively conducted in a draining fashion. Systems are
+    /// ordered based on 1. their resource access, and then 2. their insertion order. systems are
+    /// executed in the pool provided at construction, and this function does not return until all
+    /// systems in this stage have completed.
     pub fn execute(&mut self, world: &World) {
         log::trace!("execute");
         self.pool.scope(|_scope| {
@@ -201,21 +222,4 @@ impl<'a> StageExecutor<'a> {
                 self.run_recursive(*dep, world);
             });
     }
-}
-
-/// Trait describing a schedulable type. This is implemented by `System`
-pub trait Schedulable: Runnable + Send + Sync {}
-impl<T> Schedulable for T where T: Runnable + Send + Sync {}
-
-/// Trait describing a schedulable type. This is implemented by `System`
-pub trait Runnable {
-    fn name(&self) -> &str;
-    fn explicit_dependencies(&self) -> &[String];
-    fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
-    fn writes(&self) -> (&[TypeId], &[ComponentTypeId]);
-    fn prepare(&mut self, world: &World);
-    fn accesses_archetypes(&self) -> &BitSet;
-    fn run(&self, world: &World);
-    fn dispose(self: Box<Self>, world: &mut World);
-    fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;
 }

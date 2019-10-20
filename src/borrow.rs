@@ -1,3 +1,6 @@
+//! Atomic runtime borrow checking module.  
+//! These types implement something akin to `RefCell`, but are atomically handled allowing them to
+//! cross thread boundaries.
 use std::cell::UnsafeCell;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
@@ -5,6 +8,15 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::atomic::AtomicIsize;
 
+/// A `RefCell` implementation which is thread safe. This type performs all the standard runtime
+/// borrow checking which would be familiar from using `RefCell`.
+///
+/// `UnsafeCell` is used in this type, but borrow checking is performed using atomic values,
+/// garunteeing safe access across threads.
+///
+/// # Safety
+/// Runtime borrow checking is only conducted in builds with `debug_assertions` enabled. Release
+/// builds assume proper resource access and will cause undefined behavior with improper use.
 pub struct AtomicRefCell<T> {
     value: UnsafeCell<T>,
     borrow_state: AtomicIsize,
@@ -18,24 +30,41 @@ impl<T> AtomicRefCell<T> {
         }
     }
 
+    /// Retrieve an immutable `Ref` wrapped reference of `&T`.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if this value is already mutably borrowed.
+    ///
+    /// # Safety
+    /// Runtime borrow checking is only conducted in builds with `debug_assertions` enabled. Release
+    /// builds assume proper resource access and will cause undefined behavior with improper use.
     #[inline(always)]
     pub fn get<'a>(&'a self) -> Ref<'a, Shared, T> { self.try_get().unwrap() }
 
     /// Unwrap the value from the RefCell and kill it, returning the value.
     pub fn into_inner(self) -> T { self.value.into_inner() }
 
+    /// Retrieve an immutable `Ref` wrapped reference of `&T`. This is the safe version of `get`
+    /// providing an error result on failure.
+    ///
+    /// # Returns
+    ///
+    /// `Some(T)` if the value can be retrieved.
+    /// `Err` if the value is already mutably borrowed.
     #[cfg(debug_assertions)]
     pub fn try_get<'a>(&'a self) -> Result<Ref<'a, Shared<'a>, T>, &'static str> {
         loop {
-            let read = self.borrow_state.load(Ordering::SeqCst);
+            let read = self.borrow_state.load(std::sync::atomic::Ordering::SeqCst);
             if read < 0 {
                 return Err("resource already borrowed as mutable");
             }
 
-            if self
-                .borrow_state
-                .compare_and_swap(read, read + 1, Ordering::SeqCst)
-                == read
+            if self.borrow_state.compare_and_swap(
+                read,
+                read + 1,
+                std::sync::atomic::Ordering::SeqCst,
+            ) == read
             {
                 break;
             }
@@ -46,6 +75,19 @@ impl<T> AtomicRefCell<T> {
         }))
     }
 
+    /// Retrieve an immutable `Ref` wrapped reference of `&T`. This is the safe version of `get`
+    /// providing an error result on failure.
+    ///
+    /// # Returns
+    ///
+    /// `Some(T)` if the value can be retrieved.
+    /// `Err` if the value is already mutably borrowed.
+    ///
+    /// # Safety
+    ///
+    /// This release version of this function does not perform runtime borrow checking and will
+    /// cause undefined behavior if borrow rules are violated. This means they should be enforced
+    /// on the use of this type.
     #[cfg(not(debug_assertions))]
     #[inline(always)]
     pub fn try_get<'a>(&'a self) -> Result<Ref<'a, Shared<'a>, T>, &'static str> {
@@ -54,12 +96,36 @@ impl<T> AtomicRefCell<T> {
         }))
     }
 
+    /// Retrieve an mutable `RefMut` wrapped reference of `&mut T`.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if this value is already mutably borrowed.
+    ///
+    /// # Safety
+    /// Runtime borrow checking is only conducted in builds with `debug_assertions` enabled. Release
+    /// builds assume proper resource access and will cause undefined behavior with improper use.
     #[inline(always)]
     pub fn get_mut<'a>(&'a self) -> RefMut<'a, Exclusive, T> { self.try_get_mut().unwrap() }
 
+    /// Retrieve a mutable `RefMut` wrapped reference of `&mut T`. This is the safe version of
+    /// `get_mut` providing an error result on failure.
+    ///
+    /// # Returns
+    ///
+    /// `Some(T)` if the value can be retrieved.
+    /// `Err` if the value is already mutably borrowed.
+    ///
+    /// # Safety
+    ///
+    /// This release version of this function does not perform runtime borrow checking and will
+    /// cause undefined behavior if borrow rules are violated. This means they should be enforced
+    /// on the use of this type.
     #[cfg(debug_assertions)]
     pub fn try_get_mut<'a>(&'a self) -> Result<RefMut<'a, Exclusive<'a>, T>, &'static str> {
-        let borrowed = self.borrow_state.compare_and_swap(0, -1, Ordering::SeqCst);
+        let borrowed =
+            self.borrow_state
+                .compare_and_swap(0, -1, std::sync::atomic::Ordering::SeqCst);
         match borrowed {
             0 => Ok(RefMut::new(Exclusive::new(&self.borrow_state), unsafe {
                 &mut *self.value.get()
@@ -69,6 +135,19 @@ impl<T> AtomicRefCell<T> {
         }
     }
 
+    /// Retrieve a mutable `RefMut` wrapped reference of `&mut T`. This is the safe version of
+    /// `get_mut` providing an error result on failure.
+    ///
+    /// # Returns
+    ///
+    /// `Some(T)` if the value can be retrieved.
+    /// `Err` if the value is already mutably borrowed.
+    ///
+    /// # Safety
+    ///
+    /// This release version of this function does not perform runtime borrow checking and will
+    /// cause undefined behavior if borrow rules are violated. This means they should be enforced
+    /// on the use of this type.
     #[cfg(not(debug_assertions))]
     #[inline(always)]
     pub fn try_get_mut<'a>(&'a self) -> Result<RefMut<'a, Exclusive<'a>, T>, &'static str> {
@@ -82,6 +161,7 @@ unsafe impl<T: Send> Send for AtomicRefCell<T> {}
 
 unsafe impl<T: Sync> Sync for AtomicRefCell<T> {}
 
+/// Type used for allowing unsafe cloning of internal types
 pub trait UnsafeClone {
     unsafe fn clone(&self) -> Self;
 }
@@ -108,14 +188,14 @@ impl<'a> Shared<'a> {
 
 #[cfg(debug_assertions)]
 impl<'a> Drop for Shared<'a> {
-    fn drop(&mut self) { self.state.fetch_sub(1, Ordering::SeqCst); }
+    fn drop(&mut self) { self.state.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); }
 }
 
 impl<'a> Clone for Shared<'a> {
     #[inline(always)]
     fn clone(&self) -> Self {
         #[cfg(debug_assertions)]
-        self.state.fetch_add(1, Ordering::SeqCst);
+        self.state.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Shared { state: self.state }
     }
 }
@@ -142,14 +222,14 @@ impl<'a> Exclusive<'a> {
 
 #[cfg(debug_assertions)]
 impl<'a> Drop for Exclusive<'a> {
-    fn drop(&mut self) { self.state.fetch_add(1, Ordering::SeqCst); }
+    fn drop(&mut self) { self.state.fetch_add(1, std::sync::atomic::Ordering::SeqCst); }
 }
 
 impl<'a> UnsafeClone for Exclusive<'a> {
     #[inline(always)]
     unsafe fn clone(&self) -> Self {
         #[cfg(debug_assertions)]
-        self.state.fetch_sub(1, Ordering::SeqCst);
+        self.state.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
         Exclusive { state: self.state }
     }
 }

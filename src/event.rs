@@ -66,7 +66,6 @@ impl<T: Copy> Channel<T> {
         Ok(())
     }
 
-    /// par_write requires the event type be `Sync` and `Send` as well as `Copy`
     #[cfg(feature = "par-iter")]
     pub fn write(&self, event: T) -> Result<(), PushError<T>>
     where
