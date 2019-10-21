@@ -921,7 +921,6 @@ mod tests {
                     .unwrap()
                     .push(TestSystems::TestSystemThree);
             });
-
         let system_four_runs = runs.clone();
         let system_four = SystemBuilder::<()>::new("TestSystem4")
             .write_resource::<TestResourceTwo>()
