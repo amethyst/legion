@@ -947,7 +947,7 @@ mod tests {
             .unwrap();
 
         let mut executor = StageExecutor::new(&mut systems, &pool);
-        executor.execute(&world);
+        executor.execute(&mut world);
 
         assert_eq!(*(runs.lock().unwrap()), order);
     }
