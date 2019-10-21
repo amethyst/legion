@@ -4,6 +4,7 @@ use crate::{
     storage::{Component, ComponentTypeId, Tag, TagTypeId},
     world::{IntoComponentSource, TagLayout, TagSet, World},
 };
+use crossbeam::queue::SegQueue;
 use derivative::Derivative;
 use std::{marker::PhantomData, sync::Arc};
 
@@ -159,8 +160,7 @@ enum EntityCommand {
 
 #[derive(Default)]
 pub struct CommandBuffer {
-    commands: Vec<EntityCommand>,
-    entity_block: Option<EntityBlock>,
+    commands: SegQueue<EntityCommand>,
 }
 // This is safe because only 1 system in 1 execution is only ever accessing a command buffer
 // and we garuntee the write operations of a command buffer occur in a safe manner
@@ -168,49 +168,25 @@ unsafe impl Send for CommandBuffer {}
 unsafe impl Sync for CommandBuffer {}
 
 impl CommandBuffer {
-    pub fn build_entity(&mut self) -> Option<EntityBuilder<'_>> {
-        let entity = self.create_entity()?;
-        Some(EntityBuilder::new(entity, self))
-    }
-
-    // Prepares this command buffer with a new entity block ???
-    fn swap_block(&mut self, world: &mut World) {
-        let old_block = self
-            .entity_block
-            .replace(world.entity_allocator.get_block());
-        if let Some(block) = old_block {
-            world.entity_allocator.push_block(block);
-        }
-    }
-
-    pub fn create_entity(&mut self) -> Option<Entity> {
-        if let Some(block) = self.entity_block.as_mut() {
-            block.allocate()
-        } else {
-            None
-        }
-    }
-    pub fn create_entities(&mut self, count: usize) -> Vec<Option<Entity>> {
-        (0..count).map(|_| self.create_entity()).collect()
-    }
-
-    pub fn write(&mut self, world: &mut World) {
+    pub fn write(&self, world: &mut World) {
         log::trace!("Performing drain");
-        self.commands.drain(..).for_each(|command| match command {
-            EntityCommand::WriteWorld(ptr) => ptr.write(world),
-            EntityCommand::ExecMutWorld(closure) => closure(world),
-            EntityCommand::ExecWorld(closure) => closure(world),
-        })
+        while let Ok(command) = self.commands.pop() {
+            match command {
+                EntityCommand::WriteWorld(ptr) => ptr.write(world),
+                EntityCommand::ExecMutWorld(closure) => closure(world),
+                EntityCommand::ExecWorld(closure) => closure(world),
+            }
+        }
     }
 
-    pub fn exec_mut<F>(&mut self, f: F)
+    pub fn exec_mut<F>(&self, f: F)
     where
         F: 'static + Fn(&mut World),
     {
         self.commands.push(EntityCommand::ExecMutWorld(Arc::new(f)));
     }
 
-    pub fn insert_writer<W>(&mut self, writer: W)
+    pub fn insert_writer<W>(&self, writer: W)
     where
         W: 'static + WorldWritable,
     {
@@ -218,7 +194,7 @@ impl CommandBuffer {
             .push(EntityCommand::WriteWorld(Arc::new(writer)));
     }
 
-    pub fn insert<T, C>(&mut self, tags: T, components: C)
+    pub fn insert<T, C>(&self, tags: T, components: C)
     where
         T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         C: 'static + IntoComponentSource,
@@ -233,14 +209,14 @@ impl CommandBuffer {
             })));
     }
 
-    pub fn delete(&mut self, entity: Entity) {
+    pub fn delete(&self, entity: Entity) {
         self.commands
             .push(EntityCommand::WriteWorld(Arc::new(DeleteEntityCommand(
                 entity,
             ))));
     }
 
-    pub fn add_component<C: Component>(&mut self, entity: Entity, component: C) {
+    pub fn add_component<C: Component>(&self, entity: Entity, component: C) {
         self.commands
             .push(EntityCommand::WriteWorld(Arc::new(AddComponentCommand {
                 entity,
@@ -248,7 +224,7 @@ impl CommandBuffer {
             })));
     }
 
-    pub fn remove_component<C: Component>(&mut self, entity: Entity) {
+    pub fn remove_component<C: Component>(&self, entity: Entity) {
         self.commands.push(EntityCommand::WriteWorld(Arc::new(
             RemoveComponentCommand {
                 entity,
@@ -257,7 +233,7 @@ impl CommandBuffer {
         )));
     }
 
-    pub fn add_tag<T: Tag>(&mut self, entity: Entity, tag: T) {
+    pub fn add_tag<T: Tag>(&self, entity: Entity, tag: T) {
         self.commands
             .push(EntityCommand::WriteWorld(Arc::new(AddTagCommand {
                 entity,
@@ -265,7 +241,7 @@ impl CommandBuffer {
             })));
     }
 
-    pub fn remove_tag<T: Tag>(&mut self, entity: Entity) {
+    pub fn remove_tag<T: Tag>(&self, entity: Entity) {
         self.commands
             .push(EntityCommand::WriteWorld(Arc::new(RemoveTagCommand {
                 entity,

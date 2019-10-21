@@ -988,6 +988,9 @@ mod tuple_impls {
     impl_data_tuple!(A => a, B => b, C => c);
     impl_data_tuple!(A => a, B => b, C => c, D => d);
     impl_data_tuple!(A => a, B => b, C => c, D => d, E => e);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h);
 }
 
 struct DynamicComponentLayout<'a> {

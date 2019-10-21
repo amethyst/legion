@@ -260,14 +260,15 @@ impl PreparedWorld {
     ///
     /// This function borrows all components of type `T` in the world. It may panic if
     /// any other code is currently borrowing `T` mutable or if the component was not declared
-    /// as written by this system..
+    /// as written by this system.
     #[inline]
     pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
         if !unsafe { (&*self.access) }
-            .writes
+            .reads
             .contains(&ComponentTypeId::of::<T>())
         {
-            panic!("asdf")
+            panic!("You attempted to fetch a component which was not declared with `read_component` on the system. \
+            Use SystemBuilder::read_component to add this access to: {}", std::any::type_name::<T>())
         }
 
         unsafe { (&*self.world) }.get_component::<T>(entity)
@@ -282,14 +283,15 @@ impl PreparedWorld {
     ///
     /// This function borrows all components of type `T` in the world. It may panic if
     /// any other code is currently borrowing `T` mutable or if the component was not declared
-    /// as written by this system..
+    /// as written by this system.
     #[inline]
     pub fn get_component_mut<T: Component>(&self, entity: Entity) -> Option<RefMut<Exclusive, T>> {
         if !unsafe { (&*self.access) }
             .writes
             .contains(&ComponentTypeId::of::<T>())
         {
-            panic!("asdf")
+            panic!("You attempted to fetch a mutable component which was not declared with `write_component` on the system. \
+            Use SystemBuilder::write_component to add this access to: {}", std::any::type_name::<T>())
         }
 
         unsafe { (&*self.world) }.get_component_mut::<T>(entity)
