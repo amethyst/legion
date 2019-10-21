@@ -144,7 +144,7 @@ impl<'a> StageExecutor<'a> {
     /// ordered based on 1. their resource access, and then 2. their insertion order. systems are
     /// executed in the pool provided at construction, and this function does not return until all
     /// systems in this stage have completed.
-    pub fn execute(&mut self, world: &World) {
+    pub fn execute(&mut self, world: &mut World) {
         log::trace!("execute");
         self.pool.scope(|_scope| {
             match self.systems.len() {
@@ -200,7 +200,13 @@ impl<'a> StageExecutor<'a> {
                         });
                 }
             }
-        })
+        });
+
+        // Flush the command buffers of all the systems
+        // TODO: This should run in-line to dispatching for now we just drain at the end of the stage
+        self.systems.iter().for_each(|system| {
+            system.command_buffer_mut().write(world);
+        });
     }
 
     /// Recursively execute through the generated depedency cascade and exhaust it.
