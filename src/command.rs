@@ -1,9 +1,11 @@
 use crate::{
+    cons::{ConsAppend, ConsFlatten},
     entity::{Entity, EntityBlock},
     filter::{ChunksetFilterData, Filter},
     storage::{Component, ComponentTypeId, Tag, TagTypeId},
-    world::{IntoComponentSource, TagLayout, TagSet, World},
+    world::{ComponentSource, ComponentTupleSet, IntoComponentSource, TagLayout, TagSet, World},
 };
+use bit_set::BitSet;
 use crossbeam::queue::SegQueue;
 use derivative::Derivative;
 use std::{marker::PhantomData, sync::Arc};
@@ -124,33 +126,6 @@ where
     fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
 }
 
-pub struct EntityBuilder<'a> {
-    entity: Entity,
-    buffer: &'a mut CommandBuffer,
-}
-impl<'a> EntityBuilder<'a> {
-    fn new(entity: Entity, buffer: &'a mut CommandBuffer) -> Self { Self { entity, buffer } }
-
-    pub fn with_component<C: Component>(self, component: C) -> Self {
-        let buffer = self.buffer;
-        let entity = self.entity;
-        buffer.add_component(self.entity, component);
-
-        Self { entity, buffer }
-    }
-
-    pub fn with_tag<T: Tag>(self, tag: T) -> Self {
-        let buffer = self.buffer;
-        let entity = self.entity;
-        buffer.add_tag(self.entity, tag);
-
-        Self { entity, buffer }
-    }
-
-    /// This releases the borrow on the CommandBuffer
-    pub fn build(self) {}
-}
-
 #[allow(clippy::enum_variant_names)]
 enum EntityCommand {
     WriteWorld(Arc<dyn WorldWritable>),
@@ -158,14 +133,73 @@ enum EntityCommand {
     ExecMutWorld(Arc<dyn Fn(&mut World)>),
 }
 
+pub struct EntityBuilder<TS = (), CS = ()> {
+    entity: Entity,
+    tags: TS,
+    components: CS,
+}
+impl<TS, CS> EntityBuilder<TS, CS>
+where
+    TS: 'static + Send + ConsFlatten,
+    CS: 'static + Send + ConsFlatten,
+{
+    pub fn with_component<C: Component>(
+        mut self,
+        component: C,
+    ) -> EntityBuilder<TS, <CS as ConsAppend<C>>::Output>
+    where
+        CS: ConsAppend<C>,
+        <CS as ConsAppend<C>>::Output: ConsFlatten,
+    {
+        EntityBuilder {
+            components: ConsAppend::append(self.components, component),
+            entity: self.entity,
+            tags: self.tags,
+        }
+    }
+
+    pub fn with_tag<T: Tag>(mut self, tag: T) -> EntityBuilder<<TS as ConsAppend<T>>::Output, CS>
+    where
+        TS: ConsAppend<T>,
+        <TS as ConsAppend<T>>::Output: ConsFlatten,
+    {
+        EntityBuilder {
+            tags: ConsAppend::append(self.tags, tag),
+            entity: self.entity,
+            components: self.components,
+        }
+    }
+
+    fn insert(mut self, world: &mut World)
+    where
+        <TS as ConsFlatten>::Output: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+        ComponentTupleSet<
+            <CS as ConsFlatten>::Output,
+            std::iter::Once<<CS as ConsFlatten>::Output>,
+        >: ComponentSource,
+    {
+        world.insert_buffered(
+            self.entity,
+            self.tags.flatten(),
+            std::iter::once(self.components.flatten()),
+        );
+    }
+}
+
 #[derive(Default)]
 pub struct CommandBuffer {
     commands: SegQueue<EntityCommand>,
+    block: Option<EntityBlock>,
+    used_entities: BitSet,
 }
 // This is safe because only 1 system in 1 execution is only ever accessing a command buffer
 // and we garuntee the write operations of a command buffer occur in a safe manner
 unsafe impl Send for CommandBuffer {}
 unsafe impl Sync for CommandBuffer {}
+
+pub enum CommandError {
+    EntityBlockFull,
+}
 
 impl CommandBuffer {
     pub fn write(&self, world: &mut World) {
@@ -177,6 +211,29 @@ impl CommandBuffer {
                 EntityCommand::ExecWorld(closure) => closure(world),
             }
         }
+    }
+
+    pub fn build_entity(&mut self) -> Result<EntityBuilder<(), ()>, CommandError> {
+        let entity = self.create_entity()?;
+
+        Ok(EntityBuilder {
+            entity,
+            tags: (),
+            components: (),
+        })
+    }
+
+    pub fn create_entity(&mut self) -> Result<Entity, CommandError> {
+        let entity = self
+            .block
+            .as_mut()
+            .expect("CommandBuffer::create_entity called when EntityBlock not assigned.")
+            .allocate()
+            .ok_or(CommandError::EntityBlockFull)?;
+
+        self.used_entities.insert(entity.index() as usize);
+
+        Ok(entity)
     }
 
     pub fn exec_mut<F>(&self, f: F)
@@ -273,7 +330,9 @@ mod tests {
             (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
         ];
         let components_len = components.len();
-        let mut command = CommandBuffer::default();
+
+        //world.entity_allocator.get_block()
+        let command = CommandBuffer::default();
         command.insert((), components);
 
         // Assert writing checks

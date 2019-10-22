@@ -202,6 +202,14 @@ impl World {
         entities
     }
 
+    pub(crate) fn insert_buffered<T, C>(&mut self, entity: Entity, mut tags: T, components: C)
+    where
+        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+        C: IntoComponentSource,
+    {
+        unimplemented!()
+    }
+
     /// Removes the given `Entity` from the `World`.
     ///
     /// Returns `true` if the entity was deleted; else `false`.
