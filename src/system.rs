@@ -340,7 +340,10 @@ where
         (&self.access.resources.reads, &self.access.components.reads)
     }
     fn writes(&self) -> (&[TypeId], &[ComponentTypeId]) {
-        (&self.access.resources.reads, &self.access.components.reads)
+        (
+            &self.access.resources.writes,
+            &self.access.components.writes,
+        )
     }
 
     fn prepare(&mut self, world: &World) {
