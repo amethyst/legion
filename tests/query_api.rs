@@ -182,7 +182,7 @@ fn query_read_entity_data_par() {
 
     let count = AtomicUsize::new(0);
     let mut query = Read::<Pos>::query();
-    query.par_iter_chunks(&world).for_each(|mut chunk| {
+    query.par_for_each_chunk(&world, |mut chunk| {
         for (entity, pos) in chunk.iter_entities() {
             assert_eq!(expected.get(&entity).unwrap().0, *pos);
             count.fetch_add(1, Ordering::SeqCst);

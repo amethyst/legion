@@ -54,6 +54,13 @@ where
     query: *mut Query<V, F>,
 }
 
+unsafe impl<V, F> Send for PreparedQuery<V, F>
+where
+    V: for<'v> View<'v>,
+    F: EntityFilter,
+{
+}
+
 impl<V, F> PreparedQuery<V, F>
 where
     V: for<'v> View<'v>,
@@ -72,6 +79,7 @@ where
     // of mutable reference through public API, because there is no way to get access to more than a single instance at a time.
     // The unsafety is an implementation detail. It can be fully safe once GATs are in the language.
     /// Gets an iterator which iterates through all chunks that match the query.
+    #[inline]
     pub fn iter_chunks<'a, 'b>(
         &'b mut self,
     ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
@@ -79,6 +87,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
+    #[inline]
     pub fn iter_entities<'a, 'b>(
         &'b mut self,
     ) -> ChunkEntityIter<
@@ -90,6 +99,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query.
+    #[inline]
     pub fn iter<'a, 'data>(
         &'a mut self,
     ) -> ChunkDataIter<
@@ -101,14 +111,16 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
+    #[inline]
     pub fn for_each<'a, 'data, T>(&'a mut self, mut f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
-        self.iter().for_each(&mut f);
+        unsafe { (&mut *self.query).for_each(&*self.world, f) }
     }
 
     /// Iterates through all entities that matches the query in parallel by chunk
+    #[inline]
     pub fn par_entities_for_each<'a, T>(&'a mut self, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
@@ -118,21 +130,22 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
+    #[inline]
     pub fn par_for_each<'a, T>(&'a mut self, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
     {
-        self.par_iter_chunks().for_each(|mut chunk| {
-            for data in chunk.iter() {
-                f(data);
-            }
-        });
+        unsafe { (&mut *self.query).par_for_each(&*self.world, f) }
     }
 
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
-    pub fn par_iter_chunks(&mut self) -> impl ParallelIterator<Item = Chunk<'_, V>> {
-        self.iter_chunks().par_bridge()
+    #[inline]
+    pub fn par_for_each_chunk<'a, T>(&'a mut self, world: &'a World, f: T)
+    where
+        T: Fn(Chunk<'a, V>) + Send + Sync,
+    {
+        unsafe { (&mut *self.query).par_for_each_chunk(&*self.world, f) }
     }
 }
 

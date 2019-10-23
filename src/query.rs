@@ -525,7 +525,7 @@ impl<
     }
 }
 
-/// An iterator which iterates through all entity data in all chunks.
+// An iterator which iterates through all entity data in all chunks.
 pub struct ChunkDataIter<'data, V, I>
 where
     V: for<'a> View<'a>,
@@ -810,7 +810,7 @@ where
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
     {
-        self.par_iter_chunks(world).for_each(|mut chunk| {
+        self.par_for_each_chunk(world, |mut chunk| {
             for data in chunk.iter_entities() {
                 f(data);
             }
@@ -823,19 +823,23 @@ where
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
     {
-        self.par_iter_chunks(world).for_each(|mut chunk| {
+        self.par_for_each_chunk(world, |mut chunk| {
             for data in chunk.iter() {
                 f(data);
             }
         });
     }
 
-    /// Gets a parallel iterator of chunks that match the query.
+    /// Iterates through all chunks that match the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_iter_chunks<'a>(
-        &'a mut self,
-        world: &'a World,
-    ) -> impl ParallelIterator<Item = Chunk<'a, V>> {
-        self.iter_chunks(world).par_bridge()
+    pub fn par_for_each_chunk<'a, T>(&'a mut self, world: &'a World, f: T)
+    where
+        T: Fn(Chunk<'a, V>) + Send + Sync,
+    {
+        rayon::scope(|s| {
+            self.iter_chunks(world).for_each(|chunk| {
+                s.spawn(|_| f(chunk));
+            });
+        });
     }
 }

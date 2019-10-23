@@ -157,7 +157,7 @@ pub struct ChunkFilterData<'a> {
 pub trait ActiveFilter {}
 
 /// A type which combines both an archetype and a chunk filter.
-pub trait EntityFilter {
+pub trait EntityFilter: Send {
     type ArchetypeFilter: for<'a> Filter<ArchetypeFilterData<'a>>;
     type ChunksetFilter: for<'a> Filter<ChunksetFilterData<'a>>;
     type ChunkFilter: for<'a> Filter<ChunkFilterData<'a>>;
