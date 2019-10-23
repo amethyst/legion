@@ -68,25 +68,32 @@ impl<'a> StageExecutor<'a> {
             let mut component_mutated = HashMap::<ComponentTypeId, Vec<usize>>::new();
 
             for (i, system) in systems.iter().enumerate() {
+                log::debug!("Building dependency: {}", system.name());
+
                 let (read_res, read_comp) = system.reads();
                 let (write_res, write_comp) = system.writes();
 
                 // find resource access dependancies
                 let mut dependancies = HashSet::new();
                 for res in read_res {
+                    log::trace!("Read resource: {:?}", res);
                     if let Some(n) = resource_last_mutated.get(res) {
                         dependancies.insert(*n);
                     }
                 }
                 for res in write_res {
+                    log::trace!("Write resource: {:?}", res);
                     if let Some(n) = resource_last_mutated.get(res) {
+                        log::trace!("Added dep: {:?}", n);
                         dependancies.insert(*n);
                     }
                     resource_last_mutated.insert(*res, i);
                 }
 
                 static_dependancy_counts.push(AtomicUsize::from(dependancies.len()));
+                log::debug!("dependancies: {:?}", dependancies);
                 for dep in dependancies {
+                    log::debug!("static_dependants.push: {:?}", dep);
                     static_dependants[dep].push(i);
                 }
 
@@ -110,9 +117,15 @@ impl<'a> StageExecutor<'a> {
                         .or_insert_with(Vec::new)
                         .push(i);
                 }
+                log::debug!("comp_dependancies: {:?}", &comp_dependancies);
                 for dep in comp_dependancies {
                     dynamic_dependants[dep].push(i);
                 }
+            }
+
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!("static_dependants: {:?}", static_dependants);
+                log::debug!("dynamic_dependants: {:?}", dynamic_dependants);
             }
 
             let mut awaiting = Vec::with_capacity(systems.len());
@@ -146,61 +159,67 @@ impl<'a> StageExecutor<'a> {
     /// systems in this stage have completed.
     pub fn execute(&mut self, world: &mut World) {
         log::trace!("execute");
-        self.pool.scope(|_scope| {
-            match self.systems.len() {
-                1 => {
-                    log::trace!("Single system, just run it");
-                    self.systems[0].run(world);
-                }
-                _ => {
-                    log::trace!("Begin pool execution");
-                    let systems = &mut self.systems;
-                    let static_dependancy_counts = &self.static_dependancy_counts;
-                    let awaiting = &mut self.awaiting;
 
-                    // prepare all systems - archetype filters are pre-executed here
-                    systems.par_iter_mut().for_each(|sys| sys.prepare(world));
-
-                    // determine dynamic dependancies
-                    izip!(
-                        systems.iter(),
-                        self.static_dependants.iter_mut(),
-                        self.dynamic_dependants.iter_mut()
-                    )
-                    .par_bridge()
-                    .for_each(|(sys, static_dep, dyn_dep)| {
-                        let archetypes = sys.accesses_archetypes();
-                        for i in (0..dyn_dep.len()).rev() {
-                            let dep = dyn_dep[i];
-                            let other = &systems[dep];
-
-                            // if the archetype sets intersect,
-                            // then we can move the dynamic dependant into the static dependants set
-                            if !other.accesses_archetypes().is_disjoint(archetypes) {
-                                static_dep.push(dep);
-                                dyn_dep.swap_remove(i);
-                                static_dependancy_counts[dep].fetch_add(1, Ordering::SeqCst);
-                            }
-                        }
-                    });
-
-                    // initialize dependancy tracking
-                    for (i, count) in static_dependancy_counts.iter().enumerate() {
-                        awaiting[i].store(count.load(Ordering::SeqCst), Ordering::SeqCst);
+        rayon::join(
+            || {},
+            || {
+                match self.systems.len() {
+                    1 => {
+                        log::trace!("Single system, just run it");
+                        self.systems[0].run(world);
                     }
+                    _ => {
+                        log::trace!("Begin pool execution");
+                        let systems = &mut self.systems;
+                        let static_dependancy_counts = &self.static_dependancy_counts;
+                        let awaiting = &mut self.awaiting;
 
-                    let awaiting = &self.awaiting;
+                        // prepare all systems - archetype filters are pre-executed here
+                        systems.par_iter_mut().for_each(|sys| sys.prepare(world));
 
-                    // execute all systems with no outstanding dependancies
-                    (0..systems.len())
-                        .into_par_iter()
-                        .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
-                        .for_each(|i| {
-                            self.run_recursive(i, world);
+                        // determine dynamic dependancies
+                        izip!(
+                            systems.iter(),
+                            self.static_dependants.iter_mut(),
+                            self.dynamic_dependants.iter_mut()
+                        )
+                        .par_bridge()
+                        .for_each(|(sys, static_dep, dyn_dep)| {
+                            let archetypes = sys.accesses_archetypes();
+                            for i in (0..dyn_dep.len()).rev() {
+                                let dep = dyn_dep[i];
+                                let other = &systems[dep];
+
+                                // if the archetype sets intersect,
+                                // then we can move the dynamic dependant into the static dependants set
+                                if !other.accesses_archetypes().is_disjoint(archetypes) {
+                                    static_dep.push(dep);
+                                    dyn_dep.swap_remove(i);
+                                    static_dependancy_counts[dep].fetch_add(1, Ordering::Relaxed);
+                                }
+                            }
                         });
+
+                        // initialize dependancy tracking
+                        for (i, count) in static_dependancy_counts.iter().enumerate() {
+                            awaiting[i].store(count.load(Ordering::Relaxed), Ordering::Relaxed);
+                        }
+
+                        log::trace!("Initialized awaiting: {:?}", awaiting);
+
+                        let awaiting = &self.awaiting;
+
+                        // execute all systems with no outstanding dependancies
+                        (0..systems.len())
+                            .into_par_iter()
+                            .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
+                            .for_each(|i| {
+                                self.run_recursive(i, world);
+                            });
+                    }
                 }
-            }
-        });
+            },
+        );
 
         // Flush the command buffers of all the systems
         // TODO: This should run in-line to dispatching for now we just drain at the end of the stage
@@ -211,21 +230,23 @@ impl<'a> StageExecutor<'a> {
 
     /// Recursively execute through the generated depedency cascade and exhaust it.
     fn run_recursive(&self, i: usize, world: &World) {
-        log::trace!("run_recursive");
+        log::trace!("run_recursive: {}", i);
         self.systems[i].run(world);
 
-        // notify dependants of the completion of this dependancy
-        // execute all systems that became available upon the completion of this system
-        self.static_dependants[i]
-            .par_iter()
-            .filter(|dep| {
-                let fetch = self.awaiting[**dep].fetch_sub(1, Ordering::SeqCst);
-                fetch.saturating_sub(1) == 0
-            })
-            .for_each(|dep| {
-                // Flip the waiting bit on this system to max, so it doesnt run again this stage.
-                self.awaiting[*dep].store(std::usize::MAX, Ordering::SeqCst);
-                self.run_recursive(*dep, world);
-            });
+        self.static_dependants[i].par_iter().for_each(|dep| {
+            match self.awaiting[*dep].compare_exchange(
+                1,
+                std::usize::MAX,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    self.run_recursive(*dep, world);
+                }
+                Err(_) => {
+                    self.awaiting[*dep].fetch_sub(1, Ordering::Relaxed);
+                }
+            }
+        });
     }
 }

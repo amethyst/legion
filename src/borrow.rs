@@ -22,6 +22,10 @@ pub struct AtomicRefCell<T> {
     borrow_state: AtomicIsize,
 }
 
+impl<T: Default> Default for AtomicRefCell<T> {
+    fn default() -> Self { Self::new(T::default()) }
+}
+
 impl<T> AtomicRefCell<T> {
     pub fn new(value: T) -> Self {
         AtomicRefCell {
