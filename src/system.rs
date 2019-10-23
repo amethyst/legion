@@ -12,7 +12,6 @@ use crate::storage::{Component, ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
 use derivative::Derivative;
-use rayon::prelude::*;
 use shrinkwraprs::Shrinkwrap;
 use std::any::TypeId;
 use std::marker::PhantomData;
@@ -112,7 +111,7 @@ where
 
     /// Iterates through all entity data that matches the query.
     #[inline]
-    pub fn for_each<'a, 'data, T>(&'a mut self, mut f: T)
+    pub fn for_each<'a, 'data, T>(&'a mut self, f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
@@ -141,7 +140,7 @@ where
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each_chunk<'a, T>(&'a mut self, world: &'a World, f: T)
+    pub fn par_for_each_chunk<'a, T>(&'a mut self, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
     {

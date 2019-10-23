@@ -17,13 +17,23 @@ use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::iter::Zip;
 use std::mem::size_of;
-use std::num::Wrapping;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::ops::RangeBounds;
 use std::ptr::NonNull;
 use std::slice::Iter;
 use std::slice::IterMut;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+
+static VERSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn next_version() -> u64 {
+    VERSION_COUNTER
+        .fetch_add(1, Ordering::Relaxed)
+        .checked_add(1)
+        .unwrap()
+}
 
 /// A type ID identifying a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
@@ -96,6 +106,9 @@ pub struct SliceVec<T> {
     counts: Vec<usize>,
 }
 
+impl<'a, T> std::iter::ExactSizeIterator for SliceVecIter<'a, T> {}
+impl<'a, T> std::iter::FusedIterator for SliceVecIter<'a, T> {}
+
 impl<T> SliceVec<T> {
     /// Gets the length of the vector.
     pub fn len(&self) -> usize { self.counts.len() }
@@ -123,14 +136,138 @@ impl<T> SliceVec<T> {
 }
 
 /// An iterator over slices in a `SliceVec`.
+#[derive(Clone)]
 pub struct SliceVecIter<'a, T> {
     data: &'a [T],
     counts: &'a [usize],
 }
 
+/// A trait for iterators that are able to be split in roughly half.
+/// Used for splitting work among threads in parallel iterator.
+pub trait FissileIterator: Sized {
+    /// Divides one iterator into two, roughly in half.
+    ///
+    /// The implementation doesn't have to be precise,
+    /// but the closer to the midpoint it is, the better
+    /// the parallel iterator will behave.
+    ///
+    /// Returns two split iterators and a number of elements left in first split.
+    /// That returned size must be exact.
+    fn split(self) -> (Self, Self, usize);
+}
+
+impl<'a, T> FissileIterator for Iter<'a, T> {
+    fn split(self) -> (Self, Self, usize) {
+        let slice = self.as_slice();
+        let split_point = slice.len() / 2;
+        let (left_slice, right_slice) = slice.split_at(split_point);
+        (left_slice.into_iter(), right_slice.into_iter(), split_point)
+    }
+}
+
+impl<'a, T> FissileIterator for SliceVecIter<'a, T> {
+    fn split(self) -> (Self, Self, usize) {
+        let counts_split_point = self.counts.len() / 2;
+        let (left_counts, right_counts) = self.counts.split_at(counts_split_point);
+        let data_split_point = left_counts.into_iter().sum();
+        let (left_data, right_data) = self.data.split_at(data_split_point);
+        (
+            Self {
+                data: left_data,
+                counts: left_counts,
+            },
+            Self {
+                data: right_data,
+                counts: right_counts,
+            },
+            data_split_point,
+        )
+    }
+}
+
+pub(crate) struct FissileEnumerate<I: FissileIterator> {
+    iter: I,
+    count: usize,
+}
+impl<I: FissileIterator> FissileEnumerate<I> {
+    pub(crate) fn new(iter: I) -> Self { Self { iter, count: 0 } }
+}
+impl<I: FissileIterator> Iterator for FissileEnumerate<I>
+where
+    I: Iterator,
+{
+    type Item = (usize, <I as Iterator>::Item);
+
+    #[inline]
+    fn next(&mut self) -> Option<(usize, <I as Iterator>::Item)> {
+        self.iter.next().map(|a| {
+            let ret = (self.count, a);
+            self.count += 1;
+            ret
+        })
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) { self.iter.size_hint() }
+
+    #[inline]
+    fn nth(&mut self, n: usize) -> Option<(usize, I::Item)> {
+        self.iter.nth(n).map(|a| {
+            let i = self.count + n;
+            self.count = i + 1;
+            (i, a)
+        })
+    }
+
+    #[inline]
+    fn count(self) -> usize { self.iter.count() }
+
+    #[inline]
+    fn fold<Acc, Fold>(self, init: Acc, mut fold: Fold) -> Acc
+    where
+        Fold: FnMut(Acc, Self::Item) -> Acc,
+    {
+        let mut count = self.count;
+        self.iter.fold(init, move |acc, item| {
+            let acc = fold(acc, (count, item));
+            count += 1;
+            acc
+        })
+    }
+}
+
+impl<I: FissileIterator> FissileIterator for FissileEnumerate<I> {
+    fn split(self) -> (Self, Self, usize) {
+        let (left, right, left_size) = self.iter.split();
+        (
+            Self {
+                iter: left,
+                count: self.count,
+            },
+            Self {
+                iter: right,
+                count: self.count + left_size,
+            },
+            left_size,
+        )
+    }
+}
+
+impl<I: std::iter::ExactSizeIterator + FissileIterator> std::iter::ExactSizeIterator
+    for FissileEnumerate<I>
+{
+    fn len(&self) -> usize { self.iter.len() }
+}
+
+impl<I: std::iter::FusedIterator + FissileIterator> std::iter::FusedIterator
+    for FissileEnumerate<I>
+{
+}
+
 impl<'a, T> Iterator for SliceVecIter<'a, T> {
     type Item = &'a [T];
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((count, remaining_counts)) = self.counts.split_first() {
             let (data, remaining_data) = self.data.split_at(*count);
@@ -141,6 +278,12 @@ impl<'a, T> Iterator for SliceVecIter<'a, T> {
             None
         }
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) { (self.data.len(), Some(self.data.len())) }
+
+    #[inline]
+    fn count(self) -> usize { self.len() }
 }
 
 /// Stores all entity data for a `World`.
@@ -315,7 +458,7 @@ impl<'a> Filter<ArchetypeFilterData<'a>> for ArchetypeDescription {
         source.tag_types.iter().zip(source.component_types.iter())
     }
 
-    fn is_match(&mut self, (tags, components): &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, (tags, components): &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
             tags.len() == self.tags.len()
                 && self.tags.iter().all(|(t, _)| tags.contains(t))
@@ -668,7 +811,7 @@ impl ComponentStorageLayout {
                         count: UnsafeCell::new(0),
                         element_size: meta.size,
                         drop_fn: meta.drop_fn,
-                        version: UnsafeCell::new(Wrapping(0)),
+                        version: UnsafeCell::new(0),
                     },
                 )
             })
@@ -1034,12 +1177,12 @@ pub struct ComponentResourceSet {
     count: UnsafeCell<usize>,
     capacity: usize,
     drop_fn: Option<fn(*mut u8)>,
-    version: UnsafeCell<Wrapping<usize>>,
+    version: UnsafeCell<u64>,
 }
 
 impl ComponentResourceSet {
     /// Gets the version of the component slice.
-    pub fn version(&self) -> usize { unsafe { (*self.version.get()).0 } }
+    pub fn version(&self) -> u64 { unsafe { (*self.version.get()) } }
 
     /// Gets a raw pointer to the start of the component slice.
     ///
@@ -1063,11 +1206,18 @@ impl ComponentResourceSet {
     ///
     /// Access to the component data within the slice is runtime borrow checked.
     /// This call will panic if borrowing rules are broken.
+    ///
+    /// # Panics
+    ///
+    /// Will panic when an internal u64 counter overflows.
+    /// It will happen in 50000 years if you do 10000 mutations a millisecond.
     pub fn data_raw_mut(&self) -> (RefMut<Exclusive, *mut u8>, usize, usize) {
         // this version increment is not thread safe
         // - but the pointer `get_mut` ensures exclusive access at runtime
         let ptr = self.ptr.get_mut();
-        unsafe { *self.version.get() += Wrapping(1) };
+        unsafe {
+            *self.version.get() = next_version();
+        };
         (ptr, self.element_size, unsafe { *self.count.get() })
     }
 
@@ -1092,6 +1242,11 @@ impl ComponentResourceSet {
     ///
     /// Access to the component data within the slice is runtime borrow checked.
     /// This call will panic if borrowing rules are broken.
+    ///
+    /// # Panics
+    ///
+    /// Will panic when an internal u64 counter overflows.
+    /// It will happen in 50000 years if you do 10000 mutations a millisecond.
     pub unsafe fn data_slice_mut<T>(&self) -> RefMapMut<Exclusive, &mut [T]> {
         let (ptr, _size, count) = self.data_raw_mut();
         ptr.map_into(|ptr| std::slice::from_raw_parts_mut(*ptr as *mut _ as *mut T, count))
@@ -1139,6 +1294,11 @@ impl<'a> ComponentWriter<'a> {
     /// This function will _copy_ all elements into the chunk. If the source is not `Copy`,
     /// the caller must then `mem::forget` the source such that the destructor does not run
     /// on the original data.
+    ///
+    /// # Panics
+    ///
+    /// Will panic when an internal u64 counter overflows.
+    /// It will happen in 50000 years if you do 10000 mutations a millisecond.
     pub unsafe fn push_raw(&mut self, components: NonNull<u8>, count: usize) {
         debug_assert!((*self.accessor.count.get() + count) <= self.accessor.capacity);
         std::ptr::copy_nonoverlapping(
@@ -1148,7 +1308,7 @@ impl<'a> ComponentWriter<'a> {
             count * self.accessor.element_size,
         );
         *self.accessor.count.get() += count;
-        *self.accessor.version.get() += Wrapping(1);
+        *self.accessor.version.get() = next_version();
     }
 
     /// Pushes new components onto the end of the vec.
@@ -1370,6 +1530,7 @@ impl Debug for TagStorage {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::num::Wrapping;
 
     #[derive(Copy, Clone, PartialEq, Debug)]
     struct ZeroSize;

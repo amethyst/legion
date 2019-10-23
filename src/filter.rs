@@ -1,6 +1,5 @@
 use crate::storage::ArchetypeData;
 use crate::storage::ArchetypeId;
-use crate::storage::ChunkId;
 use crate::storage::Component;
 use crate::storage::ComponentStorage;
 use crate::storage::ComponentTypeId;
@@ -10,12 +9,13 @@ use crate::storage::Storage;
 use crate::storage::Tag;
 use crate::storage::TagTypeId;
 use crate::storage::TagTypes;
-use std::collections::HashMap;
 use std::iter::Enumerate;
 use std::iter::Repeat;
 use std::iter::Take;
 use std::marker::PhantomData;
 use std::slice::Iter;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 pub mod filter_fns {
     ///! Contains functions for constructing filters.
@@ -93,7 +93,7 @@ pub trait Filter<T: Copy>: Send + Sync + Sized {
     fn collect(&self, source: T) -> Self::Iter;
 
     /// Determines if an element of `Self::Iter` matches the filter conditions.
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool>;
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool>;
 
     /// Creates an iterator which yields bools for each element in the source
     /// which indicate if the element matches the filter.
@@ -465,7 +465,7 @@ impl<'a> Filter<ArchetypeFilterData<'a>> for Passthrough {
     }
 
     #[inline]
-    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
+    fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<'a> Filter<ChunksetFilterData<'a>> for Passthrough {
@@ -477,7 +477,7 @@ impl<'a> Filter<ChunksetFilterData<'a>> for Passthrough {
     }
 
     #[inline]
-    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
+    fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<'a> Filter<ChunkFilterData<'a>> for Passthrough {
@@ -489,7 +489,7 @@ impl<'a> Filter<ChunkFilterData<'a>> for Passthrough {
     }
 
     #[inline]
-    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
+    fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl std::ops::Not for Passthrough {
@@ -528,7 +528,7 @@ impl<'a, T: Copy, F: Filter<T>> Filter<T> for Not<F> {
     fn collect(&self, source: T) -> Self::Iter { self.filter.collect(source) }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         self.filter.is_match(item).map(|x| !x)
     }
 }
@@ -584,7 +584,7 @@ impl<'a, T: Copy, F: Filter<T>> Filter<T> for And<(F,)> {
     fn collect(&self, source: T) -> Self::Iter { self.filters.0.collect(source) }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         self.filters.0.is_match(item)
     }
 }
@@ -649,9 +649,9 @@ macro_rules! impl_and_filter {
             }
 
             #[inline]
-            fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+            fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                 #![allow(non_snake_case)]
-                let ($( $ty, )*) = &mut self.filters;
+                let ($( $ty, )*) = &self.filters;
                 let ($( $ty2, )*) = item;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_and($ty.is_match($ty2)); )*
@@ -741,9 +741,9 @@ macro_rules! impl_or_filter {
             }
 
             #[inline]
-            fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+            fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                 #![allow(non_snake_case)]
-                let ($( $ty, )*) = &mut self.filters;
+                let ($( $ty, )*) = &self.filters;
                 let ($( $ty2, )*) = item;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_or($ty.is_match($ty2)); )*
@@ -829,7 +829,7 @@ impl<'a, T: Component> Filter<ArchetypeFilterData<'a>> for ComponentFilter<T> {
     }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(item.contains(&ComponentTypeId::of::<T>()))
     }
 }
@@ -894,7 +894,7 @@ impl<'a, T: Tag> Filter<ArchetypeFilterData<'a>> for TagFilter<T> {
     fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter { source.tag_types.iter() }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(item.contains(&TagTypeId::of::<T>()))
     }
 }
@@ -970,7 +970,7 @@ impl<'a, 'b, T: Tag> Filter<ChunksetFilterData<'a>> for TagValueFilter<'b, T> {
     }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(**item == *self.value)
     }
 }
@@ -1020,16 +1020,16 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagValueFilter<'a, T> {
 
 /// A filter which requires that entity data of type `T` has changed within the
 /// chunk since the last time the filter was executed.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ComponentChangedFilter<T: Component> {
-    versions: HashMap<ChunkId, usize>,
+    last_read_version: AtomicU64,
     phantom: PhantomData<T>,
 }
 
 impl<T: Component> ComponentChangedFilter<T> {
     fn new() -> ComponentChangedFilter<T> {
         ComponentChangedFilter {
-            versions: HashMap::new(),
+            last_read_version: AtomicU64::new(0),
             phantom: PhantomData,
         }
     }
@@ -1043,16 +1043,31 @@ impl<'a, T: Component> Filter<ChunkFilterData<'a>> for ComponentChangedFilter<T>
     fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter { source.chunks.iter() }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
-        use std::collections::hash_map::Entry;
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         let components = item.components(ComponentTypeId::of::<T>()).unwrap();
         let version = components.version();
-        match self.versions.entry(item.id()) {
-            Entry::Occupied(mut entry) => Some(entry.insert(version) != version),
-            Entry::Vacant(entry) => {
-                entry.insert(version);
-                Some(true)
+        let mut last_read = self.last_read_version.load(Ordering::Relaxed);
+        if last_read < version {
+            loop {
+                match self.last_read_version.compare_exchange_weak(
+                    last_read,
+                    version,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(stored_last_read) => {
+                        last_read = stored_last_read;
+                        if last_read < version {
+                            // matched version is already considered visited, update no longer needed
+                            break;
+                        }
+                    }
+                }
             }
+            Some(true)
+        } else {
+            Some(false)
         }
     }
 }

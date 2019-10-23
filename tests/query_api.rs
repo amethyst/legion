@@ -1,5 +1,4 @@
 use legion::prelude::*;
-use rayon::prelude::*;
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicUsize, Ordering},

@@ -144,7 +144,7 @@ where
     CS: 'static + Send + ConsFlatten,
 {
     pub fn with_component<C: Component>(
-        mut self,
+        self,
         component: C,
     ) -> EntityBuilder<TS, <CS as ConsAppend<C>>::Output>
     where
@@ -158,7 +158,7 @@ where
         }
     }
 
-    pub fn with_tag<T: Tag>(mut self, tag: T) -> EntityBuilder<<TS as ConsAppend<T>>::Output, CS>
+    pub fn with_tag<T: Tag>(self, tag: T) -> EntityBuilder<<TS as ConsAppend<T>>::Output, CS>
     where
         TS: ConsAppend<T>,
         <TS as ConsAppend<T>>::Output: ConsFlatten,
@@ -170,7 +170,7 @@ where
         }
     }
 
-    fn insert(mut self, world: &mut World)
+    fn insert(self, world: &mut World)
     where
         <TS as ConsFlatten>::Output: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         ComponentTupleSet<

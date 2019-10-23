@@ -202,11 +202,12 @@ impl World {
         entities
     }
 
-    pub(crate) fn insert_buffered<T, C>(&mut self, entity: Entity, mut tags: T, components: C)
+    pub(crate) fn insert_buffered<T, C>(&mut self, entity: Entity, tags: T, components: C)
     where
         T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         C: IntoComponentSource,
     {
+        let _ = (entity, tags, components);
         unimplemented!()
     }
 
@@ -882,7 +883,7 @@ mod tuple_impls {
                     source.component_types.iter()
                 }
 
-                fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     let types = &[$( ComponentTypeId::of::<$ty>() ),*];
                     Some(types.len() == item.len() && types.iter().all(|t| item.contains(t)))
                 }
@@ -937,7 +938,7 @@ mod tuple_impls {
                     source.tag_types.iter()
                 }
 
-                fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     let types = &[$( TagTypeId::of::<$ty>() ),*];
                     Some(types.len() == item.len() && types.iter().all(|t| item.contains(t)))
                 }
@@ -968,7 +969,7 @@ mod tuple_impls {
                     itertools::multizip(iters)
                 }
 
-                fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     #![allow(non_snake_case)]
                     let ($( $ty, )*) = self;
                     Some(($( &*$ty, )*) == *item)
@@ -983,7 +984,7 @@ mod tuple_impls {
                     std::iter::repeat(()).take(source.archetype_data.len())
                 }
 
-                fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     Some(true)
                 }
             }
@@ -1038,7 +1039,7 @@ impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicComponentLayout<'a> {
         source.component_types.iter()
     }
 
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
             item.len() == (self.existing.len() + self.add.len() - self.remove.len())
                 && item.iter().all(|t| {
@@ -1094,7 +1095,7 @@ impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
 
     fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter { source.tag_types.iter() }
 
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
             item.len() == (self.existing.len() + self.add.len() - self.remove.len())
                 && item.iter().all(|t| {
@@ -1117,7 +1118,7 @@ impl<'a, 'b> Filter<ChunksetFilterData<'b>> for DynamicTagLayout<'a> {
             .take(source.archetype_data.len())
     }
 
-    fn is_match(&mut self, (chunk_index, arch): &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, (chunk_index, arch): &<Self::Iter as Iterator>::Item) -> Option<bool> {
         for (type_id, meta) in self.existing {
             if self.remove.contains(type_id) {
                 continue;
