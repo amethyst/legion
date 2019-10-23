@@ -46,7 +46,7 @@ pub struct StageExecutor<'a> {
     pool: &'a rayon::ThreadPool,
     static_dependants: Vec<Vec<usize>>,
     dynamic_dependants: Vec<Vec<usize>>,
-    static_dependancy_counts: Vec<AtomicUsize>,
+    static_dependency_counts: Vec<AtomicUsize>,
     awaiting: Vec<AtomicUsize>,
 }
 
@@ -57,7 +57,7 @@ impl<'a> StageExecutor<'a> {
     /// are to be observed.
     pub fn new(systems: &'a mut [Box<dyn Schedulable>], pool: &'a rayon::ThreadPool) -> Self {
         if systems.len() > 1 {
-            let mut static_dependancy_counts = Vec::new();
+            let mut static_dependency_counts = Vec::new();
 
             let mut static_dependants: Vec<Vec<_>> =
                 repeat(Vec::new()).take(systems.len()).collect();
@@ -73,43 +73,43 @@ impl<'a> StageExecutor<'a> {
                 let (read_res, read_comp) = system.reads();
                 let (write_res, write_comp) = system.writes();
 
-                // find resource access dependancies
-                let mut dependancies = HashSet::new();
+                // find resource access dependencies
+                let mut dependencies = HashSet::new();
                 for res in read_res {
                     log::trace!("Read resource: {:?}", res);
                     if let Some(n) = resource_last_mutated.get(res) {
-                        dependancies.insert(*n);
+                        dependencies.insert(*n);
                     }
                 }
                 for res in write_res {
                     log::trace!("Write resource: {:?}", res);
                     if let Some(n) = resource_last_mutated.get(res) {
                         log::trace!("Added dep: {:?}", n);
-                        dependancies.insert(*n);
+                        dependencies.insert(*n);
                     }
                     resource_last_mutated.insert(*res, i);
                 }
 
-                static_dependancy_counts.push(AtomicUsize::from(dependancies.len()));
-                log::debug!("dependancies: {:?}", dependancies);
-                for dep in dependancies {
+                static_dependency_counts.push(AtomicUsize::from(dependencies.len()));
+                log::debug!("dependencies: {:?}", dependencies);
+                for dep in dependencies {
                     log::debug!("static_dependants.push: {:?}", dep);
                     static_dependants[dep].push(i);
                 }
 
-                // find component access dependancies
-                let mut comp_dependancies = HashSet::new();
+                // find component access dependencies
+                let mut comp_dependencies = HashSet::new();
                 for comp in read_comp {
                     if let Some(ns) = component_mutated.get(comp) {
                         for n in ns {
-                            comp_dependancies.insert(*n);
+                            comp_dependencies.insert(*n);
                         }
                     }
                 }
                 for comp in write_comp {
                     if let Some(ns) = component_mutated.get(comp) {
                         for n in ns {
-                            comp_dependancies.insert(*n);
+                            comp_dependencies.insert(*n);
                         }
                     }
                     component_mutated
@@ -117,8 +117,8 @@ impl<'a> StageExecutor<'a> {
                         .or_insert_with(Vec::new)
                         .push(i);
                 }
-                log::debug!("comp_dependancies: {:?}", &comp_dependancies);
-                for dep in comp_dependancies {
+                log::debug!("comp_dependencies: {:?}", &comp_dependencies);
+                for dep in comp_dependencies {
                     dynamic_dependants[dep].push(i);
                 }
             }
@@ -138,7 +138,7 @@ impl<'a> StageExecutor<'a> {
                 awaiting,
                 static_dependants,
                 dynamic_dependants,
-                static_dependancy_counts,
+                static_dependency_counts,
                 systems,
             }
         } else {
@@ -147,7 +147,7 @@ impl<'a> StageExecutor<'a> {
                 awaiting: Vec::with_capacity(0),
                 static_dependants: Vec::with_capacity(0),
                 dynamic_dependants: Vec::with_capacity(0),
-                static_dependancy_counts: Vec::with_capacity(0),
+                static_dependency_counts: Vec::with_capacity(0),
                 systems,
             }
         }
@@ -171,13 +171,13 @@ impl<'a> StageExecutor<'a> {
                     _ => {
                         log::trace!("Begin pool execution");
                         let systems = &mut self.systems;
-                        let static_dependancy_counts = &self.static_dependancy_counts;
+                        let static_dependency_counts = &self.static_dependency_counts;
                         let awaiting = &mut self.awaiting;
 
                         // prepare all systems - archetype filters are pre-executed here
                         systems.par_iter_mut().for_each(|sys| sys.prepare(world));
 
-                        // determine dynamic dependancies
+                        // determine dynamic dependencies
                         izip!(
                             systems.iter(),
                             self.static_dependants.iter_mut(),
@@ -195,13 +195,13 @@ impl<'a> StageExecutor<'a> {
                                 if !other.accesses_archetypes().is_disjoint(archetypes) {
                                     static_dep.push(dep);
                                     dyn_dep.swap_remove(i);
-                                    static_dependancy_counts[dep].fetch_add(1, Ordering::Relaxed);
+                                    static_dependency_counts[dep].fetch_add(1, Ordering::Relaxed);
                                 }
                             }
                         });
 
-                        // initialize dependancy tracking
-                        for (i, count) in static_dependancy_counts.iter().enumerate() {
+                        // initialize dependency tracking
+                        for (i, count) in static_dependency_counts.iter().enumerate() {
                             awaiting[i].store(count.load(Ordering::Relaxed), Ordering::Relaxed);
                         }
 
@@ -209,7 +209,7 @@ impl<'a> StageExecutor<'a> {
 
                         let awaiting = &self.awaiting;
 
-                        // execute all systems with no outstanding dependancies
+                        // execute all systems with no outstanding dependencies
                         (0..systems.len())
                             .into_par_iter()
                             .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
