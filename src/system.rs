@@ -1056,7 +1056,7 @@ mod tests {
     }
 
     #[test]
-    fn par_resource_test() {
+    fn par_res_write() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let _ = env_logger::builder().is_test(true).try_init();
 
@@ -1074,6 +1074,72 @@ mod tests {
             .with_query(Read::<Vel>::query())
             .build(move |_, _, resource, _| {
                 resource.0.get_mut().fetch_add(1, Ordering::SeqCst);
+            });
+
+        let mut system2 = SystemBuilder::<()>::new("TestSystem2")
+            .write_resource::<AtomicRes>()
+            .with_query(Read::<Pos>::query())
+            .with_query(Read::<Vel>::query())
+            .build(move |_, _, resource, _| {
+                resource.0.get_mut().fetch_add(1, Ordering::SeqCst);
+            });
+
+        let mut system3 = SystemBuilder::<()>::new("TestSystem3")
+            .write_resource::<AtomicRes>()
+            .with_query(Read::<Pos>::query())
+            .with_query(Read::<Vel>::query())
+            .build(move |_, _, resource, _| {
+                resource.0.get_mut().fetch_add(1, Ordering::SeqCst);
+            });
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(8)
+            .build()
+            .unwrap();
+
+        println!(
+            "System access: reads[{:?}], writes[{:?}]",
+            system1.reads(),
+            system1.writes()
+        );
+
+        let mut systems = [system1, system2, system3];
+        let mut executor = StageExecutor::new(&mut systems, &pool);
+        for _ in 0..1000 {
+            executor.execute(&mut world);
+        }
+
+        assert_eq!(
+            world
+                .resources
+                .get::<AtomicRes>()
+                .unwrap()
+                .0
+                .get()
+                .load(Ordering::SeqCst),
+            3 * 1000,
+        );
+    }
+
+    #[test]
+    fn par_res_readwrite() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        #[derive(Default)]
+        struct AtomicRes(AtomicRefCell<AtomicUsize>);
+
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+        world.resources.insert(AtomicRes::default());
+
+        let mut state = 0;
+        let mut system1 = SystemBuilder::<()>::new("TestSystem1")
+            .read_resource::<AtomicRes>()
+            .with_query(Read::<Pos>::query())
+            .with_query(Read::<Vel>::query())
+            .build(move |_, _, resource, _| {
+                resource.0.get().fetch_add(1, Ordering::SeqCst);
             });
 
         let mut system2 = SystemBuilder::<()>::new("TestSystem2")

@@ -57,15 +57,16 @@ impl<'a> StageExecutor<'a> {
     /// are to be observed.
     pub fn new(systems: &'a mut [Box<dyn Schedulable>], pool: &'a rayon::ThreadPool) -> Self {
         if systems.len() > 1 {
-            let mut static_dependency_counts = Vec::new();
+            let mut static_dependency_counts = Vec::with_capacity(systems.len());
 
             let mut static_dependants: Vec<Vec<_>> =
-                repeat(Vec::new()).take(systems.len()).collect();
+                repeat(Vec::with_capacity(64)).take(systems.len()).collect();
             let mut dynamic_dependants: Vec<Vec<_>> =
-                repeat(Vec::new()).take(systems.len()).collect();
+                repeat(Vec::with_capacity(64)).take(systems.len()).collect();
 
-            let mut resource_last_mutated = HashMap::<TypeId, usize>::new();
-            let mut component_mutated = HashMap::<ComponentTypeId, Vec<usize>>::new();
+            let mut resource_last_mutated = HashMap::<TypeId, usize>::with_capacity(64);
+            let mut resource_last_read = HashMap::<TypeId, usize>::with_capacity(64);
+            let mut component_mutated = HashMap::<ComponentTypeId, Vec<usize>>::with_capacity(64);
 
             for (i, system) in systems.iter().enumerate() {
                 log::debug!("Building dependency: {}", system.name());
@@ -74,19 +75,27 @@ impl<'a> StageExecutor<'a> {
                 let (write_res, write_comp) = system.writes();
 
                 // find resource access dependencies
-                let mut dependencies = HashSet::new();
+                let mut dependencies = HashSet::with_capacity(64);
                 for res in read_res {
                     log::trace!("Read resource: {:?}", res);
                     if let Some(n) = resource_last_mutated.get(res) {
                         dependencies.insert(*n);
                     }
+                    resource_last_read.insert(*res, i);
                 }
                 for res in write_res {
                     log::trace!("Write resource: {:?}", res);
+                    // Writes have to be exclusive, so we are dependent on reads too
+                    if let Some(n) = resource_last_read.get(res) {
+                        log::trace!("Added dep: {:?}", n);
+                        dependencies.insert(*n);
+                    }
+
                     if let Some(n) = resource_last_mutated.get(res) {
                         log::trace!("Added dep: {:?}", n);
                         dependencies.insert(*n);
                     }
+
                     resource_last_mutated.insert(*res, i);
                 }
 
