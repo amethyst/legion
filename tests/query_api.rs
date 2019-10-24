@@ -3,7 +3,6 @@ use std::{
     collections::HashMap,
     sync::atomic::{AtomicUsize, Ordering},
 };
-// use std::iter::FromIterator;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Pos(f32, f32, f32);

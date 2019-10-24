@@ -5,6 +5,8 @@ use crate::entity::Entity;
 use crate::entity::EntityLocation;
 use crate::filter::ArchetypeFilterData;
 use crate::filter::Filter;
+use crate::iterator::FissileZip;
+use crate::iterator::SliceVecIter;
 use crate::world::TagSet;
 use crate::world::WorldId;
 use derivative::Derivative;
@@ -15,7 +17,6 @@ use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::iter::Zip;
 use std::mem::size_of;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -106,9 +107,6 @@ pub struct SliceVec<T> {
     counts: Vec<usize>,
 }
 
-impl<'a, T> std::iter::ExactSizeIterator for SliceVecIter<'a, T> {}
-impl<'a, T> std::iter::FusedIterator for SliceVecIter<'a, T> {}
-
 impl<T> SliceVec<T> {
     /// Gets the length of the vector.
     pub fn len(&self) -> usize { self.counts.len() }
@@ -133,157 +131,6 @@ impl<T> SliceVec<T> {
             counts: &self.counts,
         }
     }
-}
-
-/// An iterator over slices in a `SliceVec`.
-#[derive(Clone)]
-pub struct SliceVecIter<'a, T> {
-    data: &'a [T],
-    counts: &'a [usize],
-}
-
-/// A trait for iterators that are able to be split in roughly half.
-/// Used for splitting work among threads in parallel iterator.
-pub trait FissileIterator: Sized {
-    /// Divides one iterator into two, roughly in half.
-    ///
-    /// The implementation doesn't have to be precise,
-    /// but the closer to the midpoint it is, the better
-    /// the parallel iterator will behave.
-    ///
-    /// Returns two split iterators and a number of elements left in first split.
-    /// That returned size must be exact.
-    fn split(self) -> (Self, Self, usize);
-}
-
-impl<'a, T> FissileIterator for Iter<'a, T> {
-    fn split(self) -> (Self, Self, usize) {
-        let slice = self.as_slice();
-        let split_point = slice.len() / 2;
-        let (left_slice, right_slice) = slice.split_at(split_point);
-        (left_slice.into_iter(), right_slice.into_iter(), split_point)
-    }
-}
-
-impl<'a, T> FissileIterator for SliceVecIter<'a, T> {
-    fn split(self) -> (Self, Self, usize) {
-        let counts_split_point = self.counts.len() / 2;
-        let (left_counts, right_counts) = self.counts.split_at(counts_split_point);
-        let data_split_point = left_counts.into_iter().sum();
-        let (left_data, right_data) = self.data.split_at(data_split_point);
-        (
-            Self {
-                data: left_data,
-                counts: left_counts,
-            },
-            Self {
-                data: right_data,
-                counts: right_counts,
-            },
-            data_split_point,
-        )
-    }
-}
-
-pub(crate) struct FissileEnumerate<I: FissileIterator> {
-    iter: I,
-    count: usize,
-}
-impl<I: FissileIterator> FissileEnumerate<I> {
-    pub(crate) fn new(iter: I) -> Self { Self { iter, count: 0 } }
-}
-impl<I: FissileIterator> Iterator for FissileEnumerate<I>
-where
-    I: Iterator,
-{
-    type Item = (usize, <I as Iterator>::Item);
-
-    #[inline]
-    fn next(&mut self) -> Option<(usize, <I as Iterator>::Item)> {
-        self.iter.next().map(|a| {
-            let ret = (self.count, a);
-            self.count += 1;
-            ret
-        })
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) { self.iter.size_hint() }
-
-    #[inline]
-    fn nth(&mut self, n: usize) -> Option<(usize, I::Item)> {
-        self.iter.nth(n).map(|a| {
-            let i = self.count + n;
-            self.count = i + 1;
-            (i, a)
-        })
-    }
-
-    #[inline]
-    fn count(self) -> usize { self.iter.count() }
-
-    #[inline]
-    fn fold<Acc, Fold>(self, init: Acc, mut fold: Fold) -> Acc
-    where
-        Fold: FnMut(Acc, Self::Item) -> Acc,
-    {
-        let mut count = self.count;
-        self.iter.fold(init, move |acc, item| {
-            let acc = fold(acc, (count, item));
-            count += 1;
-            acc
-        })
-    }
-}
-
-impl<I: FissileIterator> FissileIterator for FissileEnumerate<I> {
-    fn split(self) -> (Self, Self, usize) {
-        let (left, right, left_size) = self.iter.split();
-        (
-            Self {
-                iter: left,
-                count: self.count,
-            },
-            Self {
-                iter: right,
-                count: self.count + left_size,
-            },
-            left_size,
-        )
-    }
-}
-
-impl<I: std::iter::ExactSizeIterator + FissileIterator> std::iter::ExactSizeIterator
-    for FissileEnumerate<I>
-{
-    fn len(&self) -> usize { self.iter.len() }
-}
-
-impl<I: std::iter::FusedIterator + FissileIterator> std::iter::FusedIterator
-    for FissileEnumerate<I>
-{
-}
-
-impl<'a, T> Iterator for SliceVecIter<'a, T> {
-    type Item = &'a [T];
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some((count, remaining_counts)) = self.counts.split_first() {
-            let (data, remaining_data) = self.data.split_at(*count);
-            self.counts = remaining_counts;
-            self.data = remaining_data;
-            Some(data)
-        } else {
-            None
-        }
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) { (self.data.len(), Some(self.data.len())) }
-
-    #[inline]
-    fn count(self) -> usize { self.len() }
 }
 
 /// Stores all entity data for a `World`.
@@ -452,10 +299,10 @@ impl ArchetypeDescription {
 }
 
 impl<'a> Filter<ArchetypeFilterData<'a>> for ArchetypeDescription {
-    type Iter = Zip<SliceVecIter<'a, TagTypeId>, SliceVecIter<'a, ComponentTypeId>>;
+    type Iter = FissileZip<SliceVecIter<'a, TagTypeId>, SliceVecIter<'a, ComponentTypeId>>;
 
     fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
-        source.tag_types.iter().zip(source.component_types.iter())
+        FissileZip::new(source.tag_types.iter(), source.component_types.iter())
     }
 
     fn is_match(&self, (tags, components): &<Self::Iter as Iterator>::Item) -> Option<bool> {

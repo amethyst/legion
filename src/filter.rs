@@ -1,10 +1,11 @@
+use crate::iterator::FissileZip;
+use crate::iterator::SliceVecIter;
 use crate::storage::ArchetypeData;
 use crate::storage::ArchetypeId;
 use crate::storage::Component;
 use crate::storage::ComponentStorage;
 use crate::storage::ComponentTypeId;
 use crate::storage::ComponentTypes;
-use crate::storage::SliceVecIter;
 use crate::storage::Storage;
 use crate::storage::Tag;
 use crate::storage::TagTypeId;
@@ -632,27 +633,39 @@ impl<T> std::ops::BitOr<Passthrough> for And<(T,)> {
     fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
+macro_rules! recursive_zip {
+    (@value $first:expr, $($rest:expr),*) => { FissileZip::new($first, recursive_zip!(@value $($rest),*)) };
+    (@value $last:expr) => { $last };
+    (@type $first:ty, $($rest:ty),*) => { FissileZip<$first, recursive_zip!(@type $($rest),*)> };
+    (@type $last:ty) => { $last };
+    (@unzip $first:ident, $($rest:ident),*) => { ($first, recursive_zip!(@unzip $($rest),*)) };
+    (@unzip $last:ident) => { $last };
+}
+
 macro_rules! impl_and_filter {
     ( $( $ty: ident => $ty2: ident ),* ) => {
         impl<$( $ty ),*> ActiveFilter for And<($( $ty, )*)> {}
 
         impl<'a, T: Copy, $( $ty: Filter<T> ),*> Filter<T> for And<($( $ty, )*)> {
-            type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
+            // type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
+            type Iter = recursive_zip!(@type $($ty::Iter),*);
 
             fn collect(&self, source: T) -> Self::Iter {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                let iters = (
-                    $( $ty.collect(source) ),*
-                );
-                itertools::multizip(iters)
+                // let iters = (
+                //     $( $ty.collect(source) ),*
+                // );
+                // itertools::multizip(iters)
+                recursive_zip!(@value $($ty.collect(source)),*)
             }
 
             #[inline]
             fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                let ($( $ty2, )*) = item;
+                // let ($( $ty2, )*) = item;
+                let recursive_zip!(@unzip $($ty2),*) = item;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_and($ty.is_match($ty2)); )*
                 result
@@ -729,22 +742,25 @@ macro_rules! impl_or_filter {
         impl<$( $ty ),*> ActiveFilter for Or<($( $ty, )*)> {}
 
         impl<'a, T: Copy, $( $ty: Filter<T> ),*> Filter<T> for Or<($( $ty, )*)> {
-            type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
+            // type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
+            type Iter = recursive_zip!(@type $($ty::Iter),*);
 
             fn collect(&self, source: T) -> Self::Iter {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                let iters = (
-                    $( $ty.collect(source) ),*
-                );
-                itertools::multizip(iters)
+                // let iters = (
+                //     $( $ty.collect(source) ),*
+                // );
+                // itertools::multizip(iters)
+                recursive_zip!(@value $($ty.collect(source)),*)
             }
 
             #[inline]
             fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                let ($( $ty2, )*) = item;
+                // let ($( $ty2, )*) = item;
+                let recursive_zip!(@unzip $($ty2),*) = item;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_or($ty.is_match($ty2)); )*
                 result

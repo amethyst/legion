@@ -9,6 +9,7 @@ use crate::entity::EntityLocation;
 use crate::filter::ArchetypeFilterData;
 use crate::filter::ChunksetFilterData;
 use crate::filter::Filter;
+use crate::iterator::SliceVecIter;
 use crate::resource::Resources;
 use crate::storage::ArchetypeData;
 use crate::storage::ArchetypeDescription;
@@ -16,7 +17,6 @@ use crate::storage::Component;
 use crate::storage::ComponentMeta;
 use crate::storage::ComponentStorage;
 use crate::storage::ComponentTypeId;
-use crate::storage::SliceVecIter;
 use crate::storage::Storage;
 use crate::storage::Tag;
 use crate::storage::TagMeta;
@@ -798,9 +798,9 @@ pub struct ComponentTupleFilter<T> {
 
 mod tuple_impls {
     use super::*;
+    use crate::iterator::SliceVecIter;
     use crate::storage::Component;
     use crate::storage::ComponentTypeId;
-    use crate::storage::SliceVecIter;
     use crate::storage::Tag;
     use itertools::Zip;
     use std::iter::Repeat;

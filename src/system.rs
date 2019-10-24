@@ -2,7 +2,10 @@ use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
 use crate::command::CommandBuffer;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::entity::Entity;
-use crate::filter::EntityFilter;
+use crate::filter::{
+    ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, EntityFilter, Filter,
+};
+use crate::iterator::FissileIterator;
 use crate::query::{
     Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write,
 };
@@ -123,6 +126,9 @@ where
     pub fn par_entities_for_each<'a, T>(&'a mut self, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
     {
         unsafe { (&mut *self.query).par_entities_for_each(&*self.world, f) }
     }
@@ -133,6 +139,9 @@ where
     pub fn par_for_each<'a, T>(&'a mut self, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
     {
         unsafe { (&mut *self.query).par_for_each(&*self.world, f) }
     }
@@ -143,6 +152,9 @@ where
     pub fn par_for_each_chunk<'a, T>(&'a mut self, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
     {
         unsafe { (&mut *self.query).par_for_each_chunk(&*self.world, f) }
     }

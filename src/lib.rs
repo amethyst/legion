@@ -227,6 +227,7 @@ pub mod command;
 mod cons;
 pub mod entity;
 pub mod filter;
+pub mod iterator;
 pub mod query;
 pub mod resource;
 pub mod schedule;
