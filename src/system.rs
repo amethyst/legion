@@ -1133,7 +1133,6 @@ mod tests {
         let mut world = universe.create_world();
         world.resources.insert(AtomicRes::default());
 
-        let mut state = 0;
         let mut system1 = SystemBuilder::<()>::new("TestSystem1")
             .read_resource::<AtomicRes>()
             .with_query(Read::<Pos>::query())
@@ -1185,5 +1184,135 @@ mod tests {
                 .load(Ordering::SeqCst),
             3 * 1000,
         );
+    }
+
+    #[test]
+    fn par_comp_readwrite() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        struct Comp1(f32, f32, f32);
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        struct Comp2(f32, f32, f32);
+
+        let components = vec![
+            (Pos(69., 69., 69.), Vel(69., 69., 69.)),
+            (Pos(69., 69., 69.), Vel(69., 69., 69.)),
+        ];
+
+        let mut expected = HashMap::<Entity, (Pos, Vel)>::new();
+
+        for (i, e) in world.insert((), components.clone()).iter().enumerate() {
+            if let Some((pos, rot)) = components.get(i) {
+                expected.insert(*e, (*pos, *rot));
+            }
+        }
+
+        let system1 = SystemBuilder::<()>::new("TestSystem1")
+            .with_query(<(Read<Comp1>, Read<Comp2>)>::query())
+            .build(move |_, _, _, query| {
+                query.iter().for_each(|(one, two)| {
+                    assert_eq!(one.0, 69.);
+                    assert_eq!(one.1, 69.);
+                    assert_eq!(one.2, 69.);
+
+                    assert_eq!(two.0, 69.);
+                    assert_eq!(two.1, 69.);
+                    assert_eq!(two.2, 69.);
+                });
+            });
+
+        let system2 = SystemBuilder::<()>::new("TestSystem2")
+            .with_query(<(Write<Comp1>, Read<Comp2>)>::query())
+            .build(move |_, _, _, query| {
+                query.iter().for_each(|(mut one, two)| {
+                    one.0 = 456.;
+                    one.1 = 456.;
+                    one.2 = 456.;
+
+                    assert_eq!(two.0, 69.);
+                    assert_eq!(two.1, 69.);
+                    assert_eq!(two.2, 69.);
+                });
+            });
+
+        let system3 = SystemBuilder::<()>::new("TestSystem3")
+            .with_query(<(Write<Comp1>, Write<Comp2>)>::query())
+            .build(move |_, _, _, query| {
+                query.iter().for_each(|(mut one, mut two)| {
+                    assert_eq!(one.0, 456.);
+                    assert_eq!(one.1, 456.);
+                    assert_eq!(one.2, 456.);
+
+                    assert_eq!(two.0, 69.);
+                    assert_eq!(two.1, 69.);
+                    assert_eq!(two.2, 69.);
+
+                    one.0 = 789.;
+                    one.1 = 789.;
+                    one.2 = 789.;
+
+                    one.0 = 789.;
+                    one.1 = 789.;
+                    one.2 = 789.;
+                });
+            });
+
+        let system4 = SystemBuilder::<()>::new("TestSystem4")
+            .with_query(<(Read<Comp1>, Read<Comp2>)>::query())
+            .build(move |_, _, _, query| {
+                query.iter().for_each(|(one, two)| {
+                    assert_eq!(one.0, 789.);
+                    assert_eq!(one.1, 789.);
+                    assert_eq!(one.2, 789.);
+
+                    assert_eq!(two.0, 789.);
+                    assert_eq!(two.1, 789.);
+                    assert_eq!(two.2, 789.);
+                });
+            });
+
+        let system5 = SystemBuilder::<()>::new("TestSystem5")
+            .with_query(<(Write<Comp1>, Write<Comp2>)>::query())
+            .build(move |_, _, _, query| {
+                query.iter().for_each(|(mut one, mut two)| {
+                    assert_eq!(one.0, 789.);
+                    assert_eq!(one.1, 789.);
+                    assert_eq!(one.2, 789.);
+
+                    assert_eq!(two.0, 789.);
+                    assert_eq!(two.1, 789.);
+                    assert_eq!(two.2, 789.);
+
+                    one.0 = 69.;
+                    one.1 = 69.;
+                    one.2 = 69.;
+
+                    two.0 = 69.;
+                    two.1 = 69.;
+                    two.2 = 69.;
+                });
+            });
+
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(8)
+            .build()
+            .unwrap();
+
+        println!(
+            "System access: reads[{:?}], writes[{:?}]",
+            system1.reads(),
+            system1.writes()
+        );
+
+        let mut systems = [system1, system2, system3, system4, system5];
+        let mut executor = StageExecutor::new(&mut systems, &pool);
+        for _ in 0..1000 {
+            executor.execute(&mut world);
+        }
     }
 }
