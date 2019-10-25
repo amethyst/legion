@@ -9,14 +9,13 @@ use crate::iterator::FissileIterator;
 use crate::query::{
     Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write,
 };
-use crate::resource::{Resource, ResourceSet};
+use crate::resource::{Resource, ResourceSet, ResourceTypeId};
 use crate::schedule::{Runnable, Schedulable};
 use crate::storage::{Component, ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
 use derivative::Derivative;
 use shrinkwraprs::Shrinkwrap;
-use std::any::TypeId;
 use std::marker::PhantomData;
 
 /// Structure used by `SystemAccess` for describing access to the provided `T`
@@ -31,7 +30,7 @@ pub struct Access<T> {
 #[derive(Derivative, Debug, Clone)]
 #[derivative(Default(bound = ""))]
 pub struct SystemAccess {
-    pub resources: Access<TypeId>,
+    pub resources: Access<ResourceTypeId>,
     pub components: Access<ComponentTypeId>,
     pub tags: Access<TagTypeId>,
 }
@@ -360,10 +359,10 @@ where
 {
     fn name(&self) -> &str { &self.name }
 
-    fn reads(&self) -> (&[TypeId], &[ComponentTypeId]) {
+    fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) {
         (&self.access.resources.reads, &self.access.components.reads)
     }
-    fn writes(&self) -> (&[TypeId], &[ComponentTypeId]) {
+    fn writes(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) {
         (
             &self.access.resources.writes,
             &self.access.components.writes,
@@ -556,7 +555,7 @@ pub struct SystemBuilder<Q = (), R = ()> {
     queries: Q,
     resources: R,
 
-    resource_access: Access<TypeId>,
+    resource_access: Access<ResourceTypeId>,
     component_access: Access<ComponentTypeId>,
 }
 
@@ -617,7 +616,7 @@ where
         R: ConsAppend<Read<T>>,
         <R as ConsAppend<Read<T>>>::Output: ConsFlatten,
     {
-        self.resource_access.reads.push(TypeId::of::<T>());
+        self.resource_access.reads.push(ResourceTypeId::of::<T>());
 
         SystemBuilder {
             resources: ConsAppend::append(self.resources, Read::<T>::default()),
@@ -639,7 +638,7 @@ where
         R: ConsAppend<Write<T>>,
         <R as ConsAppend<Write<T>>>::Output: ConsFlatten,
     {
-        self.resource_access.writes.push(TypeId::of::<T>());
+        self.resource_access.writes.push(ResourceTypeId::of::<T>());
 
         SystemBuilder {
             resources: ConsAppend::append(self.resources, Write::<T>::default()),
@@ -1067,8 +1066,7 @@ mod tests {
         let mut world = universe.create_world();
         world.resources.insert(AtomicRes::default());
 
-        let mut state = 0;
-        let mut system1 = SystemBuilder::<()>::new("TestSystem1")
+        let system1 = SystemBuilder::<()>::new("TestSystem1")
             .write_resource::<AtomicRes>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
@@ -1076,7 +1074,7 @@ mod tests {
                 resource.0.get_mut().fetch_add(1, Ordering::SeqCst);
             });
 
-        let mut system2 = SystemBuilder::<()>::new("TestSystem2")
+        let system2 = SystemBuilder::<()>::new("TestSystem2")
             .write_resource::<AtomicRes>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
@@ -1084,7 +1082,7 @@ mod tests {
                 resource.0.get_mut().fetch_add(1, Ordering::SeqCst);
             });
 
-        let mut system3 = SystemBuilder::<()>::new("TestSystem3")
+        let system3 = SystemBuilder::<()>::new("TestSystem3")
             .write_resource::<AtomicRes>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
@@ -1133,7 +1131,7 @@ mod tests {
         let mut world = universe.create_world();
         world.resources.insert(AtomicRes::default());
 
-        let mut system1 = SystemBuilder::<()>::new("TestSystem1")
+        let system1 = SystemBuilder::<()>::new("TestSystem1")
             .read_resource::<AtomicRes>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
@@ -1141,7 +1139,7 @@ mod tests {
                 resource.0.get().fetch_add(1, Ordering::SeqCst);
             });
 
-        let mut system2 = SystemBuilder::<()>::new("TestSystem2")
+        let system2 = SystemBuilder::<()>::new("TestSystem2")
             .write_resource::<AtomicRes>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
@@ -1149,7 +1147,7 @@ mod tests {
                 resource.0.get_mut().fetch_add(1, Ordering::SeqCst);
             });
 
-        let mut system3 = SystemBuilder::<()>::new("TestSystem3")
+        let system3 = SystemBuilder::<()>::new("TestSystem3")
             .write_resource::<AtomicRes>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
@@ -1188,7 +1186,6 @@ mod tests {
 
     #[test]
     fn par_comp_readwrite() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         let _ = env_logger::builder().is_test(true).try_init();
 
         let universe = Universe::new();
@@ -1243,7 +1240,7 @@ mod tests {
         let system3 = SystemBuilder::<()>::new("TestSystem3")
             .with_query(<(Write<Comp1>, Write<Comp2>)>::query())
             .build(move |_, _, _, query| {
-                query.iter().for_each(|(mut one, mut two)| {
+                query.iter().for_each(|(mut one, two)| {
                     assert_eq!(one.0, 456.);
                     assert_eq!(one.1, 456.);
                     assert_eq!(one.2, 456.);

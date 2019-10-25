@@ -36,22 +36,48 @@ fn next_version() -> u64 {
         .unwrap()
 }
 
+#[cfg(not(feature = "ffi"))]
 /// A type ID identifying a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct ComponentTypeId(TypeId);
 
+#[cfg(not(feature = "ffi"))]
 impl ComponentTypeId {
     /// Gets the component type ID that represents type `T`.
-    pub fn of<T: Component>() -> Self { ComponentTypeId(TypeId::of::<T>()) }
+    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>()) }
 }
 
+#[cfg(feature = "ffi")]
+/// A type ID identifying a component type.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct ComponentTypeId(TypeId, u32);
+
+#[cfg(feature = "ffi")]
+impl ComponentTypeId {
+    /// Gets the component type ID that represents type `T`.
+    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>(), 0) }
+}
+
+#[cfg(not(feature = "ffi"))]
 /// A type ID identifying a tag type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct TagTypeId(TypeId);
 
+#[cfg(not(feature = "ffi"))]
 impl TagTypeId {
     /// Gets the tag type ID that represents type `T`.
-    pub fn of<T: Tag>() -> Self { TagTypeId(TypeId::of::<T>()) }
+    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>()) }
+}
+
+#[cfg(feature = "ffi")]
+/// A type ID identifying a tag type.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct TagTypeId(TypeId, u32);
+
+#[cfg(feature = "ffi")]
+impl TagTypeId {
+    /// Gets the tag type ID that represents type `T`.
+    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>(), 0) }
 }
 
 /// A `Component` is per-entity data that can be attached to a single entity.
@@ -284,7 +310,7 @@ impl ArchetypeDescription {
 
     /// Adds a tag to the description.
     pub fn register_tag<T: Tag>(&mut self) {
-        self.register_tag_raw(TagTypeId(TypeId::of::<T>()), TagMeta::of::<T>());
+        self.register_tag_raw(TagTypeId::of::<T>(), TagMeta::of::<T>());
     }
 
     /// Adds a component to the description.
@@ -294,7 +320,7 @@ impl ArchetypeDescription {
 
     /// Adds a component to the description.
     pub fn register_component<T: Component>(&mut self) {
-        self.register_component_raw(ComponentTypeId(TypeId::of::<T>()), ComponentMeta::of::<T>());
+        self.register_component_raw(ComponentTypeId::of::<T>(), ComponentMeta::of::<T>());
     }
 }
 

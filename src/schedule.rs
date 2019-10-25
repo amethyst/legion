@@ -1,6 +1,7 @@
 use crate::{
     borrow::{Exclusive, RefMut},
     command::CommandBuffer,
+    resource::ResourceTypeId,
     storage::ComponentTypeId,
     world::World,
 };
@@ -9,7 +10,6 @@ use itertools::izip;
 use rayon::prelude::*;
 use std::iter::repeat;
 use std::{
-    any::TypeId,
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -24,8 +24,8 @@ impl<T> Schedulable for T where T: Runnable + Send + Sync {}
 /// Trait describing a schedulable type. This is implemented by `System`
 pub trait Runnable {
     fn name(&self) -> &str;
-    fn reads(&self) -> (&[TypeId], &[ComponentTypeId]);
-    fn writes(&self) -> (&[TypeId], &[ComponentTypeId]);
+    fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]);
+    fn writes(&self) -> (&[ResourceTypeId], &[ComponentTypeId]);
     fn prepare(&mut self, world: &World);
     fn accesses_archetypes(&self) -> &BitSet;
     fn run(&self, world: &World);
@@ -64,8 +64,8 @@ impl<'a> StageExecutor<'a> {
             let mut dynamic_dependants: Vec<Vec<_>> =
                 repeat(Vec::with_capacity(64)).take(systems.len()).collect();
 
-            let mut resource_last_mutated = HashMap::<TypeId, usize>::with_capacity(64);
-            let mut resource_last_read = HashMap::<TypeId, usize>::with_capacity(64);
+            let mut resource_last_mutated = HashMap::<ResourceTypeId, usize>::with_capacity(64);
+            let mut resource_last_read = HashMap::<ResourceTypeId, usize>::with_capacity(64);
             let mut component_mutated = HashMap::<ComponentTypeId, Vec<usize>>::with_capacity(64);
 
             for (i, system) in systems.iter().enumerate() {

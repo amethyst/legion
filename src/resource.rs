@@ -8,6 +8,28 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+#[cfg(not(feature = "ffi"))]
+/// A type ID identifying a component type.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct ResourceTypeId(TypeId);
+
+#[cfg(not(feature = "ffi"))]
+impl ResourceTypeId {
+    /// Gets the component type ID that represents type `T`.
+    pub fn of<T: Resource>() -> Self { Self(TypeId::of::<T>()) }
+}
+
+#[cfg(feature = "ffi")]
+/// A type ID identifying a component type.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct ResourceTypeId(TypeId, u32);
+
+#[cfg(feature = "ffi")]
+impl ResourceTypeId {
+    /// Gets the component type ID that represents type `T`.
+    pub fn of<T: Resource>() -> Self { Self(TypeId::of::<T>(), 0) }
+}
+
 /// Trait which is implemented for tuples of resources and singular resources. This abstracts
 /// fetching resources to allow for ergonomic fetching.
 ///
@@ -167,22 +189,26 @@ impl<'a, T: 'a + Resource> DerefMut for FetchMut<'a, T> {
 }
 
 /// Resources container. This container stores its underlying resources in a `HashMap` keyed on
-/// `TypeId`. This means that the ID's used in this storage will not persist between recompiles.
+/// `ResourceTypeId`. This means that the ID's used in this storage will not persist between recompiles.
 #[derive(Default)]
 pub struct Resources {
-    storage: HashMap<TypeId, AtomicRefCell<Box<dyn Resource>>>,
+    storage: HashMap<ResourceTypeId, AtomicRefCell<Box<dyn Resource>>>,
 }
 
 impl Resources {
     /// Returns `true` if type `T` exists in the store. Otherwise, returns `false`
-    pub fn contains<T: Resource>(&self) -> bool { self.storage.contains_key(&TypeId::of::<T>()) }
+    pub fn contains<T: Resource>(&self) -> bool {
+        self.storage.contains_key(&ResourceTypeId::of::<T>())
+    }
 
     /// Inserts the instance of `T` into the store. If the type already exists, it will be silently
     /// overwritten. If you would like to retain the instance of the resource that already exists,
     /// call `remove` first to retrieve it.
     pub fn insert<T: Resource>(&mut self, value: T) {
-        self.storage
-            .insert(TypeId::of::<T>(), AtomicRefCell::new(Box::new(value)));
+        self.storage.insert(
+            ResourceTypeId::of::<T>(),
+            AtomicRefCell::new(Box::new(value)),
+        );
     }
 
     /// Removes the type `T` from this store if it exists.
@@ -193,7 +219,7 @@ impl Resources {
         Some(
             *self
                 .storage
-                .remove(&TypeId::of::<T>())?
+                .remove(&ResourceTypeId::of::<T>())?
                 .into_inner()
                 .downcast::<T>()
                 .ok()?,
@@ -203,7 +229,7 @@ impl Resources {
     /// Retrieve an immutable reference to  `T` from the store if it exists. Otherwise, return `None`
     pub fn get<T: Resource>(&self) -> Option<Fetch<'_, T>> {
         Some(Fetch {
-            inner: self.storage.get(&TypeId::of::<T>())?.get(),
+            inner: self.storage.get(&ResourceTypeId::of::<T>())?.get(),
             _marker: Default::default(),
         })
     }
@@ -211,7 +237,7 @@ impl Resources {
     /// Retrieve a mutable reference to  `T` from the store if it exists. Otherwise, return `None`
     pub fn get_mut<T: Resource>(&self) -> Option<FetchMut<'_, T>> {
         Some(FetchMut {
-            inner: self.storage.get(&TypeId::of::<T>())?.get_mut(),
+            inner: self.storage.get(&ResourceTypeId::of::<T>())?.get_mut(),
             _marker: Default::default(),
         })
     }
@@ -240,7 +266,7 @@ impl Resources {
         Some(Fetch {
             inner: self
                 .storage
-                .entry(TypeId::of::<T>())
+                .entry(ResourceTypeId::of::<T>())
                 .or_insert_with(|| AtomicRefCell::new(Box::new(value)))
                 .get(),
             _marker: Default::default(),
@@ -253,7 +279,7 @@ impl Resources {
         Some(FetchMut {
             inner: self
                 .storage
-                .entry(TypeId::of::<T>())
+                .entry(ResourceTypeId::of::<T>())
                 .or_insert_with(|| AtomicRefCell::new(Box::new(value)))
                 .get_mut(),
             _marker: Default::default(),
@@ -268,7 +294,7 @@ impl Resources {
         Some(Fetch {
             inner: self
                 .storage
-                .entry(TypeId::of::<T>())
+                .entry(ResourceTypeId::of::<T>())
                 .or_insert_with(|| AtomicRefCell::new(Box::new(T::default())))
                 .get(),
             _marker: Default::default(),
@@ -283,7 +309,7 @@ impl Resources {
         Some(FetchMut {
             inner: self
                 .storage
-                .entry(TypeId::of::<T>())
+                .entry(ResourceTypeId::of::<T>())
                 .or_insert_with(|| AtomicRefCell::new(Box::new(T::default())))
                 .get_mut(),
             _marker: Default::default(),
