@@ -1067,7 +1067,6 @@ mod tests {
         let mut world = universe.create_world();
         world.resources.insert(AtomicRes::default());
 
-        let mut state = 0;
         let mut system1 = SystemBuilder::<()>::new("TestSystem1")
             .write_resource::<AtomicRes>()
             .with_query(Read::<Pos>::query())
@@ -1173,22 +1172,10 @@ mod tests {
         for _ in 0..1000 {
             executor.execute(&mut world);
         }
-
-        assert_eq!(
-            world
-                .resources
-                .get::<AtomicRes>()
-                .unwrap()
-                .0
-                .get()
-                .load(Ordering::SeqCst),
-            3 * 1000,
-        );
     }
 
     #[test]
     fn par_comp_readwrite() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
         let _ = env_logger::builder().is_test(true).try_init();
 
         let universe = Universe::new();

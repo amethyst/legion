@@ -647,7 +647,7 @@ macro_rules! impl_and_filter {
         impl<$( $ty ),*> ActiveFilter for And<($( $ty, )*)> {}
 
         impl<'a, T: Copy, $( $ty: Filter<T> ),*> Filter<T> for And<($( $ty, )*)> {
-            // type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
+            // type Iter = crate::zip::Zip<( $( $ty::Iter ),* )>;
             type Iter = recursive_zip!(@type $($ty::Iter),*);
 
             fn collect(&self, source: T) -> Self::Iter {
@@ -656,7 +656,7 @@ macro_rules! impl_and_filter {
                 // let iters = (
                 //     $( $ty.collect(source) ),*
                 // );
-                // itertools::multizip(iters)
+                // crate::zip::multizip(iters)
                 recursive_zip!(@value $($ty.collect(source)),*)
             }
 
@@ -742,7 +742,7 @@ macro_rules! impl_or_filter {
         impl<$( $ty ),*> ActiveFilter for Or<($( $ty, )*)> {}
 
         impl<'a, T: Copy, $( $ty: Filter<T> ),*> Filter<T> for Or<($( $ty, )*)> {
-            // type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
+            // type Iter = crate::zip::Zip<( $( $ty::Iter ),* )>;
             type Iter = recursive_zip!(@type $($ty::Iter),*);
 
             fn collect(&self, source: T) -> Self::Iter {
@@ -751,7 +751,7 @@ macro_rules! impl_or_filter {
                 // let iters = (
                 //     $( $ty.collect(source) ),*
                 // );
-                // itertools::multizip(iters)
+                // crate::zip::multizip(iters)
                 recursive_zip!(@value $($ty.collect(source)),*)
             }
 
