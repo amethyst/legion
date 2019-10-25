@@ -121,7 +121,12 @@ impl<'a, T: Component> View<'a> for Read<T> {
         let (slice_borrow, slice) = unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())
-                .unwrap_or_else(|| panic!("Component of type {:?} not found in chunk when fetching Read view", std::any::type_name::<T>()))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Component of type {:?} not found in chunk when fetching Read view",
+                        std::any::type_name::<T>()
+                    )
+                })
                 .data_slice::<T>()
                 .deconstruct()
         };
@@ -162,7 +167,12 @@ impl<'a, T: Component> View<'a> for Write<T> {
         let (slice_borrow, slice) = unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())
-                .unwrap_or_else(|| panic!("Component of type {:?} not found in chunk when fetching Write view", std::any::type_name::<T>()))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Component of type {:?} not found in chunk when fetching Write view",
+                        std::any::type_name::<T>()
+                    )
+                })
                 .data_slice_mut::<T>()
                 .deconstruct()
         };
@@ -212,7 +222,12 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
             archetype
                 .tags()
                 .get(TagTypeId::of::<T>())
-                .unwrap_or_else(|| panic!("Component of type {:?} not found in archetype when fetching Tagged view", std::any::type_name::<T>()))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Component of type {:?} not found in archetype when fetching Tagged view",
+                        std::any::type_name::<T>()
+                    )
+                })
                 .data_slice::<T>()
                 .get_unchecked(chunk_index)
         };
@@ -260,7 +275,7 @@ macro_rules! impl_view_tuple {
         }
 
         impl<'a, $( $ty: ViewElement + View<'a> ),* > View<'a> for ($( $ty, )*) {
-            type Iter = itertools::Zip<($( $ty::Iter, )*)>;
+            type Iter = crate::zip::Zip<($( $ty::Iter, )*)>;
 
             #[inline]
             fn fetch(
@@ -268,7 +283,7 @@ macro_rules! impl_view_tuple {
                 chunk: &'a ComponentStorage,
                 chunk_index: usize,
             ) -> Self::Iter {
-                itertools::multizip(($( $ty::fetch(archetype.clone(), chunk.clone(), chunk_index), )*))
+                crate::zip::multizip(($( $ty::fetch(archetype.clone(), chunk.clone(), chunk_index), )*))
             }
 
             fn validate() -> bool {

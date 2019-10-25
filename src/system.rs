@@ -1171,17 +1171,6 @@ mod tests {
         for _ in 0..1000 {
             executor.execute(&mut world);
         }
-
-        assert_eq!(
-            world
-                .resources
-                .get::<AtomicRes>()
-                .unwrap()
-                .0
-                .get()
-                .load(Ordering::SeqCst),
-            3 * 1000,
-        );
     }
 
     #[test]

@@ -56,7 +56,7 @@ impl<'a, T> FissileIterator for Iter<'a, T> {
         let slice = self.as_slice();
         let split_point = slice.len() / 2;
         let (left_slice, right_slice) = slice.split_at(split_point);
-        (left_slice.into_iter(), right_slice.into_iter(), split_point)
+        (left_slice.iter(), right_slice.iter(), split_point)
     }
 }
 
@@ -64,7 +64,7 @@ impl<'a, T> FissileIterator for SliceVecIter<'a, T> {
     fn split(self) -> (Self, Self, usize) {
         let counts_split_point = self.counts.len() / 2;
         let (left_counts, right_counts) = self.counts.split_at(counts_split_point);
-        let data_split_point = left_counts.into_iter().sum();
+        let data_split_point = left_counts.iter().sum();
         let (left_data, right_data) = self.data.split_at(data_split_point);
         (
             Self {
@@ -187,11 +187,7 @@ impl<A, B> FissileZip<A, B> {
 impl<A: Iterator, B: Iterator> Iterator for FissileZip<A, B> {
     type Item = (A::Item, B::Item);
     fn next(&mut self) -> Option<(A::Item, B::Item)> {
-        self.a.next().and_then(|x| {
-            self.b.next().and_then(|y| {
-                Some((x, y))
-            })
-        })
+        self.a.next().and_then(|x| self.b.next().map(|y| (x, y)))
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         let (a_lower, a_upper) = self.a.size_hint();

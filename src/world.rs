@@ -22,6 +22,7 @@ use crate::storage::Tag;
 use crate::storage::TagMeta;
 use crate::storage::TagTypeId;
 use crate::storage::Tags;
+use crate::tuple::TupleEq;
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use std::cell::UnsafeCell;
@@ -802,7 +803,7 @@ mod tuple_impls {
     use crate::storage::Component;
     use crate::storage::ComponentTypeId;
     use crate::storage::Tag;
-    use itertools::Zip;
+    use crate::zip::Zip;
     use std::iter::Repeat;
     use std::iter::Take;
     use std::slice::Iter;
@@ -813,9 +814,9 @@ mod tuple_impls {
             impl_data_tuple!(@COMPONENT_SOURCE $( $ty => $id ),*);
         };
         ( @COMPONENT_SOURCE $( $ty: ident => $id: ident ),* ) => {
-            impl<I, $( $ty ),*> ComponentLayout for ComponentTupleSet<($( $ty, )*), I>
+            impl<UWU, $( $ty ),*> ComponentLayout for ComponentTupleSet<($( $ty, )*), UWU>
             where
-                I: Iterator<Item = ($( $ty, )*)>,
+                UWU: Iterator<Item = ($( $ty, )*)>,
                 $( $ty: Component ),*
             {
                 type Filter = ComponentTupleFilter<($( $ty, )*)>;
@@ -832,9 +833,9 @@ mod tuple_impls {
                 }
             }
 
-            impl<I, $( $ty ),*> ComponentSource for ComponentTupleSet<($( $ty, )*), I>
+            impl<UWU, $( $ty ),*> ComponentSource for ComponentTupleSet<($( $ty, )*), UWU>
             where
-                I: Iterator<Item = ($( $ty, )*)>,
+                UWU: Iterator<Item = ($( $ty, )*)>,
                 $( $ty: Component ),*
             {
                 fn is_empty(&mut self) -> bool {
@@ -966,13 +967,13 @@ mod tuple_impls {
 
                     );
 
-                    itertools::multizip(iters)
+                    crate::zip::multizip(iters)
                 }
 
                 fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     #![allow(non_snake_case)]
                     let ($( $ty, )*) = self;
-                    Some(($( &*$ty, )*) == *item)
+                    Some(($( &*$ty, )*).legion_eq(item))
                 }
             }
         };
@@ -1000,6 +1001,24 @@ mod tuple_impls {
     impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f);
     impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g);
     impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v, W => w);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v, W => w, X => x);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v, W => w, X => x, Y => y);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v, W => w, X => x, Y => y, Z => z);
 }
 
 struct DynamicComponentLayout<'a> {

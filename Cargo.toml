@@ -16,6 +16,7 @@ travis-ci = { repository = "TomGillen/legion", branch = "master" }
 [features]
 default = ["par-iter", "events"]
 par-iter = ["rayon"]
+ffi = []
 events = []
 
 [dependencies]

@@ -224,7 +224,6 @@
 
 pub mod borrow;
 pub mod command;
-mod cons;
 pub mod entity;
 pub mod filter;
 pub mod iterator;
@@ -234,6 +233,10 @@ pub mod schedule;
 pub mod storage;
 pub mod system;
 pub mod world;
+
+mod cons;
+mod tuple;
+mod zip;
 
 pub use bit_set;
 

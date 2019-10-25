@@ -55,6 +55,8 @@ impl<'a> StageExecutor<'a> {
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
+    #[allow(clippy::cognitive_complexity)]
+    // TODO: we should break this up
     pub fn new(systems: &'a mut [Box<dyn Schedulable>], pool: &'a rayon::ThreadPool) -> Self {
         if systems.len() > 1 {
             let mut static_dependency_counts = Vec::with_capacity(systems.len());
