@@ -814,6 +814,14 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
+    pub fn for_each_entities<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
+    where
+        T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
+    {
+        self.iter_entities(world).for_each(&mut f);
+    }
+
+    /// Iterates through all entity data that matches the query.
     pub fn for_each<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),

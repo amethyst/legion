@@ -1221,6 +1221,33 @@ mod tests {
     }
 
     #[test]
+    fn insert_many() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let mut world = create();
+
+        struct One;
+        struct Two;
+        struct Three;
+        struct Four;
+        struct Five;
+        struct Six;
+        struct Seven;
+        struct Eight;
+        struct Nine;
+        struct Ten;
+
+        let shared = (1usize, 2f32, 3u16);
+        let components = vec![
+            (One, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten),
+            (One, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten),
+        ];
+        world.insert(shared, components);
+
+        assert_eq!(2, world.entity_allocator.allocation_buffer().len());
+    }
+
+    #[test]
     fn insert() {
         let _ = env_logger::builder().is_test(true).try_init();
 

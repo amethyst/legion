@@ -120,6 +120,14 @@ where
         unsafe { (&mut *self.query).for_each(&*self.world, f) }
     }
 
+    /// Iterates through all entity data that matches the query.
+    pub fn for_each_entities<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
+    where
+        T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
+    {
+        unsafe { (&mut *self.query).for_each_entities(&*self.world, f) }
+    }
+
     /// Iterates through all entities that matches the query in parallel by chunk
     #[inline]
     pub fn par_entities_for_each<'a, T>(&'a mut self, f: T)
