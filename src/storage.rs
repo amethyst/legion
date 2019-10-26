@@ -780,6 +780,10 @@ impl Chunkset {
         let mut first = 0;
         let mut last = slice.len() - 1;
 
+        if slice.is_empty() {
+            return true;
+        }
+
         loop {
             // find the first chunk that is not full
             while first < last && slice[first].is_full() {
