@@ -6,9 +6,15 @@ use crate::{
     world::{ComponentSource, ComponentTupleSet, IntoComponentSource, TagLayout, TagSet, World},
 };
 use bit_set::BitSet;
-use crossbeam::queue::SegQueue;
+
 use derivative::Derivative;
 use std::{marker::PhantomData, sync::Arc};
+
+#[cfg(feature = "par-iter")]
+use crossbeam::queue::SegQueue;
+
+#[cfg(not(feature = "par-iter"))]
+use crate::borrow::{AtomicRefCell, Exclusive, RefMut};
 
 pub trait WorldWritable {
     fn write(self: Arc<Self>, world: &mut World);
@@ -188,7 +194,10 @@ where
 
 #[derive(Default)]
 pub struct CommandBuffer {
+    #[cfg(feature = "par-iter")]
     commands: SegQueue<EntityCommand>,
+    #[cfg(not(feature = "par-iter"))]
+    commands: AtomicRefCell<Vec<EntityCommand>>,
     block: Option<EntityBlock>,
     used_entities: BitSet,
 }
@@ -202,13 +211,35 @@ pub enum CommandError {
 }
 
 impl CommandBuffer {
+    #[cfg(not(feature = "par-iter"))]
+    #[inline]
+    fn get_commands(&self) -> RefMut<'_, Exclusive, Vec<EntityCommand>> { self.commands.get_mut() }
+
+    #[cfg(feature = "par-iter")]
+    #[inline]
+    fn get_commands(&self) -> &SegQueue<EntityCommand> { &self.commands }
+
     pub fn write(&self, world: &mut World) {
         log::trace!("Performing drain");
-        while let Ok(command) = self.commands.pop() {
-            match command {
-                EntityCommand::WriteWorld(ptr) => ptr.write(world),
-                EntityCommand::ExecMutWorld(closure) => closure(world),
-                EntityCommand::ExecWorld(closure) => closure(world),
+        #[cfg(feature = "par-iter")]
+        {
+            while let Ok(command) = self.get_commands().pop() {
+                match command {
+                    EntityCommand::WriteWorld(ptr) => ptr.write(world),
+                    EntityCommand::ExecMutWorld(closure) => closure(world),
+                    EntityCommand::ExecWorld(closure) => closure(world),
+                }
+            }
+        }
+
+        #[cfg(not(feature = "par-iter"))]
+        {
+            while let Some(command) = self.get_commands().pop() {
+                match command {
+                    EntityCommand::WriteWorld(ptr) => ptr.write(world),
+                    EntityCommand::ExecMutWorld(closure) => closure(world),
+                    EntityCommand::ExecWorld(closure) => closure(world),
+                }
             }
         }
     }
@@ -240,14 +271,15 @@ impl CommandBuffer {
     where
         F: 'static + Fn(&mut World),
     {
-        self.commands.push(EntityCommand::ExecMutWorld(Arc::new(f)));
+        self.get_commands()
+            .push(EntityCommand::ExecMutWorld(Arc::new(f)));
     }
 
     pub fn insert_writer<W>(&self, writer: W)
     where
         W: 'static + WorldWritable,
     {
-        self.commands
+        self.get_commands()
             .push(EntityCommand::WriteWorld(Arc::new(writer)));
     }
 
@@ -256,8 +288,7 @@ impl CommandBuffer {
         T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         C: 'static + IntoComponentSource,
     {
-        // TODO: how do we do this?
-        self.commands
+        self.get_commands()
             .push(EntityCommand::WriteWorld(Arc::new(InsertCommand {
                 write_components: Vec::default(),
                 write_tags: Vec::default(),
@@ -267,14 +298,14 @@ impl CommandBuffer {
     }
 
     pub fn delete(&self, entity: Entity) {
-        self.commands
+        self.get_commands()
             .push(EntityCommand::WriteWorld(Arc::new(DeleteEntityCommand(
                 entity,
             ))));
     }
 
     pub fn add_component<C: Component>(&self, entity: Entity, component: C) {
-        self.commands
+        self.get_commands()
             .push(EntityCommand::WriteWorld(Arc::new(AddComponentCommand {
                 entity,
                 component,
@@ -282,7 +313,7 @@ impl CommandBuffer {
     }
 
     pub fn remove_component<C: Component>(&self, entity: Entity) {
-        self.commands.push(EntityCommand::WriteWorld(Arc::new(
+        self.get_commands().push(EntityCommand::WriteWorld(Arc::new(
             RemoveComponentCommand {
                 entity,
                 _marker: PhantomData::<C>::default(),
@@ -291,7 +322,7 @@ impl CommandBuffer {
     }
 
     pub fn add_tag<T: Tag>(&self, entity: Entity, tag: T) {
-        self.commands
+        self.get_commands()
             .push(EntityCommand::WriteWorld(Arc::new(AddTagCommand {
                 entity,
                 tag,
@@ -299,7 +330,7 @@ impl CommandBuffer {
     }
 
     pub fn remove_tag<T: Tag>(&self, entity: Entity) {
-        self.commands
+        self.get_commands()
             .push(EntityCommand::WriteWorld(Arc::new(RemoveTagCommand {
                 entity,
                 _marker: PhantomData::<T>::default(),
@@ -347,8 +378,7 @@ mod tests {
         let mut query = Read::<Pos>::query();
 
         let mut count = 0;
-        for (_, _) in query.iter_entities(&world) {
-            //assert_eq!(expected.get(&entity).unwrap().0, *pos);
+        for _ in query.iter_entities(&world) {
             count += 1;
         }
 
