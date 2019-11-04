@@ -7,12 +7,14 @@ use crate::{
 };
 use bit_set::BitSet;
 use itertools::izip;
-use rayon::prelude::*;
 use std::iter::repeat;
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
 };
+
+#[cfg(feature = "par-iter")]
+use rayon::prelude::*;
 
 /// Empty trait which defines a `System` as schedulable by the dispatcher - this requires that the
 /// type is both `Send` and `Sync`.
@@ -43,18 +45,27 @@ trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq {}
 /// Executes all systems that are to be run within a single given stage.
 pub struct StageExecutor<'a> {
     systems: &'a mut [Box<dyn Schedulable>],
+    #[cfg(feature = "par-iter")]
     pool: &'a rayon::ThreadPool,
+    #[cfg(feature = "par-iter")]
     static_dependants: Vec<Vec<usize>>,
+    #[cfg(feature = "par-iter")]
     dynamic_dependants: Vec<Vec<usize>>,
+    #[cfg(feature = "par-iter")]
     static_dependency_counts: Vec<AtomicUsize>,
+    #[cfg(feature = "par-iter")]
     awaiting: Vec<AtomicUsize>,
 }
 
 impl<'a> StageExecutor<'a> {
+    #[cfg(not(feature = "par-iter"))]
+    pub fn new(systems: &'a mut [Box<dyn Schedulable>]) -> Self { Self { systems } }
+
     /// Constructs a new executor for all systems to be run in a single stage.
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
+    #[cfg(feature = "par-iter")]
     #[allow(clippy::cognitive_complexity)]
     // TODO: we should break this up
     pub fn new(systems: &'a mut [Box<dyn Schedulable>], pool: &'a rayon::ThreadPool) -> Self {
@@ -164,10 +175,22 @@ impl<'a> StageExecutor<'a> {
         }
     }
 
+    /// This is a linear executor which just runs the system in their given order.
+    ///
+    /// Only enabled with par-iter is disabled
+    #[cfg(not(feature = "par-iter"))]
+    pub fn execute(&mut self, world: &mut World) {
+        self.systems.iter_mut().for_each(|system| {
+            system.run(world);
+            system.command_buffer_mut().write(world);
+        });
+    }
+
     /// Executes this stage. Execution is recursively conducted in a draining fashion. Systems are
     /// ordered based on 1. their resource access, and then 2. their insertion order. systems are
     /// executed in the pool provided at construction, and this function does not return until all
     /// systems in this stage have completed.
+    #[cfg(feature = "par-iter")]
     pub fn execute(&mut self, world: &mut World) {
         log::trace!("execute");
 
@@ -240,6 +263,7 @@ impl<'a> StageExecutor<'a> {
     }
 
     /// Recursively execute through the generated depedency cascade and exhaust it.
+    #[cfg(feature = "par-iter")]
     fn run_recursive(&self, i: usize, world: &World) {
         log::trace!("run_recursive: {}", i);
         self.systems[i].run(world);

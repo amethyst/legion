@@ -158,6 +158,7 @@ fn query_cached_read_entity_data() {
 }
 
 #[test]
+#[cfg(feature = "par-iter")]
 fn query_read_entity_data_par() {
     let _ = env_logger::builder().is_test(true).try_init();
 
@@ -191,6 +192,7 @@ fn query_read_entity_data_par() {
 }
 
 #[test]
+#[cfg(feature = "par-iter")]
 fn query_read_entity_data_par_foreach() {
     let _ = env_logger::builder().is_test(true).try_init();
 

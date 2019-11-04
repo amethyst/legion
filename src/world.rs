@@ -24,7 +24,6 @@ use crate::storage::TagTypeId;
 use crate::storage::Tags;
 use crate::tuple::TupleEq;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use std::cell::UnsafeCell;
 use std::iter::Enumerate;
 use std::iter::Peekable;
@@ -36,6 +35,9 @@ use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+
+#[cfg(feature = "par-iter")]
+use rayon::prelude::*;
 
 #[cfg(feature = "events")]
 use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
@@ -64,13 +66,17 @@ impl Universe {
         let id = self.world_count.fetch_add(1, Ordering::SeqCst);
         let world = World::new(WorldId(id), EntityAllocator::new(self.allocator.clone()));
 
-        self.channel
-            .write(WorldCreatedEvent(WorldId(id)))
-            .expect("Failed to write to WorldCreatedEvent channel.");
+        #[cfg(feature = "events")]
+        {
+            self.channel
+                .write(WorldCreatedEvent(WorldId(id)))
+                .expect("Failed to write to WorldCreatedEvent channel.");
+        }
 
         world
     }
 
+    #[cfg(feature = "events")]
     pub fn channel(&mut self) -> &mut Channel<WorldCreatedEvent> { &mut self.channel }
 }
 
@@ -112,11 +118,13 @@ impl World {
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: allocator,
             defrag_progress: 0,
+            #[cfg(feature = "events")]
             channel: Channel::default(),
             resources: Resources::default(),
         }
     }
 
+    #[cfg(feature = "events")]
     pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> { &mut self.channel }
 
     pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
@@ -194,11 +202,15 @@ impl World {
         }
 
         let entities = self.entity_allocator.allocation_buffer();
-        entities.par_iter().for_each(|e| {
-            self.channel
-                .write(EntityEvent::Created(*e))
-                .expect("Failed to write to WorldCreatedEvent channel.");
-        });
+
+        #[cfg(feature = "events")]
+        {
+            entities.par_iter().for_each(|e| {
+                self.channel
+                    .write(EntityEvent::Created(*e))
+                    .expect("Failed to write to WorldCreatedEvent channel.");
+            });
+        }
 
         entities
     }
@@ -216,9 +228,12 @@ impl World {
     ///
     /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
-        self.channel
-            .write(EntityEvent::Deleted(entity))
-            .expect("Failed to write to EntityEvent::Deleted channel.");
+        #[cfg(feature = "events")]
+        {
+            self.channel
+                .write(EntityEvent::Deleted(entity))
+                .expect("Failed to write to EntityEvent::Deleted channel.");
+        }
 
         if let Some(location) = self.entity_allocator.delete_entity(entity) {
             // find entity's chunk

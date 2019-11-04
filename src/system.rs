@@ -121,7 +121,8 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each_entities<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
+    #[cfg(feature = "par-iter")]
+    pub fn for_each_entities<'a, 'data, T>(&'a mut self, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
     {
@@ -129,6 +130,7 @@ where
     }
 
     /// Iterates through all entities that matches the query in parallel by chunk
+    #[cfg(feature = "par-iter")]
     #[inline]
     pub fn par_entities_for_each<'a, T>(&'a mut self, f: T)
     where
@@ -976,13 +978,21 @@ mod tests {
 
         let mut systems = vec![system_one, system_two, system_three, system_four];
 
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(8)
-            .build()
-            .unwrap();
+        #[cfg(feature = "par-iter")]
+        {
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(8)
+                .build()
+                .unwrap();
 
-        let mut executor = StageExecutor::new(&mut systems, &pool);
-        executor.execute(&mut world);
+            let mut executor = StageExecutor::new(&mut systems, &pool);
+            executor.execute(&mut world);
+        }
+        #[cfg(not(feature = "par-iter"))]
+        {
+            let mut executor = StageExecutor::new(&mut systems);
+            executor.execute(&mut world);
+        }
 
         assert_eq!(*(runs.lock().unwrap()), order);
     }
@@ -1063,6 +1073,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "par-iter")]
     fn par_res_write() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let _ = env_logger::builder().is_test(true).try_init();
@@ -1128,6 +1139,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "par-iter")]
     fn par_res_readwrite() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let _ = env_logger::builder().is_test(true).try_init();
@@ -1182,6 +1194,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "par-iter")]
     fn par_comp_readwrite() {
         let _ = env_logger::builder().is_test(true).try_init();
 

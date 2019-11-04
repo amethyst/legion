@@ -1035,6 +1035,7 @@ where
     }
 }
 
+#[cfg(feature = "par-iter")]
 impl<'data, 'filter, V, FArch, FChunkset, FChunk> ParallelIterator
     for ChunkViewParIter<'data, 'filter, V, FArch, FChunkset, FChunk>
 where
@@ -1056,6 +1057,7 @@ where
     }
 }
 
+#[cfg(feature = "par-iter")]
 impl<'data, 'filter, V, FArch, FChunkset, FChunk> UnindexedProducer
     for ChunkViewParIter<'data, 'filter, V, FArch, FChunkset, FChunk>
 where
