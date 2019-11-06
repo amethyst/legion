@@ -1,13 +1,13 @@
 use crate::{
     entity::Entity,
     storage::{
-        ArchetypeData, ArchetypeDescription, Chunkset, ComponentMeta, ComponentResourceSet,
+        ArchetypeData, ArchetypeDescription, ComponentMeta, ComponentResourceSet,
         ComponentStorage, ComponentTypeId, TagMeta, TagStorage, TagTypeId,
     },
     world::World,
 };
 use serde::{
-    ser::{SerializeSeq, SerializeStruct},
+    ser::SerializeStruct,
     Serialize, Serializer,
 };
 
@@ -148,7 +148,7 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for ArchetypeSerializer<'a, 'b, CS> 
         )?;
         let tags: Vec<_> = self.valid_tags
             .iter()
-            .map(|(idx, ty, meta)| {
+            .map(|(_idx, ty, meta)| {
                 let tag_storage = self
                     .archetype
                     .tags()
@@ -237,7 +237,7 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for ChunkSerializer<'a, 'b, CS> {
         let comp_storages: Vec<_> = self
             .valid_components
             .iter()
-            .map(|(idx, ty, meta)| {
+            .map(|(_idx, ty, meta)| {
                 let comp_resources = self
                     .comp_storage
                     .components(**ty)

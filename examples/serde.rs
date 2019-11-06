@@ -1,7 +1,7 @@
 use legion::{
     prelude::*,
     storage::{
-        ArchetypeDescription, Component, ComponentMeta, ComponentResourceSet, ComponentTypeId,
+        ArchetypeDescription, ComponentMeta, ComponentResourceSet, ComponentTypeId,
         TagMeta, TagStorage, TagTypeId,
     },
 };
@@ -22,8 +22,8 @@ struct Unregistered(f32, f32, f32);
 struct ComponentRegistration {
     uuid: type_uuid::Bytes,
     ty: TypeId,
-    tag_serialize_fn: fn(&TagStorage, &mut FnMut(&erased_serde::Serialize)),
-    comp_serialize_fn: fn(&ComponentResourceSet, &mut FnMut(&erased_serde::Serialize)),
+    tag_serialize_fn: fn(&TagStorage, &mut dyn FnMut(&dyn erased_serde::Serialize)),
+    comp_serialize_fn: fn(&ComponentResourceSet, &mut dyn FnMut(&dyn erased_serde::Serialize)),
 }
 impl ComponentRegistration {
     fn of<T: TypeUuid + Serialize + for<'de> Deserialize<'de> + 'static>() -> Self {
@@ -47,7 +47,7 @@ impl ComponentRegistration {
 struct SerializeImpl {
     types: HashMap<TypeId, ComponentRegistration>,
 }
-impl legion::serde::WorldSerializer for SerializeImpl {
+impl legion::ser::WorldSerializer for SerializeImpl {
     fn can_serialize_tag(&self, ty: &TagTypeId, _meta: &TagMeta) -> bool {
         self.types.get(&ty.0).is_some()
     }
@@ -80,12 +80,12 @@ impl legion::serde::WorldSerializer for SerializeImpl {
         &self,
         serializer: S,
         component_type: &ComponentTypeId,
-        component_meta: &ComponentMeta,
+        _component_meta: &ComponentMeta,
         components: &ComponentResourceSet,
     ) -> Result<S::Ok, S::Error> {
         if let Some(reg) = self.types.get(&component_type.0) {
-            let mut result = RefCell::new(None);
-            let mut serializer = RefCell::new(Some(serializer));
+            let result = RefCell::new(None);
+            let serializer = RefCell::new(Some(serializer));
             {
                 let mut result_ref = result.borrow_mut();
                 (reg.comp_serialize_fn)(components, &mut |serialize| {
@@ -100,12 +100,12 @@ impl legion::serde::WorldSerializer for SerializeImpl {
         &self,
         serializer: S,
         tag_type: &TagTypeId,
-        tag_meta: &TagMeta,
+        _tag_meta: &TagMeta,
         tags: &TagStorage,
     ) -> Result<S::Ok, S::Error> {
         if let Some(reg) = self.types.get(&tag_type.0) {
-            let mut result = RefCell::new(None);
-            let mut serializer = RefCell::new(Some(serializer));
+            let result = RefCell::new(None);
+            let serializer = RefCell::new(Some(serializer));
             {
                 let mut result_ref = result.borrow_mut();
                 (reg.tag_serialize_fn)(tags, &mut |serialize| {
@@ -121,7 +121,7 @@ impl legion::serde::WorldSerializer for SerializeImpl {
         serializer: S,
         entities: &[Entity],
     ) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(entities.iter().map(|e| *uuid::Uuid::new_v4().as_bytes() ))
+        serializer.collect_seq(entities.iter().map(|_e| *uuid::Uuid::new_v4().as_bytes() ))
     }
 }
 
@@ -169,6 +169,6 @@ fn main() {
         types: HashMap::from_iter(registrations.iter().map(|reg| (reg.ty, reg.clone()))),
     };
 
-    let serializable = legion::serde::serializable_world(&world, &ser_helper);
+    let serializable = legion::ser::serializable_world(&world, &ser_helper);
     println!("{}", serde_json::to_string(&serializable).unwrap());
 }
