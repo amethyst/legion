@@ -2,12 +2,11 @@
 
 use quote::quote;
 use std::{collections::HashMap, fs::OpenOptions, path::Path};
-use syn::{parse_macro_input, DeriveInput, Ident, ItemStruct};
+use syn::{parse_macro_input, AttributeArgs, DeriveInput, Ident, ItemStruct};
 use uuid::Uuid;
 
 type UuidMap = HashMap<String, u128>;
 
-/*
 fn get_uuid(ast: &DeriveInput) -> Uuid {
     let uuid_map_path = Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("uuid.ron");
     let uuid_map_file = OpenOptions::new()
@@ -34,7 +33,7 @@ fn get_uuid(ast: &DeriveInput) -> Uuid {
     }
 
     Uuid::new_v4()
-}*/
+}
 
 pub fn impl_uuid(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let parser_copy = input.clone();
@@ -48,10 +47,18 @@ pub fn impl_uuid(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let uuid_bytes: u128 = uuid.as_u128();
 
     let item = parse_macro_input!(parser_copy as ItemStruct);
-    panic!("Item = {:?}", item.ident.to_string());
+
+    let span = item.ident.span();
+    /*
+    println!(
+        "file {}:{}:{}:{}",
+        span.source_file().path().display(),
+        span.start().line,
+        span.start().column,
+        item.ident.to_string()
+    );*/
 
     let res = quote! {
-        // blah
         impl legion::Uuid for #component_name {
             fn uuid() -> uuid::Uuid {
                 uuid::Uuid::from_u128(#uuid_bytes)
