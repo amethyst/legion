@@ -254,8 +254,3 @@ pub mod prelude {
     pub use crate::world::{Universe, World};
     pub use bit_set::BitSet;
 }
-
-#[cfg(feature = "uuid")]
-pub trait Uuid {
-    fn uuid() -> uuid::Uuid;
-}
