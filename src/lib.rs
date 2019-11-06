@@ -239,6 +239,8 @@ pub mod schedule;
 pub mod storage;
 pub mod system;
 pub mod world;
+#[cfg(feature = "serde-1")]
+pub mod serde;
 
 mod cons;
 mod tuple;
