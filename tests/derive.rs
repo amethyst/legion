@@ -1,3 +1,5 @@
+#![cfg(feature = "derive")]
+
 use legion::prelude::*;
 use legion_derive::Uuid;
 
