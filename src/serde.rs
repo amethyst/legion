@@ -1,10 +1,8 @@
 use crate::{
     entity::Entity,
     storage::{
-        ArchetypeData, ArchetypeDescription, Chunkset, ComponentResourceSet, ComponentTypeId,
-        TagMeta, TagStorage, TagTypeId,
-        ComponentMeta,
-        ComponentStorage,
+        ArchetypeData, ArchetypeDescription, Chunkset, ComponentMeta, ComponentResourceSet,
+        ComponentStorage, ComponentTypeId, TagMeta, TagStorage, TagTypeId,
     },
     world::World,
 };
@@ -18,13 +16,15 @@ pub struct WorldSerializable<'a, 'b, CS: WorldSerializer> {
     world: &'a World,
 }
 
-pub fn serializable_world<'a, 'b, CS: WorldSerializer>(world: &'a World, serialize_impl: &'b CS) -> WorldSerializable<'a, 'b, CS> {
+pub fn serializable_world<'a, 'b, CS: WorldSerializer>(
+    world: &'a World,
+    serialize_impl: &'b CS,
+) -> WorldSerializable<'a, 'b, CS> {
     WorldSerializable {
         world,
         world_serializer: serialize_impl,
     }
 }
-
 
 /*
 // Structure optimized for saving and loading:
@@ -63,10 +63,8 @@ pub fn serializable_world<'a, 'b, CS: WorldSerializer>(world: &'a World, seriali
 */
 
 pub trait WorldSerializer {
-    fn can_serialize(
-        &self,
-        archetype_desc: &ArchetypeDescription,
-    ) -> bool;
+    fn can_serialize_tag(&self, ty: &TagTypeId, _meta: &TagMeta) -> bool;
+    fn can_serialize_component(&self, ty: &ComponentTypeId, _meta: &ComponentMeta) -> bool;
     fn serialize_archetype_description<S: Serializer>(
         &self,
         serializer: S,
@@ -89,7 +87,7 @@ pub trait WorldSerializer {
     fn serialize_entities<S: Serializer>(
         &self,
         serializer: S,
-        entities: &[Entity]
+        entities: &[Entity],
     ) -> Result<S::Ok, S::Error>;
 }
 
@@ -103,47 +101,36 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for WorldSerializable<'a, 'b, CS> {
             storage
                 .archetypes()
                 .iter()
-                .filter(|archetype| self.world_serializer.can_serialize(archetype.description()))
-                .map(|archetype| ArchetypeSerializer {
-                    world_serializer: self.world_serializer,
-                    archetype,
+                .filter_map(|archetype| {
+                    let valid_tags = archetype.description()
+                        .tags()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (ty, meta))| self.world_serializer.can_serialize_tag(ty, meta))
+                        .map(|(idx, (ty, meta))| (idx, ty, meta)).collect::<Vec<_>>();
+                    let valid_components = archetype.description().components().iter().enumerate().filter(|(_, (ty, meta))| {
+                        self.world_serializer.can_serialize_component(ty, meta)
+                    }).map(|(idx, (ty, meta))| (idx, ty, meta)).collect::<Vec<_>>();
+                    if valid_tags.len() != 0 || valid_components.len() != 0 {
+                        Some(ArchetypeSerializer {
+                            world_serializer: self.world_serializer,
+                            archetype,
+                            valid_tags,
+                            valid_components,
+                        })
+                    } else {
+                        None
+                    }
                 }),
         )
-        // let storage = self.world.storage();
-        // let mut tag_slice_buffer: Vec<(&TagTypeId, &TagStorage)> = Vec::new();
-        // for archetype in storage.archetypes() {
-        //     let desc = archetype.description();
-        //     let tag_storage = archetype.tags();
-        //     tag_slice_buffer.clear();
-        //     for (tag_type, _) in desc.tags() {
-        //         let storage = tag_storage
-        //             .get(*tag_type)
-        //             .expect("no tag storage for tag type");
-        //         tag_slice_buffer.push((tag_type, storage));
-        //     }
-        //     for (idx, chunkset) in archetype.chunksets().iter().enumerate() {
-        //         for chunk in chunkset.occupied() {
-        //             let chunk_seq = serializer.serialize_seq(Some(desc.components().len()))?;
-        //             for (comp_type, _) in desc.components() {
-        //                 let comp_resources = chunk
-        //                     .components(*comp_type)
-        //                     .expect("no storage for component type in descriptor");
-        //                 chunk_seq.serialize_element(&ComponentResourceSetSerializer {
-        //                     world_serializer: self.world_serializer,
-        //                     comp_resources,
-        //                     comp_type,
-        //                 })?;
-        //             }
-        //             chunk_seq.end();
-        //         }
-        //     }
-        // }
     }
 }
 
 struct ArchetypeSerializer<'a, 'b, CS: WorldSerializer> {
     world_serializer: &'b CS,
     archetype: &'a ArchetypeData,
+    valid_tags: Vec<(usize, &'a TagTypeId, &'a TagMeta)>,
+    valid_components: Vec<(usize, &'a ComponentTypeId, &'a ComponentMeta)>,
 }
 impl<'a, 'b, CS: WorldSerializer> Serialize for ArchetypeSerializer<'a, 'b, CS> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -159,14 +146,13 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for ArchetypeSerializer<'a, 'b, CS> 
                 desc,
             },
         )?;
-        let tags: Vec<_> = desc
-            .tags()
+        let tags: Vec<_> = self.valid_tags
             .iter()
-            .map(|(ty, meta)| {
+            .map(|(idx, ty, meta)| {
                 let tag_storage = self
                     .archetype
                     .tags()
-                    .get(*ty)
+                    .get(**ty)
                     .expect("tag type in archetype but not in storage");
                 TagSerializer {
                     world_serializer: self.world_serializer,
@@ -189,6 +175,7 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for ArchetypeSerializer<'a, 'b, CS> 
                         world_serializer: self.world_serializer,
                         desc,
                         comp_storage,
+                        valid_components: &self.valid_components,
                     })
                     .collect::<Vec<_>>()
             })
@@ -232,6 +219,7 @@ struct ChunkSerializer<'a, 'b, CS: WorldSerializer> {
     world_serializer: &'b CS,
     desc: &'a ArchetypeDescription,
     comp_storage: &'a ComponentStorage,
+    valid_components: &'a Vec<(usize, &'a ComponentTypeId, &'a ComponentMeta)>,
 }
 impl<'a, 'b, CS: WorldSerializer> Serialize for ChunkSerializer<'a, 'b, CS> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -239,17 +227,20 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for ChunkSerializer<'a, 'b, CS> {
         S: Serializer,
     {
         let mut chunk = serializer.serialize_struct("Chunk", 2)?;
-        chunk.serialize_field("entities", &EntitySerializer {
-            world_serializer: self.world_serializer,
-            entities: self.comp_storage.entities(),
-        })?;
-        let comp_storages: Vec<_> = self.desc
-            .components()
+        chunk.serialize_field(
+            "entities",
+            &EntitySerializer {
+                world_serializer: self.world_serializer,
+                entities: self.comp_storage.entities(),
+            },
+        )?;
+        let comp_storages: Vec<_> = self
+            .valid_components
             .iter()
-            .map(|(ty, meta)| {
+            .map(|(idx, ty, meta)| {
                 let comp_resources = self
                     .comp_storage
-                    .components(*ty)
+                    .components(**ty)
                     .expect("component type in archetype but not in storage");
                 ComponentResourceSetSerializer {
                     world_serializer: self.world_serializer,
@@ -275,8 +266,12 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for ComponentResourceSetSerializer<'
     where
         S: Serializer,
     {
-        self.world_serializer
-            .serialize_components(serializer, self.ty, self.meta, self.comp_resources)
+        self.world_serializer.serialize_components(
+            serializer,
+            self.ty,
+            self.meta,
+            self.comp_resources,
+        )
     }
 }
 

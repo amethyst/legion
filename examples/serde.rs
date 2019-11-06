@@ -15,6 +15,8 @@ struct Pos(f32, f32, f32);
 #[derive(TypeUuid, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
 #[uuid = "14dec17f-ae14-40a3-8e44-e487fc423287"]
 struct Vel(f32, f32, f32);
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Unregistered(f32, f32, f32);
 
 #[derive(Clone)]
 struct ComponentRegistration {
@@ -46,15 +48,11 @@ struct SerializeImpl {
     types: HashMap<TypeId, ComponentRegistration>,
 }
 impl legion::serde::WorldSerializer for SerializeImpl {
-    fn can_serialize(&self, archetype_desc: &ArchetypeDescription) -> bool {
-        archetype_desc
-            .tags()
-            .iter()
-            .any(|(ty, _)| self.types.get(&ty.0).is_some())
-            || archetype_desc
-                .components()
-                .iter()
-                .any(|(ty, _)| self.types.get(&ty.0).is_some())
+    fn can_serialize_tag(&self, ty: &TagTypeId, _meta: &TagMeta) -> bool {
+        self.types.get(&ty.0).is_some()
+    }
+    fn can_serialize_component(&self, ty: &ComponentTypeId, _meta: &ComponentMeta) -> bool {
+        self.types.get(&ty.0).is_some()
     }
     fn serialize_archetype_description<S: Serializer>(
         &self,
@@ -88,13 +86,15 @@ impl legion::serde::WorldSerializer for SerializeImpl {
         if let Some(reg) = self.types.get(&component_type.0) {
             let mut result = RefCell::new(None);
             let mut serializer = RefCell::new(Some(serializer));
-            let mut result_ref = result.borrow_mut();
-            (reg.comp_serialize_fn)(components, &mut move |serialize| {
-                result_ref.replace(erased_serde::serialize(serialize, serializer.borrow_mut().take().unwrap()));
-            });
+            {
+                let mut result_ref = result.borrow_mut();
+                (reg.comp_serialize_fn)(components, &mut |serialize| {
+                    result_ref.replace(erased_serde::serialize(serialize, serializer.borrow_mut().take().unwrap()));
+                });
+            }
             return result.borrow_mut().take().unwrap();
         }
-        unimplemented!()
+        panic!("received unserializable type {:?}, this should be filtered by can_serialize", component_type);
     }
     fn serialize_tags<S: Serializer>(
         &self,
@@ -106,13 +106,15 @@ impl legion::serde::WorldSerializer for SerializeImpl {
         if let Some(reg) = self.types.get(&tag_type.0) {
             let mut result = RefCell::new(None);
             let mut serializer = RefCell::new(Some(serializer));
-            let mut result_ref = result.borrow_mut();
-            (reg.tag_serialize_fn)(tags, &mut move |serialize| {
-                result_ref.replace(erased_serde::serialize(serialize, serializer.borrow_mut().take().unwrap()));
-            });
+            {
+                let mut result_ref = result.borrow_mut();
+                (reg.tag_serialize_fn)(tags, &mut |serialize| {
+                    result_ref.replace(erased_serde::serialize(serialize, serializer.borrow_mut().take().unwrap()));
+                });
+            }
             return result.borrow_mut().take().unwrap();
         }
-        unimplemented!()
+        panic!("received unserializable type {:?}, this should be filtered by can_serialize", tag_type);
     }
     fn serialize_entities<S: Serializer>(
         &self,
@@ -128,7 +130,7 @@ fn main() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    // create entities
+    // Pos and Vel are both serializable, so all components in this chunkset will be serialized
     world.insert(
         (),
         vec![
@@ -138,13 +140,22 @@ fn main() {
             (Pos(1., 2., 3.), Vel(1., 2., 3.)),
         ],
     );
+    // Unserializable components are not serialized, so only the Pos components should be serialized in this chunkset
     world.insert(
-        (),
+        (Unregistered(4., 5., 6.,),),
         vec![
-            (Pos(1., 2., 3.),),
-            (Pos(1., 2., 3.),),
-            (Pos(1., 2., 3.),),
-            (Pos(1., 2., 3.),),
+            (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
+            (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
+            (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
+            (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
+        ],
+    );
+    // Entities with no serializable components are not serialized, so this entire chunkset should be skipped in the output
+    world.insert(
+        (Unregistered(4., 5., 6.,),),
+        vec![
+            (Unregistered(4., 5., 6.),),
+            (Unregistered(4., 5., 6.),),
         ],
     );
 
