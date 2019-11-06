@@ -6,7 +6,7 @@ use syn::{parse_macro_input, AttributeArgs, DeriveInput, Ident, ItemStruct};
 use uuid::Uuid;
 
 type UuidMap = HashMap<String, u128>;
-
+/*
 fn get_uuid(ast: &DeriveInput) -> Uuid {
     let uuid_map_path = Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("uuid.ron");
     let uuid_map_file = OpenOptions::new()
@@ -33,7 +33,7 @@ fn get_uuid(ast: &DeriveInput) -> Uuid {
     }
 
     Uuid::new_v4()
-}
+}*/
 
 pub fn impl_uuid(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let parser_copy = input.clone();

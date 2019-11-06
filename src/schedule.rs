@@ -182,6 +182,10 @@ impl<'a> StageExecutor<'a> {
     pub fn execute(&mut self, world: &mut World) {
         self.systems.iter_mut().for_each(|system| {
             system.run(world);
+        });
+
+        // Flush the command buffers of all the systems
+        self.systems.iter().for_each(|system| {
             system.command_buffer_mut().write(world);
         });
     }
@@ -256,7 +260,6 @@ impl<'a> StageExecutor<'a> {
         );
 
         // Flush the command buffers of all the systems
-        // TODO: This should run in-line to dispatching for now we just drain at the end of the stage
         self.systems.iter().for_each(|system| {
             system.command_buffer_mut().write(world);
         });
