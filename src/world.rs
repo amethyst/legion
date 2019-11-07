@@ -441,7 +441,7 @@ impl World {
         target_chunk
     }
 
-    /// Adds a component to an entity, or set's its value if the component is
+    /// Adds a component to an entity, or sets its value if the component is
     /// already present.
     pub fn add_component<T: Component>(&mut self, entity: Entity, component: T) {
         if let Some(mut comp) = self.get_component_mut(entity) {
@@ -480,7 +480,7 @@ impl World {
         }
     }
 
-    /// Adds a tag to an entity, or set's its value if the tag is
+    /// Adds a tag to an entity, or sets its value if the tag is
     /// already present.
     pub fn add_tag<T: Tag>(&mut self, entity: Entity, tag: T) {
         if self.get_tag::<T>(entity).is_some() {
