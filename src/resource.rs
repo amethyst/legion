@@ -1,12 +1,13 @@
 use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
 use crate::query::{Read, Write};
-use mopa::Any;
 use std::{
     any::TypeId,
     collections::HashMap,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
+
+use downcast_rs::{impl_downcast, Downcast};
 
 #[cfg(not(feature = "ffi"))]
 /// A type ID identifying a component type.
@@ -63,19 +64,9 @@ pub trait ResourceSet: Send + Sync {
 }
 
 /// Blanket trait for resource types.
-pub trait Resource: 'static + Any + Send + Sync {}
-impl<T> Resource for T where T: 'static + Any + Send + Sync {}
-
-// This magically makes Any work. Ur an Any harry
-mod __resource_mopafy_scope {
-    #![allow(clippy::all)]
-
-    use mopa::mopafy;
-
-    use super::Resource;
-
-    mopafy!(Resource);
-}
+pub trait Resource: 'static + Downcast + Send + Sync {}
+impl<T> Resource for T where T: 'static + Send + Sync {}
+impl_downcast!(Resource);
 
 /// Wrapper type for safe, lifetime-garunteed immutable access to a resource of type `T'. This
 /// is the wrapper type which is provided to the closure in a `System`, meaning it is only scoped
