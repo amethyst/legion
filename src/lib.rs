@@ -247,7 +247,7 @@ pub mod prelude {
     pub use crate::command::CommandBuffer;
     pub use crate::entity::Entity;
     pub use crate::filter::filter_fns::*;
-    pub use crate::query::{IntoQuery, Query, Read, Tagged, Write};
+    pub use crate::query::{IntoQuery, Query, Read, TryRead, Tagged, Write};
     pub use crate::resource::{ResourceSet, Resources};
     pub use crate::schedule::{Runnable, Schedulable, StageExecutor};
     pub use crate::system::{System, SystemBuilder};

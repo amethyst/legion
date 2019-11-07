@@ -543,6 +543,71 @@ impl<'a, State: 'a + Clone, T: 'a, I: Iterator<Item = &'a T> + ExactSizeIterator
 }
 
 #[derive(Debug)]
+enum TryIter<'a, State: 'a + Clone, T> {
+    Found {
+        borrow: State,
+        iter: T,
+        _phantom: PhantomData<&'a State>,
+    },
+    Missing(usize),
+}
+
+#[derive(Debug)]
+pub struct TryRefIter<'a, State: 'a + Clone, T: 'a, I: Iterator<Item = &'a T>> {
+    inner: TryIter<'a, State, I>,
+}
+
+impl<'a, State: 'a + Clone, T: 'a, I: Iterator<Item = &'a T>> TryRefIter<'a, State, T, I> {
+    #[inline(always)]
+    pub(crate) fn found(borrow: State, iter: I) -> Self {
+        Self {
+            inner: TryIter::Found {
+                borrow,
+                iter,
+                _phantom: PhantomData,
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn missing(count: usize) -> Self {
+        Self {
+            inner: TryIter::Missing(count),
+        }
+    }
+}
+
+impl<'a, State: 'a + Clone, T: 'a, I: Iterator<Item = &'a T>> Iterator
+    for TryRefIter<'a, State, T, I>
+{
+    type Item = Option<Ref<'a, State, T>>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(match self.inner {
+            TryIter::Found { ref borrow, ref mut iter, .. } => 
+                Some(Ref::new(borrow.clone(), iter.next()?)),
+            TryIter::Missing(ref mut n) => {
+                *n = n.checked_sub(1)?;
+                None
+            }
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self.inner {
+            TryIter::Found { ref iter, .. } => iter.size_hint(),
+            TryIter::Missing(n) => (n, Some(n)),
+        }
+    }
+}
+
+impl<'a, State: 'a + Clone, T: 'a, I: Iterator<Item = &'a T> + ExactSizeIterator> ExactSizeIterator
+    for TryRefIter<'a, State, T, I>
+{
+}
+
+#[derive(Debug)]
 pub struct RefIterMut<'a, State: 'a + UnsafeClone, T: 'a, I: Iterator<Item = &'a mut T>> {
     #[allow(dead_code)]
     // held for drop impl

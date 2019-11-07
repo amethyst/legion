@@ -1,5 +1,6 @@
 use crate::borrow::Exclusive;
 use crate::borrow::RefIter;
+use crate::borrow::TryRefIter;
 use crate::borrow::RefIterMut;
 use crate::borrow::RefMap;
 use crate::borrow::RefMapMut;
@@ -145,6 +146,47 @@ impl<'a, T: Component> View<'a> for Read<T> {
 }
 
 impl<T: Component> ViewElement for Read<T> {
+    type Component = T;
+}
+
+/// Reads a single entity data component type from a chunk, if it's present.
+#[derive(Derivative, Debug)]
+#[derivative(Default(bound = ""))]
+pub struct TryRead<T: Component>(PhantomData<T>);
+
+impl<'a, T: Component> DefaultFilter for TryRead<T> {
+    type Filter = EntityFilterTuple<Passthrough, Passthrough, Passthrough>;
+
+    fn filter() -> Self::Filter { super::filter::filter_fns::passthrough() }
+}
+
+impl<'a, T: Component> View<'a> for TryRead<T> {
+    type Iter = TryRefIter<'a, Shared<'a>, T, Iter<'a, T>>;
+
+    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
+        unsafe {
+            chunk
+                .components(ComponentTypeId::of::<T>())
+                .map(|x| {
+                    let (borrow, slice) = x.data_slice::<T>().deconstruct();
+                    TryRefIter::found(borrow, slice.iter())
+                })
+                .unwrap_or_else(|| TryRefIter::missing(chunk.len()))
+        }
+    }
+
+    fn validate() -> bool { true }
+
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
+
+    fn writes<D: Component>() -> bool { false }
+
+    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+
+    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
+}
+
+impl<T: Component> ViewElement for TryRead<T> {
     type Component = T;
 }
 
