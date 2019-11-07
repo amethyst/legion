@@ -14,24 +14,27 @@ edition = "2018"
 travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
-default = ["par-iter"]
-par-iter = ["rayon"]
+default = ["par-iter", "events", "ffi"]
+par-iter = ["rayon", "crossbeam"]
+ffi = []
+events = []
 
 [dependencies]
-slog = { version = "2.5", features = ["nested-values"] }
-slog-stdlog = "4"
 parking_lot = "0.9"
 downcast-rs = "1.0"
 itertools = "0.8"
 rayon = { version = "1.2", optional = true }
+crossbeam = { version = "0.7", optional = true }
 derivative = "1"
 smallvec = "0.6"
 bit-set = "0.5"
+paste = "0.1"
+log = "0.4"
+shrinkwraprs = "0.2"
+mopa = "0.2"
 
 [dev-dependencies]
-env_logger = "0.6"
-slog-term = "2"
-slog-async = "2"
+env_logger = "0.7"
 criterion = "0.3"
 cgmath = "0.17"
 

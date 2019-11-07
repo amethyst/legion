@@ -1,25 +1,30 @@
+use crate::iterator::FissileZip;
+use crate::iterator::SliceVecIter;
 use crate::storage::ArchetypeData;
 use crate::storage::ArchetypeId;
-use crate::storage::ChunkId;
 use crate::storage::Component;
 use crate::storage::ComponentStorage;
 use crate::storage::ComponentTypeId;
 use crate::storage::ComponentTypes;
-use crate::storage::SliceVecIter;
 use crate::storage::Storage;
 use crate::storage::Tag;
 use crate::storage::TagTypeId;
 use crate::storage::TagTypes;
-use std::collections::HashMap;
 use std::iter::Enumerate;
 use std::iter::Repeat;
 use std::iter::Take;
 use std::marker::PhantomData;
 use std::slice::Iter;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
 pub mod filter_fns {
     ///! Contains functions for constructing filters.
     use super::*;
+
+    pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough, Passthrough> {
+        EntityFilterTuple::new(Passthrough, Passthrough, Passthrough)
+    }
 
     /// Creates an entity data filter which includes chunks that contain
     /// entity data components of type `T`.
@@ -89,7 +94,7 @@ pub trait Filter<T: Copy>: Send + Sync + Sized {
     fn collect(&self, source: T) -> Self::Iter;
 
     /// Determines if an element of `Self::Iter` matches the filter conditions.
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool>;
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool>;
 
     /// Creates an iterator which yields bools for each element in the source
     /// which indicate if the element matches the filter.
@@ -153,7 +158,7 @@ pub struct ChunkFilterData<'a> {
 pub trait ActiveFilter {}
 
 /// A type which combines both an archetype and a chunk filter.
-pub trait EntityFilter {
+pub trait EntityFilter: Send {
     type ArchetypeFilter: for<'a> Filter<ArchetypeFilterData<'a>>;
     type ChunksetFilter: for<'a> Filter<ChunksetFilterData<'a>>;
     type ChunkFilter: for<'a> Filter<ChunkFilterData<'a>>;
@@ -196,7 +201,7 @@ pub trait EntityFilter {
 }
 
 /// An EntityFilter which combined both an archetype filter and a chunk filter.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EntityFilterTuple<A, S, C> {
     pub arch_filter: A,
     pub chunkset_filter: S,
@@ -449,7 +454,7 @@ impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunksetFilter
 }
 
 /// A passthrough filter which allows through all elements.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Passthrough;
 
 impl<'a> Filter<ArchetypeFilterData<'a>> for Passthrough {
@@ -461,7 +466,7 @@ impl<'a> Filter<ArchetypeFilterData<'a>> for Passthrough {
     }
 
     #[inline]
-    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
+    fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<'a> Filter<ChunksetFilterData<'a>> for Passthrough {
@@ -473,7 +478,7 @@ impl<'a> Filter<ChunksetFilterData<'a>> for Passthrough {
     }
 
     #[inline]
-    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
+    fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl<'a> Filter<ChunkFilterData<'a>> for Passthrough {
@@ -485,7 +490,7 @@ impl<'a> Filter<ChunkFilterData<'a>> for Passthrough {
     }
 
     #[inline]
-    fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
+    fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { None }
 }
 
 impl std::ops::Not for Passthrough {
@@ -510,7 +515,7 @@ impl<'a, Rhs> std::ops::BitOr<Rhs> for Passthrough {
 }
 
 /// A filter which negates `F`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Not<F> {
     pub filter: F,
 }
@@ -524,7 +529,7 @@ impl<'a, T: Copy, F: Filter<T>> Filter<T> for Not<F> {
     fn collect(&self, source: T) -> Self::Iter { self.filter.collect(source) }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         self.filter.is_match(item).map(|x| !x)
     }
 }
@@ -566,7 +571,7 @@ impl<'a, F> std::ops::BitOr<Passthrough> for Not<F> {
 }
 
 /// A filter which requires all filters within `T` match.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct And<T> {
     pub filters: T,
 }
@@ -580,7 +585,7 @@ impl<'a, T: Copy, F: Filter<T>> Filter<T> for And<(F,)> {
     fn collect(&self, source: T) -> Self::Iter { self.filters.0.collect(source) }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         self.filters.0.is_match(item)
     }
 }
@@ -628,27 +633,39 @@ impl<T> std::ops::BitOr<Passthrough> for And<(T,)> {
     fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
+macro_rules! recursive_zip {
+    (@value $first:expr, $($rest:expr),*) => { FissileZip::new($first, recursive_zip!(@value $($rest),*)) };
+    (@value $last:expr) => { $last };
+    (@type $first:ty, $($rest:ty),*) => { FissileZip<$first, recursive_zip!(@type $($rest),*)> };
+    (@type $last:ty) => { $last };
+    (@unzip $first:ident, $($rest:ident),*) => { ($first, recursive_zip!(@unzip $($rest),*)) };
+    (@unzip $last:ident) => { $last };
+}
+
 macro_rules! impl_and_filter {
     ( $( $ty: ident => $ty2: ident ),* ) => {
         impl<$( $ty ),*> ActiveFilter for And<($( $ty, )*)> {}
 
         impl<'a, T: Copy, $( $ty: Filter<T> ),*> Filter<T> for And<($( $ty, )*)> {
-            type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
+            // type Iter = crate::zip::Zip<( $( $ty::Iter ),* )>;
+            type Iter = recursive_zip!(@type $($ty::Iter),*);
 
             fn collect(&self, source: T) -> Self::Iter {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                let iters = (
-                    $( $ty.collect(source) ),*
-                );
-                itertools::multizip(iters)
+                // let iters = (
+                //     $( $ty.collect(source) ),*
+                // );
+                // crate::zip::multizip(iters)
+                recursive_zip!(@value $($ty.collect(source)),*)
             }
 
             #[inline]
-            fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+            fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                 #![allow(non_snake_case)]
-                let ($( $ty, )*) = &mut self.filters;
-                let ($( $ty2, )*) = item;
+                let ($( $ty, )*) = &self.filters;
+                // let ($( $ty2, )*) = item;
+                let recursive_zip!(@unzip $($ty2),*) = item;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_and($ty.is_match($ty2)); )*
                 result
@@ -715,7 +732,7 @@ impl_and_filter!(A => a, B => b, C => c, D => d, E => e);
 impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
 
 /// A filter which requires that any filter within `T` match.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Or<T> {
     pub filters: T,
 }
@@ -725,22 +742,25 @@ macro_rules! impl_or_filter {
         impl<$( $ty ),*> ActiveFilter for Or<($( $ty, )*)> {}
 
         impl<'a, T: Copy, $( $ty: Filter<T> ),*> Filter<T> for Or<($( $ty, )*)> {
-            type Iter = itertools::Zip<( $( $ty::Iter ),* )>;
+            // type Iter = crate::zip::Zip<( $( $ty::Iter ),* )>;
+            type Iter = recursive_zip!(@type $($ty::Iter),*);
 
             fn collect(&self, source: T) -> Self::Iter {
                 #![allow(non_snake_case)]
                 let ($( $ty, )*) = &self.filters;
-                let iters = (
-                    $( $ty.collect(source) ),*
-                );
-                itertools::multizip(iters)
+                // let iters = (
+                //     $( $ty.collect(source) ),*
+                // );
+                // crate::zip::multizip(iters)
+                recursive_zip!(@value $($ty.collect(source)),*)
             }
 
             #[inline]
-            fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+            fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                 #![allow(non_snake_case)]
-                let ($( $ty, )*) = &mut self.filters;
-                let ($( $ty2, )*) = item;
+                let ($( $ty, )*) = &self.filters;
+                // let ($( $ty2, )*) = item;
+                let recursive_zip!(@unzip $($ty2),*) = item;
                 let mut result: Option<bool> = None;
                 $( result = result.coalesce_or($ty.is_match($ty2)); )*
                 result
@@ -807,7 +827,7 @@ impl_or_filter!(A => a, B => b, C => c, D => d, E => e);
 impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
 
 /// A filter qhich requires that all chunks contain entity data components of type `T`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ComponentFilter<T>(PhantomData<T>);
 
 impl<T: Component> ComponentFilter<T> {
@@ -825,7 +845,7 @@ impl<'a, T: Component> Filter<ArchetypeFilterData<'a>> for ComponentFilter<T> {
     }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(item.contains(&ComponentTypeId::of::<T>()))
     }
 }
@@ -874,7 +894,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for ComponentFilter<T> {
 }
 
 /// A filter which requires that all chunks contain shared tag data of type `T`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TagFilter<T>(PhantomData<T>);
 
 impl<T: Tag> TagFilter<T> {
@@ -890,7 +910,7 @@ impl<'a, T: Tag> Filter<ArchetypeFilterData<'a>> for TagFilter<T> {
     fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter { source.tag_types.iter() }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(item.contains(&TagTypeId::of::<T>()))
     }
 }
@@ -939,7 +959,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagFilter<T> {
 }
 
 /// A filter which requires that all chunks contain a specific tag value.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TagValueFilter<'a, T> {
     value: &'a T,
 }
@@ -966,7 +986,7 @@ impl<'a, 'b, T: Tag> Filter<ChunksetFilterData<'a>> for TagValueFilter<'b, T> {
     }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(**item == *self.value)
     }
 }
@@ -1018,14 +1038,14 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagValueFilter<'a, T> {
 /// chunk since the last time the filter was executed.
 #[derive(Debug)]
 pub struct ComponentChangedFilter<T: Component> {
-    versions: HashMap<ChunkId, usize>,
+    last_read_version: AtomicU64,
     phantom: PhantomData<T>,
 }
 
 impl<T: Component> ComponentChangedFilter<T> {
     fn new() -> ComponentChangedFilter<T> {
         ComponentChangedFilter {
-            versions: HashMap::new(),
+            last_read_version: AtomicU64::new(0),
             phantom: PhantomData,
         }
     }
@@ -1039,16 +1059,31 @@ impl<'a, T: Component> Filter<ChunkFilterData<'a>> for ComponentChangedFilter<T>
     fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter { source.chunks.iter() }
 
     #[inline]
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
-        use std::collections::hash_map::Entry;
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         let components = item.components(ComponentTypeId::of::<T>()).unwrap();
         let version = components.version();
-        match self.versions.entry(item.id()) {
-            Entry::Occupied(mut entry) => Some(entry.insert(version) != version),
-            Entry::Vacant(entry) => {
-                entry.insert(version);
-                Some(true)
+        let mut last_read = self.last_read_version.load(Ordering::Relaxed);
+        if last_read < version {
+            loop {
+                match self.last_read_version.compare_exchange_weak(
+                    last_read,
+                    version,
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(stored_last_read) => {
+                        last_read = stored_last_read;
+                        if last_read < version {
+                            // matched version is already considered visited, update no longer needed
+                            break;
+                        }
+                    }
+                }
             }
+            Some(true)
+        } else {
+            Some(false)
         }
     }
 }
@@ -1102,7 +1137,9 @@ mod test {
 
     #[test]
     pub fn create() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let filter = component::<usize>() | tag_value(&5isize);
-        println!("{:?}", filter);
+        log::trace!("{:?}", filter);
     }
 }

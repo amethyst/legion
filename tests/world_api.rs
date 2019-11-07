@@ -17,6 +17,8 @@ struct Static;
 
 #[test]
 fn insert() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -29,6 +31,8 @@ fn insert() {
 
 #[test]
 fn get_component() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -57,6 +61,8 @@ fn get_component() {
 
 #[test]
 fn get_component_wrong_type() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -67,6 +73,8 @@ fn get_component_wrong_type() {
 
 #[test]
 fn get_shared() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -89,6 +97,8 @@ fn get_shared() {
 
 #[test]
 fn get_shared_wrong_type() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -99,6 +109,8 @@ fn get_shared_wrong_type() {
 
 #[test]
 fn delete() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -125,6 +137,8 @@ fn delete() {
 
 #[test]
 fn delete_last() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -158,6 +172,8 @@ fn delete_last() {
 
 #[test]
 fn delete_first() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -192,6 +208,8 @@ fn delete_first() {
 
 #[test]
 fn merge() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world_1 = universe.create_world();
     let mut world_2 = universe.create_world();
@@ -225,6 +243,8 @@ fn merge() {
 
 #[test]
 fn mutate_add_component() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -251,6 +271,8 @@ fn mutate_add_component() {
 
 #[test]
 fn mutate_remove_component() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -277,6 +299,8 @@ fn mutate_remove_component() {
 
 #[test]
 fn mutate_add_tag() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -303,6 +327,8 @@ fn mutate_add_tag() {
 
 #[test]
 fn mutate_remove_tag() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -328,7 +354,28 @@ fn mutate_remove_tag() {
 }
 
 #[test]
+fn mutate_change_tag_minimum_test() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    let shared = (Model(5),);
+    let components = vec![(Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3))];
+
+    let entities = world.insert(shared, components).to_vec();
+
+    log::trace!("STARTING CHANGE");
+    world.add_tag(entities[0], Model(3));
+    log::trace!("CHANGED\n");
+
+    assert_eq!(*world.get_tag::<Model>(entities[0]).unwrap(), Model(3));
+}
+
+#[test]
 fn mutate_change_tag() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -346,8 +393,25 @@ fn mutate_change_tag() {
 
     assert_eq!(3, query_model_5.iter(&world).count());
     assert_eq!(0, query_model_3.iter(&world).count());
+
+    log::trace!("STARTING CHANGE");
     world.add_tag(*entities.get(1).unwrap(), Model(3));
+    log::trace!("CHANGED\n");
+
+    assert_eq!(
+        1,
+        query_model_3
+            .iter_entities(&world)
+            .map(|e| {
+                log::trace!("iter: {:?}", e);
+                e
+            })
+            .count()
+    );
+    assert_eq!(
+        *world.get_tag::<Model>(*entities.get(1).unwrap()).unwrap(),
+        Model(3)
+    );
 
     assert_eq!(2, query_model_5.iter(&world).count());
-    assert_eq!(1, query_model_3.iter(&world).count());
 }

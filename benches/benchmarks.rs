@@ -141,7 +141,7 @@ fn bench_iter_chunks_simple(c: &mut Criterion) {
         let mut world = setup(10000);
         add_background_entities(&mut world, 10000);
 
-        let mut query = <(Read<Position>, Write<Rotation>)>::query();
+        let mut query = <(Write<Position>, Read<Rotation>)>::query();
 
         b.iter(|| {
             for c in query.iter_chunks(&world) {
@@ -168,7 +168,7 @@ fn bench_iter_chunks_complex(c: &mut Criterion) {
             );
         }
 
-        let mut query = <(Read<Position>, Write<Rotation>)>::query()
+        let mut query = <(Write<Position>, Read<Rotation>)>::query()
             .filter(!component::<A>() & tag_value(&Tag(2.0)));
 
         b.iter(|| {

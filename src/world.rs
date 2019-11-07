@@ -9,18 +9,20 @@ use crate::entity::EntityLocation;
 use crate::filter::ArchetypeFilterData;
 use crate::filter::ChunksetFilterData;
 use crate::filter::Filter;
+use crate::iterator::SliceVecIter;
+use crate::resource::Resources;
 use crate::storage::ArchetypeData;
 use crate::storage::ArchetypeDescription;
 use crate::storage::Component;
 use crate::storage::ComponentMeta;
 use crate::storage::ComponentStorage;
 use crate::storage::ComponentTypeId;
-use crate::storage::SliceVecIter;
 use crate::storage::Storage;
 use crate::storage::Tag;
 use crate::storage::TagMeta;
 use crate::storage::TagTypeId;
 use crate::storage::Tags;
+use crate::tuple::TupleEq;
 use parking_lot::Mutex;
 use std::cell::UnsafeCell;
 use std::iter::Enumerate;
@@ -34,6 +36,12 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+#[cfg(feature = "par-iter")]
+use rayon::prelude::*;
+
+#[cfg(feature = "events")]
+use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
+
 /// The `Universe` is a factory for creating `World`s.
 ///
 /// Entities inserted into worlds created within the same universe are guarenteed to have
@@ -42,11 +50,15 @@ use std::sync::Arc;
 pub struct Universe {
     allocator: Arc<Mutex<BlockAllocator>>,
     world_count: AtomicUsize,
+    #[cfg(feature = "events")]
+    channel: Channel<WorldCreatedEvent>,
 }
 
 impl Universe {
     /// Creates a new `Universe`.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Creates a new `World` within this `Unvierse`.
     ///
@@ -54,13 +66,29 @@ impl Universe {
     /// unique `Entity` IDs, even across worlds.
     pub fn create_world(&self) -> World {
         let id = self.world_count.fetch_add(1, Ordering::SeqCst);
-        World::new(WorldId(id), EntityAllocator::new(self.allocator.clone()))
+        let world = World::new(WorldId(id), EntityAllocator::new(self.allocator.clone()));
+
+        #[cfg(feature = "events")]
+        {
+            self.channel
+                .write(WorldCreatedEvent(WorldId(id)))
+                .expect("Failed to write to WorldCreatedEvent channel.");
+        }
+
+        world
+    }
+
+    #[cfg(feature = "events")]
+    pub fn channel(&mut self) -> &mut Channel<WorldCreatedEvent> {
+        &mut self.channel
     }
 }
 
 impl Default for Universe {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "events")]
+            channel: Channel::default(),
             world_count: AtomicUsize::from(0),
             allocator: Arc::new(Mutex::new(BlockAllocator::new())),
         }
@@ -74,8 +102,13 @@ pub struct WorldId(usize);
 pub struct World {
     id: WorldId,
     storage: UnsafeCell<Storage>,
-    entity_allocator: EntityAllocator,
+    pub(crate) entity_allocator: EntityAllocator,
     defrag_progress: usize,
+
+    #[cfg(feature = "events")]
+    channel: Channel<EntityEvent>,
+
+    pub resources: Resources,
 }
 
 unsafe impl Send for World {}
@@ -89,15 +122,29 @@ impl World {
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: allocator,
             defrag_progress: 0,
+            #[cfg(feature = "events")]
+            channel: Channel::default(),
+            resources: Resources::default(),
         }
     }
 
-    pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
+    #[cfg(feature = "events")]
+    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> {
+        &mut self.channel
+    }
 
-    pub(crate) fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
+    pub(crate) fn storage(&self) -> &Storage {
+        unsafe { &*self.storage.get() }
+    }
+
+    pub(crate) fn storage_mut(&mut self) -> &mut Storage {
+        unsafe { &mut *self.storage.get() }
+    }
 
     /// Gets the unique ID of this world.
-    pub fn id(&self) -> WorldId { self.id }
+    pub fn id(&self) -> WorldId {
+        self.id
+    }
 
     /// Inserts new entities into the world.
     ///
@@ -166,13 +213,40 @@ impl World {
             }
         }
 
-        self.entity_allocator.allocation_buffer()
+        let entities = self.entity_allocator.allocation_buffer();
+
+        #[cfg(feature = "events")]
+        {
+            entities.par_iter().for_each(|e| {
+                self.channel
+                    .write(EntityEvent::Created(*e))
+                    .expect("Failed to write to WorldCreatedEvent channel.");
+            });
+        }
+
+        entities
+    }
+
+    pub(crate) fn insert_buffered<T, C>(&mut self, entity: Entity, tags: T, components: C)
+    where
+        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+        C: IntoComponentSource,
+    {
+        let _ = (entity, tags, components);
+        unimplemented!()
     }
 
     /// Removes the given `Entity` from the `World`.
     ///
     /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
+        #[cfg(feature = "events")]
+        {
+            self.channel
+                .write(EntityEvent::Deleted(entity))
+                .expect("Failed to write to EntityEvent::Deleted channel.");
+        }
+
         if let Some(location) = self.entity_allocator.delete_entity(entity) {
             // find entity's chunk
             let chunk = self
@@ -297,6 +371,12 @@ impl World {
             add_tags,
             remove_tags,
         );
+        log::trace!("src  = {:?}", location);
+        log::trace!(
+            "target_arch_index={}, target_chunkset_index={}",
+            target_arch_index,
+            target_chunkset_index
+        );
 
         // Safety Note:
         // It is only safe for us to have 2 &mut references to storage here because
@@ -330,9 +410,22 @@ impl World {
         // move existing data over into new chunk
         if let Some(swapped) = current_chunk.move_entity(target_chunk, location.component()) {
             // update location of any entity that was moved into the previous location
+            log::trace!("SWAP location! {:?}, {:?}", swapped, location);
+
             self.entity_allocator
                 .set_location(swapped.index(), location);
         }
+
+        log::trace!(
+            "Set location! {:?}, {:?}",
+            entity,
+            EntityLocation::new(
+                target_arch_index,
+                target_chunkset_index,
+                target_chunk_index,
+                target_chunk.len() - 1,
+            )
+        );
 
         // record the entity's new location
         self.entity_allocator.set_location(
@@ -367,14 +460,16 @@ impl World {
 
         // push new component into chunk
         let (_, components) = target_chunk.write();
+        let slice = [component];
         unsafe {
             let components = &mut *components.get();
             components
                 .get_mut(ComponentTypeId::of::<T>())
                 .unwrap()
                 .writer()
-                .push(&[component]);
+                .push(&slice);
         }
+        std::mem::forget(slice);
     }
 
     /// Removes a component from an entity.
@@ -488,11 +583,14 @@ impl World {
         let location = self.entity_allocator.get_location(entity.index())?;
         let archetype = self.storage().archetypes().get(location.archetype())?;
         let tags = archetype.tags().get(TagTypeId::of::<T>())?;
-        unsafe { tags.data_slice::<T>().get(location.chunk()) }
+
+        unsafe { tags.data_slice::<T>().get(location.set()) }
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
-    pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
+    pub fn is_alive(&self, entity: Entity) -> bool {
+        self.entity_allocator.is_alive(entity)
+    }
 
     /// Iteratively defragments the world's internal memory.
     ///
@@ -732,11 +830,11 @@ pub struct ComponentTupleFilter<T> {
 
 mod tuple_impls {
     use super::*;
+    use crate::iterator::SliceVecIter;
     use crate::storage::Component;
     use crate::storage::ComponentTypeId;
-    use crate::storage::SliceVecIter;
     use crate::storage::Tag;
-    use itertools::Zip;
+    use crate::zip::Zip;
     use std::iter::Repeat;
     use std::iter::Take;
     use std::slice::Iter;
@@ -747,9 +845,9 @@ mod tuple_impls {
             impl_data_tuple!(@COMPONENT_SOURCE $( $ty => $id ),*);
         };
         ( @COMPONENT_SOURCE $( $ty: ident => $id: ident ),* ) => {
-            impl<I, $( $ty ),*> ComponentLayout for ComponentTupleSet<($( $ty, )*), I>
+            impl<UWU, $( $ty ),*> ComponentLayout for ComponentTupleSet<($( $ty, )*), UWU>
             where
-                I: Iterator<Item = ($( $ty, )*)>,
+                UWU: Iterator<Item = ($( $ty, )*)>,
                 $( $ty: Component ),*
             {
                 type Filter = ComponentTupleFilter<($( $ty, )*)>;
@@ -766,9 +864,9 @@ mod tuple_impls {
                 }
             }
 
-            impl<I, $( $ty ),*> ComponentSource for ComponentTupleSet<($( $ty, )*), I>
+            impl<UWU, $( $ty ),*> ComponentSource for ComponentTupleSet<($( $ty, )*), UWU>
             where
-                I: Iterator<Item = ($( $ty, )*)>,
+                UWU: Iterator<Item = ($( $ty, )*)>,
                 $( $ty: Component ),*
             {
                 fn is_empty(&mut self) -> bool {
@@ -791,6 +889,8 @@ mod tuple_impls {
                         while let Some(($( $id, )*)) = { if count == space { None } else { self.iter.next() } } {
                             let entity = allocator.create_entity();
                             entities.push(entity);
+
+                            // TODO: Trigger component addition events here
                             $(
                                 let slice = [$id];
                                 $ty.push(&slice);
@@ -814,7 +914,7 @@ mod tuple_impls {
                     source.component_types.iter()
                 }
 
-                fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     let types = &[$( ComponentTypeId::of::<$ty>() ),*];
                     Some(types.len() == item.len() && types.iter().all(|t| item.contains(t)))
                 }
@@ -869,7 +969,7 @@ mod tuple_impls {
                     source.tag_types.iter()
                 }
 
-                fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     let types = &[$( TagTypeId::of::<$ty>() ),*];
                     Some(types.len() == item.len() && types.iter().all(|t| item.contains(t)))
                 }
@@ -897,13 +997,13 @@ mod tuple_impls {
 
                     );
 
-                    itertools::multizip(iters)
+                    crate::zip::multizip(iters)
                 }
 
-                fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     #![allow(non_snake_case)]
                     let ($( $ty, )*) = self;
-                    Some(($( &*$ty, )*) == *item)
+                    Some(($( &*$ty, )*).legion_eq(item))
                 }
             }
         };
@@ -915,7 +1015,7 @@ mod tuple_impls {
                     std::iter::repeat(()).take(source.archetype_data.len())
                 }
 
-                fn is_match(&mut self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+                fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     Some(true)
                 }
             }
@@ -928,6 +1028,27 @@ mod tuple_impls {
     impl_data_tuple!(A => a, B => b, C => c);
     impl_data_tuple!(A => a, B => b, C => c, D => d);
     impl_data_tuple!(A => a, B => b, C => c, D => d, E => e);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v, W => w);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v, W => w, X => x);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v, W => w, X => x, Y => y);
+    impl_data_tuple!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l, M => m, N => n, O => o, P => p, Q => q, R => r, S => s, T => t, U => u, V => v, W => w, X => x, Y => y, Z => z);
 }
 
 struct DynamicComponentLayout<'a> {
@@ -939,7 +1060,9 @@ struct DynamicComponentLayout<'a> {
 impl<'a> ComponentLayout for DynamicComponentLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter { self }
+    fn get_filter(&mut self) -> &mut Self::Filter {
+        self
+    }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy components from existing archetype into new
@@ -967,7 +1090,7 @@ impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicComponentLayout<'a> {
         source.component_types.iter()
     }
 
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
             item.len() == (self.existing.len() + self.add.len() - self.remove.len())
                 && item.iter().all(|t| {
@@ -997,7 +1120,9 @@ unsafe impl<'a> Sync for DynamicTagLayout<'a> {}
 impl<'a> TagLayout for DynamicTagLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter { self }
+    fn get_filter(&mut self) -> &mut Self::Filter {
+        self
+    }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy tags from existing archetype into new
@@ -1021,9 +1146,11 @@ impl<'a> TagLayout for DynamicTagLayout<'a> {
 impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
     type Iter = SliceVecIter<'b, TagTypeId>;
 
-    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter { source.tag_types.iter() }
+    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter {
+        source.tag_types.iter()
+    }
 
-    fn is_match(&mut self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
             item.len() == (self.existing.len() + self.add.len() - self.remove.len())
                 && item.iter().all(|t| {
@@ -1046,7 +1173,7 @@ impl<'a, 'b> Filter<ChunksetFilterData<'b>> for DynamicTagLayout<'a> {
             .take(source.archetype_data.len())
     }
 
-    fn is_match(&mut self, (chunk_index, arch): &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, (chunk_index, arch): &<Self::Iter as Iterator>::Item) -> Option<bool> {
         for (type_id, meta) in self.existing {
             if self.remove.contains(type_id) {
                 continue;
@@ -1115,16 +1242,51 @@ mod tests {
     }
 
     #[test]
-    fn create_universe() { Universe::default(); }
+    fn create_universe() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        Universe::default();
+    }
 
     #[test]
     fn create_world() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let universe = Universe::new();
         universe.create_world();
     }
 
     #[test]
+    fn insert_many() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
+        let mut world = create();
+
+        struct One;
+        struct Two;
+        struct Three;
+        struct Four;
+        struct Five;
+        struct Six;
+        struct Seven;
+        struct Eight;
+        struct Nine;
+        struct Ten;
+
+        let shared = (1usize, 2f32, 3u16);
+        let components = vec![
+            (One, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten),
+            (One, Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten),
+        ];
+        world.insert(shared, components);
+
+        assert_eq!(2, world.entity_allocator.allocation_buffer().len());
+    }
+
+    #[test]
     fn insert() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (1usize, 2f32, 3u16);
@@ -1136,6 +1298,8 @@ mod tests {
 
     #[test]
     fn get_component() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1166,6 +1330,8 @@ mod tests {
 
     #[test]
     fn get_component_wrong_type() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         world.insert((), vec![(0f64,)]);
@@ -1177,6 +1343,8 @@ mod tests {
 
     #[test]
     fn get_tag() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1195,6 +1363,8 @@ mod tests {
 
     #[test]
     fn get_tag_wrong_type() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         world.insert((Static,), vec![(0f64,)]);
@@ -1206,6 +1376,8 @@ mod tests {
 
     #[test]
     fn delete() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1228,6 +1400,8 @@ mod tests {
 
     #[test]
     fn delete_last() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1255,6 +1429,8 @@ mod tests {
 
     #[test]
     fn delete_first() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let shared = (Static, Model(5));
@@ -1282,6 +1458,8 @@ mod tests {
 
     #[test]
     fn add_component() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let components = vec![
@@ -1307,6 +1485,8 @@ mod tests {
 
     #[test]
     fn remove_component() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let components = vec![
@@ -1328,6 +1508,8 @@ mod tests {
 
     #[test]
     fn add_tag() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let components = vec![
@@ -1354,6 +1536,8 @@ mod tests {
 
     #[test]
     fn remove_tag() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut world = create();
 
         let components = vec![
@@ -1375,5 +1559,21 @@ mod tests {
             );
             assert!(world.get_tag::<Static>(*e).is_none());
         }
+    }
+
+    #[test]
+    fn add_component2() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        struct Transform {
+            translation: Vec<f32>,
+        }
+        let mut world = create();
+        let entity = world.insert((5u32,), vec![(3u32,)])[0];
+        world.add_component::<Transform>(
+            entity,
+            Transform {
+                translation: vec![0., 1., 2.],
+            },
+        );
     }
 }

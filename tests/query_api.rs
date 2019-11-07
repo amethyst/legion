@@ -1,10 +1,8 @@
 use legion::prelude::*;
-use rayon::prelude::*;
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicUsize, Ordering},
 };
-// use std::iter::FromIterator;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Pos(f32, f32, f32);
@@ -97,6 +95,8 @@ struct Static;
 
 #[test]
 fn query_read_entity_data() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -127,6 +127,8 @@ fn query_read_entity_data() {
 
 #[test]
 fn query_cached_read_entity_data() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -156,7 +158,10 @@ fn query_cached_read_entity_data() {
 }
 
 #[test]
+#[cfg(feature = "par-iter")]
 fn query_read_entity_data_par() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -176,7 +181,7 @@ fn query_read_entity_data_par() {
 
     let count = AtomicUsize::new(0);
     let mut query = Read::<Pos>::query();
-    query.par_iter_chunks(&world).for_each(|mut chunk| {
+    query.par_for_each_chunk(&world, |mut chunk| {
         for (entity, pos) in chunk.iter_entities() {
             assert_eq!(expected.get(&entity).unwrap().0, *pos);
             count.fetch_add(1, Ordering::SeqCst);
@@ -187,7 +192,10 @@ fn query_read_entity_data_par() {
 }
 
 #[test]
+#[cfg(feature = "par-iter")]
 fn query_read_entity_data_par_foreach() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -216,6 +224,8 @@ fn query_read_entity_data_par_foreach() {
 
 #[test]
 fn query_read_entity_data_tuple() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -247,6 +257,8 @@ fn query_read_entity_data_tuple() {
 
 #[test]
 fn query_write_entity_data() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -279,6 +291,8 @@ fn query_write_entity_data() {
 
 #[test]
 fn query_write_entity_data_tuple() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -313,6 +327,8 @@ fn query_write_entity_data_tuple() {
 
 #[test]
 fn query_mixed_entity_data_tuple() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -346,6 +362,8 @@ fn query_mixed_entity_data_tuple() {
 
 #[test]
 fn query_partial_match() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -379,6 +397,8 @@ fn query_partial_match() {
 
 #[test]
 fn query_read_shared_data() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -403,6 +423,8 @@ fn query_read_shared_data() {
 
 #[test]
 fn query_on_changed_first() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -433,6 +455,8 @@ fn query_on_changed_first() {
 
 #[test]
 fn query_on_changed_no_changes() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 
@@ -471,6 +495,8 @@ fn query_on_changed_no_changes() {
 
 #[test]
 fn query_on_changed_self_changes() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let universe = Universe::new();
     let mut world = universe.create_world();
 

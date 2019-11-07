@@ -220,20 +220,37 @@
 //!     render_instanced(model, &transforms);
 //! }
 //! ```
-
 #![allow(dead_code)]
 
 pub mod borrow;
+pub mod command;
 pub mod entity;
 pub mod filter;
+pub mod iterator;
 pub mod query;
+pub mod resource;
+pub mod schedule;
 pub mod storage;
 pub mod system;
 pub mod world;
 
+mod cons;
+mod tuple;
+mod zip;
+
+pub use bit_set;
+
+#[cfg(feature = "events")]
+pub mod event;
+
 pub mod prelude {
+    pub use crate::command::CommandBuffer;
     pub use crate::entity::Entity;
     pub use crate::filter::filter_fns::*;
     pub use crate::query::{IntoQuery, Query, Read, Tagged, Write};
+    pub use crate::resource::{ResourceSet, Resources};
+    pub use crate::schedule::{Runnable, Schedulable, StageExecutor};
+    pub use crate::system::{System, SystemBuilder};
     pub use crate::world::{Universe, World};
+    pub use bit_set::BitSet;
 }

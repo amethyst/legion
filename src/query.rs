@@ -16,6 +16,8 @@ use crate::filter::Filter;
 use crate::filter::FilterResult;
 use crate::filter::Passthrough;
 use crate::filter::TagFilter;
+use crate::iterator::FissileEnumerate;
+use crate::iterator::FissileIterator;
 use crate::storage::ArchetypeData;
 use crate::storage::Component;
 use crate::storage::ComponentStorage;
@@ -24,6 +26,7 @@ use crate::storage::Storage;
 use crate::storage::Tag;
 use crate::storage::TagTypeId;
 use crate::world::World;
+use derivative::Derivative;
 use std::any::TypeId;
 use std::iter::Enumerate;
 use std::iter::Repeat;
@@ -33,7 +36,10 @@ use std::slice::Iter;
 use std::slice::IterMut;
 
 #[cfg(feature = "par-iter")]
-use rayon::prelude::*;
+use rayon::{
+    iter::plumbing::{bridge_unindexed, Folder, UnindexedConsumer, UnindexedProducer},
+    prelude::*,
+};
 
 /// A type which can fetch a strongly-typed view of the data contained
 /// within a chunk.
@@ -56,6 +62,12 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
 
     /// Determines if the view writes to the specified data type.
     fn writes<T: Component>() -> bool;
+
+    /// Returns an array of the components read by this view
+    fn read_types() -> Vec<ComponentTypeId>;
+
+    /// Returns an array of the components written by this view
+    fn write_types() -> Vec<ComponentTypeId>;
 }
 
 /// A type which can construct a default entity filter.
@@ -92,7 +104,8 @@ impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
 }
 
 /// Reads a single entity data component type from a chunk.
-#[derive(Debug)]
+#[derive(Derivative, Debug)]
+#[derivative(Default(bound = ""))]
 pub struct Read<T: Component>(PhantomData<T>);
 
 impl<'a, T: Component> DefaultFilter for Read<T> {
@@ -108,7 +121,12 @@ impl<'a, T: Component> View<'a> for Read<T> {
         let (slice_borrow, slice) = unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())
-                .unwrap()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Component of type {:?} not found in chunk when fetching Read view",
+                        std::any::type_name::<T>()
+                    )
+                })
                 .data_slice::<T>()
                 .deconstruct()
         };
@@ -120,6 +138,10 @@ impl<'a, T: Component> View<'a> for Read<T> {
     fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
     fn writes<D: Component>() -> bool { false }
+
+    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+
+    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
 }
 
 impl<T: Component> ViewElement for Read<T> {
@@ -127,7 +149,8 @@ impl<T: Component> ViewElement for Read<T> {
 }
 
 /// Writes to a single entity data component type from a chunk.
-#[derive(Debug)]
+#[derive(Derivative, Debug)]
+#[derivative(Default(bound = ""))]
 pub struct Write<T: Component>(PhantomData<T>);
 
 impl<'a, T: Component> DefaultFilter for Write<T> {
@@ -144,7 +167,12 @@ impl<'a, T: Component> View<'a> for Write<T> {
         let (slice_borrow, slice) = unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())
-                .unwrap()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Component of type {:?} not found in chunk when fetching Write view",
+                        std::any::type_name::<T>()
+                    )
+                })
                 .data_slice_mut::<T>()
                 .deconstruct()
         };
@@ -159,6 +187,12 @@ impl<'a, T: Component> View<'a> for Write<T> {
 
     #[inline]
     fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
+
+    #[inline]
+    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+
+    #[inline]
+    fn write_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
 }
 
 impl<T: Component> ViewElement for Write<T> {
@@ -188,7 +222,12 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
             archetype
                 .tags()
                 .get(TagTypeId::of::<T>())
-                .unwrap()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Component of type {:?} not found in archetype when fetching Tagged view",
+                        std::any::type_name::<T>()
+                    )
+                })
                 .data_slice::<T>()
                 .get_unchecked(chunk_index)
         };
@@ -203,6 +242,12 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
 
     #[inline]
     fn writes<D: Component>() -> bool { false }
+
+    #[inline]
+    fn read_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
+
+    #[inline]
+    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
 }
 
 impl<T: Tag> ViewElement for Tagged<T> {
@@ -230,7 +275,7 @@ macro_rules! impl_view_tuple {
         }
 
         impl<'a, $( $ty: ViewElement + View<'a> ),* > View<'a> for ($( $ty, )*) {
-            type Iter = itertools::Zip<($( $ty::Iter, )*)>;
+            type Iter = crate::zip::Zip<($( $ty::Iter, )*)>;
 
             #[inline]
             fn fetch(
@@ -238,7 +283,7 @@ macro_rules! impl_view_tuple {
                 chunk: &'a ComponentStorage,
                 chunk_index: usize,
             ) -> Self::Iter {
-                itertools::multizip(($( $ty::fetch(archetype.clone(), chunk.clone(), chunk_index), )*))
+                crate::zip::multizip(($( $ty::fetch(archetype.clone(), chunk.clone(), chunk_index), )*))
             }
 
             fn validate() -> bool {
@@ -259,8 +304,12 @@ macro_rules! impl_view_tuple {
             }
 
             fn writes<Data: Component>() -> bool {
-                $( $ty::reads::<Data>() )||*
+                $( $ty::writes::<Data>() )||*
             }
+
+            fn read_types() -> Vec<ComponentTypeId> { vec![$( ComponentTypeId::of::<$ty>()),*] }
+
+            fn write_types() -> Vec<ComponentTypeId> { vec![$( ComponentTypeId::of::<$ty>()),*] }
         }
     };
 }
@@ -386,32 +435,30 @@ impl<'data, V: View<'data>> Iterator for ZipEntities<'data, V> {
 }
 
 /// An iterator over all chunks that match a given query.
-pub struct ChunkViewIter<
-    'data,
-    'filter,
+pub struct ChunkViewIter<'data, 'filter, V, FArch, FChunkset, FChunk>
+where
     V: for<'a> View<'a>,
-    Arch: Filter<ArchetypeFilterData<'data>>,
-    Chunkset: Filter<ChunksetFilterData<'data>>,
-    Chunk: Filter<ChunkFilterData<'data>>,
-> {
+    FArch: Filter<ArchetypeFilterData<'data>>,
+    FChunkset: Filter<ChunksetFilterData<'data>>,
+    FChunk: Filter<ChunkFilterData<'data>>,
+{
     _view: PhantomData<V>,
     storage: &'data Storage,
-    arch_filter: &'filter mut Arch,
-    chunkset_filter: &'filter mut Chunkset,
-    chunk_filter: &'filter mut Chunk,
-    archetypes: Enumerate<Arch::Iter>,
-    set_frontier: Option<(&'data ArchetypeData, Take<Enumerate<Chunkset::Iter>>)>,
-    chunk_frontier: Option<(&'data ArchetypeData, usize, Take<Enumerate<Chunk::Iter>>)>,
+    arch_filter: &'filter FArch,
+    chunkset_filter: &'filter FChunkset,
+    chunk_filter: &'filter FChunk,
+    archetypes: Enumerate<FArch::Iter>,
+    set_frontier: Option<(&'data ArchetypeData, Take<Enumerate<FChunkset::Iter>>)>,
+    chunk_frontier: Option<(&'data ArchetypeData, usize, Take<Enumerate<FChunk::Iter>>)>,
 }
 
-impl<
-        'data,
-        'filter,
-        V: for<'a> View<'a>,
-        ArchFilter: Filter<ArchetypeFilterData<'data>>,
-        ChunksetFilter: Filter<ChunksetFilterData<'data>>,
-        ChunkFilter: Filter<ChunkFilterData<'data>>,
-    > ChunkViewIter<'data, 'filter, V, ArchFilter, ChunksetFilter, ChunkFilter>
+impl<'data, 'filter, V, FArch, FChunkset, FChunk>
+    ChunkViewIter<'data, 'filter, V, FArch, FChunkset, FChunk>
+where
+    V: for<'a> View<'a>,
+    FArch: Filter<ArchetypeFilterData<'data>>,
+    FChunkset: Filter<ChunksetFilterData<'data>>,
+    FChunk: Filter<ChunkFilterData<'data>>,
 {
     fn next_set(&mut self) -> Option<(&'data ArchetypeData, usize)> {
         loop {
@@ -456,14 +503,13 @@ impl<
     }
 }
 
-impl<
-        'data,
-        'filter,
-        V: for<'a> View<'a>,
-        ArchFilter: Filter<ArchetypeFilterData<'data>>,
-        ChunkFilter: Filter<ChunkFilterData<'data>>,
-        ChunksetFilter: Filter<ChunksetFilterData<'data>>,
-    > Iterator for ChunkViewIter<'data, 'filter, V, ArchFilter, ChunksetFilter, ChunkFilter>
+impl<'data, 'filter, V, FArch, FChunkset, FChunk> Iterator
+    for ChunkViewIter<'data, 'filter, V, FArch, FChunkset, FChunk>
+where
+    V: for<'a> View<'a>,
+    FArch: Filter<ArchetypeFilterData<'data>>,
+    FChunkset: Filter<ChunksetFilterData<'data>>,
+    FChunk: Filter<ChunkFilterData<'data>>,
 {
     type Item = Chunk<'data, V>;
 
@@ -496,7 +542,7 @@ impl<
     }
 }
 
-/// An iterator which iterates through all entity data in all chunks.
+// An iterator which iterates through all entity data in all chunks.
 pub struct ChunkDataIter<'data, V, I>
 where
     V: for<'a> View<'a>,
@@ -686,9 +732,11 @@ where
 /// The `ChunkView` yielded from `iter_chunks` allows access to all shared data in the chunk (queried for or not),
 /// but entity data slices can only be accessed if they were requested in the query's view. Attempting to access
 /// other data types, or attempting to write to components that were only requested via a `Read` will panic.
+#[derive(Derivative)]
+#[derivative(Clone(bound = "F: Clone"))]
 pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
     view: PhantomData<V>,
-    filter: F,
+    pub(crate) filter: F,
 }
 
 impl<V, F> Query<V, F>
@@ -766,6 +814,14 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
+    pub fn for_each_entities<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
+    where
+        T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
+    {
+        self.iter_entities(world).for_each(&mut f);
+    }
+
+    /// Iterates through all entity data that matches the query.
     pub fn for_each<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
@@ -773,25 +829,318 @@ where
         self.iter(world).for_each(&mut f);
     }
 
+    #[cfg(feature = "par-iter")]
+    /// Gets an iterator which iterates through all chunks that match the query in parallel.
+    pub fn par_iter_chunks<'a, 'data>(
+        &'a mut self,
+        world: &'data World,
+    ) -> ChunkViewParIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
+    where
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'data>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'data>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'data>>>::Iter: FissileIterator,
+    {
+        let (arch_filter, chunkset_filter, chunk_filter) = self.filter.filters();
+        let storage = world.storage();
+        let archetypes = FissileEnumerate::new(arch_filter.collect(ArchetypeFilterData {
+            component_types: storage.component_types(),
+            tag_types: storage.tag_types(),
+        }));
+        ChunkViewParIter {
+            storage,
+            arch_filter,
+            chunkset_filter,
+            chunk_filter,
+            archetypes,
+            set_frontier: None,
+            chunk_frontier: None,
+            _view: PhantomData,
+        }
+    }
+
+    /// Iterates through all entity data that matches the query in parallel.
+    #[cfg(feature = "par-iter")]
+    pub fn par_entities_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
+    where
+        T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
+    {
+        self.par_for_each_chunk(world, |mut chunk| {
+            for data in chunk.iter_entities() {
+                f(data);
+            }
+        });
+    }
+
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
     pub fn par_for_each<'a, T>(&'a mut self, world: &'a World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
     {
-        self.par_iter_chunks(world).for_each(|mut chunk| {
+        self.par_for_each_chunk(world, |mut chunk| {
             for data in chunk.iter() {
                 f(data);
             }
         });
     }
 
-    /// Gets a parallel iterator of chunks that match the query.
+    /// Iterates through all chunks that match the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_iter_chunks<'a>(
-        &'a mut self,
-        world: &'a World,
-    ) -> impl ParallelIterator<Item = Chunk<'a, V>> {
-        self.iter_chunks(world).par_bridge()
+    pub fn par_for_each_chunk<'a, T>(&'a mut self, world: &'a World, f: T)
+    where
+        T: Fn(Chunk<'a, V>) + Send + Sync,
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
+    {
+        let par_iter = self.par_iter_chunks(world);
+        ParallelIterator::for_each(par_iter, |chunk| {
+            f(chunk);
+        });
+    }
+}
+
+/// An iterator over all chunks that match a given query.
+#[cfg(feature = "par-iter")]
+pub struct ChunkViewParIter<'data, 'filter, V, FArch, FChunkset, FChunk>
+where
+    V: for<'a> View<'a>,
+    FArch: Filter<ArchetypeFilterData<'data>>,
+    FChunkset: Filter<ChunksetFilterData<'data>>,
+    FChunk: Filter<ChunkFilterData<'data>>,
+    FArch::Iter: FissileIterator,
+    FChunkset::Iter: FissileIterator,
+    FChunk::Iter: FissileIterator,
+{
+    _view: PhantomData<V>,
+    storage: &'data Storage,
+    arch_filter: &'filter FArch,
+    chunkset_filter: &'filter FChunkset,
+    chunk_filter: &'filter FChunk,
+    archetypes: FissileEnumerate<FArch::Iter>,
+    set_frontier: Option<(
+        &'data ArchetypeData,
+        FissileEnumerate<FChunkset::Iter>,
+        usize,
+    )>,
+    chunk_frontier: Option<(
+        &'data ArchetypeData,
+        usize,
+        FissileEnumerate<FChunk::Iter>,
+        usize,
+    )>,
+}
+
+#[cfg(feature = "par-iter")]
+impl<'data, 'filter, V, FArch, FChunkset, FChunk>
+    ChunkViewParIter<'data, 'filter, V, FArch, FChunkset, FChunk>
+where
+    V: for<'a> View<'a>,
+    FArch: Filter<ArchetypeFilterData<'data>>,
+    FChunkset: Filter<ChunksetFilterData<'data>>,
+    FChunk: Filter<ChunkFilterData<'data>>,
+    FArch::Iter: FissileIterator,
+    FChunkset::Iter: FissileIterator,
+    FChunk::Iter: FissileIterator,
+{
+    fn next_set(&mut self) -> Option<(&'data ArchetypeData, usize)> {
+        loop {
+            // if we are looping through an archetype, find the next set
+            if let Some((ref arch, ref mut chunks, index_bound)) = self.set_frontier {
+                for (set_index, filter_data) in chunks {
+                    if set_index < index_bound
+                        && self.chunkset_filter.is_match(&filter_data).is_pass()
+                    {
+                        return Some((arch, set_index));
+                    }
+                }
+            }
+
+            // we have completed the current set, find the next one
+            loop {
+                match self.archetypes.next() {
+                    Some((arch_index, arch_data)) => {
+                        if self.arch_filter.is_match(&arch_data).is_pass() {
+                            // we have found another set
+                            self.set_frontier = {
+                                let arch =
+                                    unsafe { self.storage.archetypes().get_unchecked(arch_index) };
+                                let data = ChunksetFilterData {
+                                    archetype_data: arch,
+                                };
+
+                                Some((
+                                    arch,
+                                    FissileEnumerate::new(self.chunkset_filter.collect(data)),
+                                    arch.len(),
+                                ))
+                            };
+                            break;
+                        }
+                    }
+                    // there are no more sets
+                    None => return None,
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "par-iter")]
+impl<'data, 'filter, V, FArch, FChunkset, FChunk> Iterator
+    for ChunkViewParIter<'data, 'filter, V, FArch, FChunkset, FChunk>
+where
+    V: for<'a> View<'a>,
+    FArch: Filter<ArchetypeFilterData<'data>>,
+    FChunkset: Filter<ChunksetFilterData<'data>>,
+    FChunk: Filter<ChunkFilterData<'data>>,
+    FArch::Iter: FissileIterator,
+    FChunkset::Iter: FissileIterator,
+    FChunk::Iter: FissileIterator,
+{
+    type Item = Chunk<'data, V>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            // if we are looping through a set, then yield the next chunk
+            if let Some((ref arch, set_index, ref mut set, index_bound)) = self.chunk_frontier {
+                for (chunk_index, filter_data) in set {
+                    if chunk_index < index_bound
+                        && self.chunk_filter.is_match(&filter_data).is_pass()
+                    {
+                        return Some(Chunk::new(arch, set_index, chunk_index));
+                    }
+                }
+            }
+
+            // we have completed the set, find the next
+            if let Some((ref arch, set_index)) = self.next_set() {
+                let chunks = unsafe { arch.chunksets().get_unchecked(set_index) }.occupied();
+                self.chunk_frontier = Some((
+                    arch,
+                    set_index,
+                    FissileEnumerate::new(self.chunk_filter.collect(ChunkFilterData { chunks })),
+                    chunks.len(),
+                ))
+            } else {
+                return None;
+            }
+        }
+    }
+}
+
+#[cfg(feature = "par-iter")]
+impl<'data, 'filter, V, FArch, FChunkset, FChunk> ParallelIterator
+    for ChunkViewParIter<'data, 'filter, V, FArch, FChunkset, FChunk>
+where
+    V: for<'a> View<'a>,
+    FArch: Filter<ArchetypeFilterData<'data>>,
+    FChunkset: Filter<ChunksetFilterData<'data>>,
+    FChunk: Filter<ChunkFilterData<'data>>,
+    FArch::Iter: FissileIterator,
+    FChunkset::Iter: FissileIterator,
+    FChunk::Iter: FissileIterator,
+{
+    type Item = Chunk<'data, V>;
+
+    fn drive_unindexed<C>(self, consumer: C) -> C::Result
+    where
+        C: UnindexedConsumer<Self::Item>,
+    {
+        bridge_unindexed(self, consumer)
+    }
+}
+
+#[cfg(feature = "par-iter")]
+impl<'data, 'filter, V, FArch, FChunkset, FChunk> UnindexedProducer
+    for ChunkViewParIter<'data, 'filter, V, FArch, FChunkset, FChunk>
+where
+    V: for<'a> View<'a>,
+    FArch: Filter<ArchetypeFilterData<'data>>,
+    FChunkset: Filter<ChunksetFilterData<'data>>,
+    FChunk: Filter<ChunkFilterData<'data>>,
+    FArch::Iter: FissileIterator,
+    FChunkset::Iter: FissileIterator,
+    FChunk::Iter: FissileIterator,
+{
+    type Item = Chunk<'data, V>;
+
+    fn split(self) -> (Self, Option<Self>) {
+        let Self {
+            _view,
+            storage,
+            arch_filter,
+            chunkset_filter,
+            chunk_filter,
+            archetypes,
+            set_frontier,
+            chunk_frontier,
+        } = self;
+
+        let (left_archetypes, right_archetypes, arch_size) = archetypes.split();
+
+        let (left_set, right_set, set_size) = if let Some((data, iter, bound)) = set_frontier {
+            let (left_iter, right_iter, iter_size) = iter.split();
+            (
+                Some((data, left_iter, bound)),
+                Some((data, right_iter, bound)),
+                iter_size,
+            )
+        } else {
+            (None, None, 0)
+        };
+
+        let (left_chunk, right_chunk, chunk_size) =
+            if let Some((data, idx, iter, bound)) = chunk_frontier {
+                let (left_iter, right_iter, iter_size) = iter.split();
+                (
+                    Some((data, idx, left_iter, bound)),
+                    Some((data, idx, right_iter, bound)),
+                    iter_size,
+                )
+            } else {
+                (None, None, 0)
+            };
+
+        let right_split = Self {
+            _view,
+            storage,
+            arch_filter,
+            chunkset_filter,
+            chunk_filter,
+            archetypes: right_archetypes,
+            set_frontier: right_set,
+            chunk_frontier: right_chunk,
+        };
+
+        if arch_size + set_size + chunk_size == 0 {
+            (right_split, None)
+        } else {
+            (
+                Self {
+                    _view,
+                    storage,
+                    arch_filter,
+                    chunkset_filter,
+                    chunk_filter,
+                    archetypes: left_archetypes,
+                    set_frontier: left_set,
+                    chunk_frontier: left_chunk,
+                },
+                Some(right_split),
+            )
+        }
+    }
+    fn fold_with<F>(self, folder: F) -> F
+    where
+        F: Folder<Self::Item>,
+    {
+        folder.consume_iter(self)
     }
 }

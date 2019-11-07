@@ -5,6 +5,8 @@ use crate::entity::Entity;
 use crate::entity::EntityLocation;
 use crate::filter::ArchetypeFilterData;
 use crate::filter::Filter;
+use crate::iterator::FissileZip;
+use crate::iterator::SliceVecIter;
 use crate::world::TagSet;
 use crate::world::WorldId;
 use derivative::Derivative;
@@ -15,32 +17,67 @@ use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::iter::Zip;
 use std::mem::size_of;
-use std::num::Wrapping;
 use std::ops::Deref;
 use std::ops::DerefMut;
 use std::ops::RangeBounds;
 use std::ptr::NonNull;
 use std::slice::Iter;
 use std::slice::IterMut;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
+static VERSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+fn next_version() -> u64 {
+    VERSION_COUNTER
+        .fetch_add(1, Ordering::Relaxed)
+        .checked_add(1)
+        .unwrap()
+}
+
+#[cfg(not(feature = "ffi"))]
 /// A type ID identifying a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct ComponentTypeId(TypeId);
 
+#[cfg(not(feature = "ffi"))]
 impl ComponentTypeId {
     /// Gets the component type ID that represents type `T`.
-    pub fn of<T: Component>() -> Self { ComponentTypeId(TypeId::of::<T>()) }
+    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>()) }
 }
 
+#[cfg(feature = "ffi")]
+/// A type ID identifying a component type.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct ComponentTypeId(TypeId, u32);
+
+#[cfg(feature = "ffi")]
+impl ComponentTypeId {
+    /// Gets the component type ID that represents type `T`.
+    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>(), 0) }
+}
+
+#[cfg(not(feature = "ffi"))]
 /// A type ID identifying a tag type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct TagTypeId(TypeId);
 
+#[cfg(not(feature = "ffi"))]
 impl TagTypeId {
     /// Gets the tag type ID that represents type `T`.
-    pub fn of<T: Tag>() -> Self { TagTypeId(TypeId::of::<T>()) }
+    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>()) }
+}
+
+#[cfg(feature = "ffi")]
+/// A type ID identifying a tag type.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub struct TagTypeId(TypeId, u32);
+
+#[cfg(feature = "ffi")]
+impl TagTypeId {
+    /// Gets the tag type ID that represents type `T`.
+    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>(), 0) }
 }
 
 /// A `Component` is per-entity data that can be attached to a single entity.
@@ -118,27 +155,6 @@ impl<T> SliceVec<T> {
         SliceVecIter {
             data: &self.data,
             counts: &self.counts,
-        }
-    }
-}
-
-/// An iterator over slices in a `SliceVec`.
-pub struct SliceVecIter<'a, T> {
-    data: &'a [T],
-    counts: &'a [usize],
-}
-
-impl<'a, T> Iterator for SliceVecIter<'a, T> {
-    type Item = &'a [T];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some((count, remaining_counts)) = self.counts.split_first() {
-            let (data, remaining_data) = self.data.split_at(*count);
-            self.counts = remaining_counts;
-            self.data = remaining_data;
-            Some(data)
-        } else {
-            None
         }
     }
 }
@@ -294,7 +310,7 @@ impl ArchetypeDescription {
 
     /// Adds a tag to the description.
     pub fn register_tag<T: Tag>(&mut self) {
-        self.register_tag_raw(TagTypeId(TypeId::of::<T>()), TagMeta::of::<T>());
+        self.register_tag_raw(TagTypeId::of::<T>(), TagMeta::of::<T>());
     }
 
     /// Adds a component to the description.
@@ -304,18 +320,18 @@ impl ArchetypeDescription {
 
     /// Adds a component to the description.
     pub fn register_component<T: Component>(&mut self) {
-        self.register_component_raw(ComponentTypeId(TypeId::of::<T>()), ComponentMeta::of::<T>());
+        self.register_component_raw(ComponentTypeId::of::<T>(), ComponentMeta::of::<T>());
     }
 }
 
 impl<'a> Filter<ArchetypeFilterData<'a>> for ArchetypeDescription {
-    type Iter = Zip<SliceVecIter<'a, TagTypeId>, SliceVecIter<'a, ComponentTypeId>>;
+    type Iter = FissileZip<SliceVecIter<'a, TagTypeId>, SliceVecIter<'a, ComponentTypeId>>;
 
     fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
-        source.tag_types.iter().zip(source.component_types.iter())
+        FissileZip::new(source.tag_types.iter(), source.component_types.iter())
     }
 
-    fn is_match(&mut self, (tags, components): &<Self::Iter as Iterator>::Item) -> Option<bool> {
+    fn is_match(&self, (tags, components): &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
             tags.len() == self.tags.len()
                 && self.tags.iter().all(|(t, _)| tags.contains(t))
@@ -662,13 +678,13 @@ impl ComponentStorageLayout {
             .map(|(ty, _, meta)| {
                 (
                     *ty,
-                    ComponentAccessor {
+                    ComponentResourceSet {
                         ptr: AtomicRefCell::new(meta.align as *mut u8),
                         capacity: self.capacity,
                         count: UnsafeCell::new(0),
                         element_size: meta.size,
                         drop_fn: meta.drop_fn,
-                        version: UnsafeCell::new(Wrapping(0)),
+                        version: UnsafeCell::new(0),
                     },
                 )
             })
@@ -764,6 +780,10 @@ impl Chunkset {
         let mut first = 0;
         let mut last = slice.len() - 1;
 
+        if slice.is_empty() {
+            return true;
+        }
+
         loop {
             // find the first chunk that is not full
             while first < last && slice[first].is_full() {
@@ -826,17 +846,17 @@ impl ChunkId {
 }
 
 /// A set of component slices located on a chunk.
-pub struct Components(SmallVec<[(ComponentTypeId, ComponentAccessor); 5]>);
+pub struct Components(SmallVec<[(ComponentTypeId, ComponentResourceSet); 5]>);
 
 impl Components {
-    pub(crate) fn new(mut data: SmallVec<[(ComponentTypeId, ComponentAccessor); 5]>) -> Self {
+    pub(crate) fn new(mut data: SmallVec<[(ComponentTypeId, ComponentResourceSet); 5]>) -> Self {
         data.sort_by_key(|(t, _)| *t);
         Self(data)
     }
 
     /// Gets a component slice accessor for the specified component type.
     #[inline]
-    pub fn get(&self, type_id: ComponentTypeId) -> Option<&ComponentAccessor> {
+    pub fn get(&self, type_id: ComponentTypeId) -> Option<&ComponentResourceSet> {
         self.0
             .binary_search_by_key(&type_id, |(t, _)| *t)
             .ok()
@@ -845,18 +865,18 @@ impl Components {
 
     /// Gets a mutable component slice accessor for the specified component type.
     #[inline]
-    pub fn get_mut(&mut self, type_id: ComponentTypeId) -> Option<&mut ComponentAccessor> {
+    pub fn get_mut(&mut self, type_id: ComponentTypeId) -> Option<&mut ComponentResourceSet> {
         self.0
             .binary_search_by_key(&type_id, |(t, _)| *t)
             .ok()
             .map(move |i| unsafe { &mut self.0.get_unchecked_mut(i).1 })
     }
 
-    fn iter(&mut self) -> Iter<(ComponentTypeId, ComponentAccessor)> { self.0.iter() }
+    fn iter(&mut self) -> Iter<(ComponentTypeId, ComponentResourceSet)> { self.0.iter() }
 
-    fn iter_mut(&mut self) -> IterMut<(ComponentTypeId, ComponentAccessor)> { self.0.iter_mut() }
+    fn iter_mut(&mut self) -> IterMut<(ComponentTypeId, ComponentResourceSet)> { self.0.iter_mut() }
 
-    fn drain(&mut self) -> Drain<(ComponentTypeId, ComponentAccessor)> { self.0.drain() }
+    fn drain(&mut self) -> Drain<(ComponentTypeId, ComponentResourceSet)> { self.0.drain() }
 }
 
 /// Stores a chunk of entities and their component data of a specific data layout.
@@ -893,7 +913,7 @@ impl ComponentStorage {
     pub fn entities(&self) -> &[Entity] { self.entities.as_slice() }
 
     /// Gets a component accessor for the specified component type.
-    pub fn components(&self, component_type: ComponentTypeId) -> Option<&ComponentAccessor> {
+    pub fn components(&self, component_type: ComponentTypeId) -> Option<&ComponentResourceSet> {
         unsafe { &*self.component_info.get() }.get(component_type)
     }
 
@@ -1028,18 +1048,18 @@ impl Drop for ComponentStorage {
 
 /// Provides raw access to component data slices.
 #[repr(align(64))]
-pub struct ComponentAccessor {
+pub struct ComponentResourceSet {
     ptr: AtomicRefCell<*mut u8>,
     element_size: usize,
     count: UnsafeCell<usize>,
     capacity: usize,
     drop_fn: Option<fn(*mut u8)>,
-    version: UnsafeCell<Wrapping<usize>>,
+    version: UnsafeCell<u64>,
 }
 
-impl ComponentAccessor {
+impl ComponentResourceSet {
     /// Gets the version of the component slice.
-    pub fn version(&self) -> usize { unsafe { (*self.version.get()).0 } }
+    pub fn version(&self) -> u64 { unsafe { (*self.version.get()) } }
 
     /// Gets a raw pointer to the start of the component slice.
     ///
@@ -1063,11 +1083,18 @@ impl ComponentAccessor {
     ///
     /// Access to the component data within the slice is runtime borrow checked.
     /// This call will panic if borrowing rules are broken.
+    ///
+    /// # Panics
+    ///
+    /// Will panic when an internal u64 counter overflows.
+    /// It will happen in 50000 years if you do 10000 mutations a millisecond.
     pub fn data_raw_mut(&self) -> (RefMut<Exclusive, *mut u8>, usize, usize) {
         // this version increment is not thread safe
         // - but the pointer `get_mut` ensures exclusive access at runtime
         let ptr = self.ptr.get_mut();
-        unsafe { *self.version.get() += Wrapping(1) };
+        unsafe {
+            *self.version.get() = next_version();
+        };
         (ptr, self.element_size, unsafe { *self.count.get() })
     }
 
@@ -1092,6 +1119,11 @@ impl ComponentAccessor {
     ///
     /// Access to the component data within the slice is runtime borrow checked.
     /// This call will panic if borrowing rules are broken.
+    ///
+    /// # Panics
+    ///
+    /// Will panic when an internal u64 counter overflows.
+    /// It will happen in 50000 years if you do 10000 mutations a millisecond.
     pub unsafe fn data_slice_mut<T>(&self) -> RefMapMut<Exclusive, &mut [T]> {
         let (ptr, _size, count) = self.data_raw_mut();
         ptr.map_into(|ptr| std::slice::from_raw_parts_mut(*ptr as *mut _ as *mut T, count))
@@ -1101,11 +1133,11 @@ impl ComponentAccessor {
     pub fn writer(&mut self) -> ComponentWriter { ComponentWriter::new(self) }
 }
 
-impl Debug for ComponentAccessor {
+impl Debug for ComponentResourceSet {
     fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
         write!(
             f,
-            "ComponentAccessor {{ ptr: {:?}, element_size: {}, count: {}, capacity: {}, version: {} }}",
+            "ComponentResourceSet {{ ptr: {:?}, element_size: {}, count: {}, capacity: {}, version: {} }}",
             *self.ptr.get(),
             self.element_size,
             unsafe { *self.count.get() },
@@ -1117,12 +1149,12 @@ impl Debug for ComponentAccessor {
 
 /// Provides methods adding or removing components from a component vec.
 pub struct ComponentWriter<'a> {
-    accessor: &'a ComponentAccessor,
+    accessor: &'a ComponentResourceSet,
     ptr: RefMut<'a, Exclusive<'a>, *mut u8>,
 }
 
 impl<'a> ComponentWriter<'a> {
-    fn new(accessor: &'a ComponentAccessor) -> ComponentWriter<'a> {
+    fn new(accessor: &'a ComponentResourceSet) -> ComponentWriter<'a> {
         Self {
             accessor,
             ptr: accessor.ptr.get_mut(),
@@ -1139,6 +1171,11 @@ impl<'a> ComponentWriter<'a> {
     /// This function will _copy_ all elements into the chunk. If the source is not `Copy`,
     /// the caller must then `mem::forget` the source such that the destructor does not run
     /// on the original data.
+    ///
+    /// # Panics
+    ///
+    /// Will panic when an internal u64 counter overflows.
+    /// It will happen in 50000 years if you do 10000 mutations a millisecond.
     pub unsafe fn push_raw(&mut self, components: NonNull<u8>, count: usize) {
         debug_assert!((*self.accessor.count.get() + count) <= self.accessor.capacity);
         std::ptr::copy_nonoverlapping(
@@ -1148,7 +1185,7 @@ impl<'a> ComponentWriter<'a> {
             count * self.accessor.element_size,
         );
         *self.accessor.count.get() += count;
-        *self.accessor.version.get() += Wrapping(1);
+        *self.accessor.version.get() = next_version();
     }
 
     /// Pushes new components onto the end of the vec.
@@ -1322,7 +1359,7 @@ impl TagStorage {
             };
 
             if ptr.is_null() {
-                println!("out of memory");
+                log::trace!("out of memory");
                 std::process::abort()
             }
 
@@ -1370,12 +1407,15 @@ impl Debug for TagStorage {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::num::Wrapping;
 
     #[derive(Copy, Clone, PartialEq, Debug)]
     struct ZeroSize;
 
     #[test]
     pub fn create() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1408,6 +1448,8 @@ mod test {
 
     #[test]
     pub fn create_lazy_allocated() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1436,6 +1478,8 @@ mod test {
 
     #[test]
     pub fn create_free_when_empty() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1477,6 +1521,8 @@ mod test {
 
     #[test]
     pub fn read_components() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1557,6 +1603,8 @@ mod test {
 
     #[test]
     pub fn read_tags() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1599,6 +1647,8 @@ mod test {
 
     #[test]
     pub fn create_zero_size_tags() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
@@ -1633,6 +1683,8 @@ mod test {
 
     #[test]
     pub fn create_zero_size_components() {
+        let _ = env_logger::builder().is_test(true).try_init();
+
         let mut archetypes = Storage::new(WorldId::default());
 
         let mut desc = ArchetypeDescription::default();
