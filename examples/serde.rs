@@ -1,12 +1,15 @@
 use legion::{
+    entity::EntityAllocator,
     prelude::*,
     storage::{
         ArchetypeDescription, ComponentMeta, ComponentResourceSet, ComponentTypeId,
-        TagMeta, TagStorage, TagTypeId,
+        ComponentWriter, TagMeta, TagStorage, TagTypeId,
     },
 };
-use serde::{ser::SerializeStruct, Deserialize, Serialize, Serializer};
-use std::{cell::RefCell, any::TypeId, collections::HashMap};
+use serde::{
+    de::IgnoredAny, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer,
+};
+use std::{any::TypeId, cell::RefCell, collections::HashMap};
 use type_uuid::TypeUuid;
 
 #[derive(TypeUuid, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -19,14 +22,35 @@ struct Vel(f32, f32, f32);
 struct Unregistered(f32, f32, f32);
 
 #[derive(Clone)]
-struct ComponentRegistration {
+struct TypeRegistration {
     uuid: type_uuid::Bytes,
     ty: TypeId,
     tag_serialize_fn: fn(&TagStorage, &mut dyn FnMut(&dyn erased_serde::Serialize)),
+    tag_deserialize_fn: fn(
+        deserializer: &mut erased_serde::Deserializer,
+        &mut TagStorage,
+    ) -> Result<(), erased_serde::Error>,
     comp_serialize_fn: fn(&ComponentResourceSet, &mut dyn FnMut(&dyn erased_serde::Serialize)),
+    comp_deserialize_fn: fn(
+        deserializer: &mut erased_serde::Deserializer,
+        &mut ComponentWriter,
+    ) -> Result<(), erased_serde::Error>,
+    register_tag_fn: fn(&mut ArchetypeDescription),
+    register_comp_fn: fn(&mut ArchetypeDescription),
 }
-impl ComponentRegistration {
-    fn of<T: TypeUuid + Serialize + for<'de> Deserialize<'de> + 'static>() -> Self {
+// should separate this into TagRegistration and ComponentRegistration
+// Tag type constraints are much stricter, requiring PartialEq and Clone
+impl TypeRegistration {
+    fn of<
+        T: TypeUuid
+            + Serialize
+            + for<'de> Deserialize<'de>
+            + PartialEq
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    >() -> Self {
         Self {
             uuid: T::UUID,
             ty: TypeId::of::<T>(),
@@ -35,17 +59,52 @@ impl ComponentRegistration {
                 let slice = unsafe { tag_storage.data_slice::<T>() };
                 serialize_fn(&&*slice);
             },
+            tag_deserialize_fn: |deserializer, tag_storage| {
+                // TODO implement visitor to avoid allocation of Vec
+                let mut tag_vec = <Vec<T> as Deserialize>::deserialize(deserializer)?;
+                for tag in tag_vec {
+                    // Tag types should line up, making this safe
+                    unsafe {
+                        tag_storage.push(tag);
+                    }
+                }
+                Ok(())
+            },
             comp_serialize_fn: |comp_storage, serialize_fn| {
                 // it's safe because we know this is the correct type due to lookup
                 let slice = unsafe { comp_storage.data_slice::<T>() };
                 serialize_fn(&*slice);
             },
+            comp_deserialize_fn: |deserializer, comp_writer| {
+                // TODO implement visitor to avoid allocation of Vec
+                let mut comp_vec = <Vec<T> as Deserialize>::deserialize(deserializer)?;
+                // Safe since we forget the things after
+                unsafe {
+                    comp_writer.push(&comp_vec);
+                }
+                for comp in comp_vec.drain(0..comp_vec.len()) {
+                    std::mem::forget(comp);
+                }
+                Ok(())
+            },
+            register_tag_fn: |mut desc| {
+                desc.register_tag::<T>();
+            },
+            register_comp_fn: |mut desc| {
+                desc.register_tag::<T>();
+            },
         }
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct SerializedArchetypeDescription {
+    tag_types: Vec<type_uuid::Bytes>,
+    component_types: Vec<type_uuid::Bytes>,
+}
+
 struct SerializeImpl {
-    types: HashMap<TypeId, ComponentRegistration>,
+    types: HashMap<TypeId, TypeRegistration>,
 }
 impl legion::ser::WorldSerializer for SerializeImpl {
     fn can_serialize_tag(&self, ty: &TagTypeId, _meta: &TagMeta) -> bool {
@@ -71,10 +130,11 @@ impl legion::ser::WorldSerializer for SerializeImpl {
             .filter_map(|(ty, _)| self.types.get(&ty.0))
             .map(|reg| reg.uuid)
             .collect::<Vec<_>>();
-        let mut desc_out = serializer.serialize_struct("ArchetypeDescription", 2)?;
-        desc_out.serialize_field("tag_types", &tags_to_serialize)?;
-        desc_out.serialize_field("component_types", &components_to_serialize)?;
-        desc_out.end()
+        SerializedArchetypeDescription {
+            tag_types: tags_to_serialize,
+            component_types: components_to_serialize,
+        }
+        .serialize(serializer)
     }
     fn serialize_components<S: Serializer>(
         &self,
@@ -89,12 +149,18 @@ impl legion::ser::WorldSerializer for SerializeImpl {
             {
                 let mut result_ref = result.borrow_mut();
                 (reg.comp_serialize_fn)(components, &mut |serialize| {
-                    result_ref.replace(erased_serde::serialize(serialize, serializer.borrow_mut().take().unwrap()));
+                    result_ref.replace(erased_serde::serialize(
+                        serialize,
+                        serializer.borrow_mut().take().unwrap(),
+                    ));
                 });
             }
             return result.borrow_mut().take().unwrap();
         }
-        panic!("received unserializable type {:?}, this should be filtered by can_serialize", component_type);
+        panic!(
+            "received unserializable type {:?}, this should be filtered by can_serialize",
+            component_type
+        );
     }
     fn serialize_tags<S: Serializer>(
         &self,
@@ -109,19 +175,100 @@ impl legion::ser::WorldSerializer for SerializeImpl {
             {
                 let mut result_ref = result.borrow_mut();
                 (reg.tag_serialize_fn)(tags, &mut |serialize| {
-                    result_ref.replace(erased_serde::serialize(serialize, serializer.borrow_mut().take().unwrap()));
+                    result_ref.replace(erased_serde::serialize(
+                        serialize,
+                        serializer.borrow_mut().take().unwrap(),
+                    ));
                 });
             }
             return result.borrow_mut().take().unwrap();
         }
-        panic!("received unserializable type {:?}, this should be filtered by can_serialize", tag_type);
+        panic!(
+            "received unserializable type {:?}, this should be filtered by can_serialize",
+            tag_type
+        );
     }
     fn serialize_entities<S: Serializer>(
         &self,
         serializer: S,
         entities: &[Entity],
     ) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(entities.iter().map(|_e| *uuid::Uuid::new_v4().as_bytes() ))
+        serializer.collect_seq(entities.iter().map(|_e| *uuid::Uuid::new_v4().as_bytes()))
+    }
+}
+
+struct DeserializeImpl {
+    types: HashMap<TypeId, TypeRegistration>,
+    types_by_uuid: HashMap<type_uuid::Bytes, TypeRegistration>,
+    entity_map: RefCell<HashMap<uuid::Bytes, Entity>>,
+}
+impl legion::de::WorldDeserializer for DeserializeImpl {
+    fn deserialize_archetype_description<D: for<'de> Deserializer<'de>>(
+        &self,
+        deserializer: D,
+    ) -> Result<ArchetypeDescription, <D as Deserializer>::Error> {
+        let serialized_desc =
+            <SerializedArchetypeDescription as Deserialize>::deserialize(deserializer)?;
+        let mut desc = ArchetypeDescription::default();
+        for tag in serialized_desc.tag_types {
+            if let Some(reg) = self.types_by_uuid.get(&tag) {
+                (reg.register_tag_fn)(&mut desc);
+            }
+        }
+        for comp in serialized_desc.component_types {
+            if let Some(reg) = self.types_by_uuid.get(&comp) {
+                (reg.register_comp_fn)(&mut desc);
+            }
+        }
+        Ok(desc)
+    }
+    fn deserialize_components<DD: for<'b> Deserializer<'b>>(
+        &self,
+        deserializer: DD,
+        component_type: &ComponentTypeId,
+        component_meta: &ComponentMeta,
+        components: &mut ComponentResourceSet,
+    ) -> Result<(), <DD as Deserializer>::Error> {
+        if let Some(reg) = self.types.get(&component_type.0) {
+            let mut writer = components.writer();
+            let mut erased = erased_serde::Deserializer::erase(deserializer);
+            (reg.comp_deserialize_fn)(&mut erased, &mut writer)
+                .map_err(<<DD as serde::Deserializer>::Error as serde::de::Error>::custom)?;
+        } else {
+            <IgnoredAny>::deserialize(deserializer)?;
+        }
+        Ok(())
+    }
+    fn deserialize_tags<D: for<'de> Deserializer<'de>>(
+        &self,
+        deserializer: D,
+        tag_type: &TagTypeId,
+        tag_meta: &TagMeta,
+        tags: &mut TagStorage,
+    ) -> Result<(), <D as Deserializer>::Error> {
+        if let Some(reg) = self.types.get(&tag_type.0) {
+            let mut erased = erased_serde::Deserializer::erase(deserializer);
+            (reg.tag_deserialize_fn)(&mut erased, tags)
+                .map_err(<<D as serde::Deserializer>::Error as serde::de::Error>::custom)?;
+        } else {
+            <IgnoredAny>::deserialize(deserializer)?;
+        }
+        Ok(())
+    }
+    fn deserialize_entities<D: for<'de> Deserializer<'de>>(
+        &self,
+        deserializer: D,
+        entity_allocator: &mut EntityAllocator,
+        entities: &mut Vec<Entity>,
+    ) -> Result<(), <D as Deserializer>::Error> {
+        let entity_uuids = <Vec<uuid::Bytes> as Deserialize>::deserialize(deserializer)?;
+        let mut entity_map = self.entity_map.borrow_mut();
+        for id in entity_uuids {
+            let entity = entity_allocator.create_entity();
+            entity_map.insert(id, entity);
+            entities.push(entity);
+        }
+        Ok(())
     }
 }
 
@@ -142,7 +289,7 @@ fn main() {
     );
     // Unserializable components are not serialized, so only the Pos components should be serialized in this chunkset
     world.insert(
-        (Unregistered(4., 5., 6.,),),
+        (Unregistered(4., 5., 6.),),
         vec![
             (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
             (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
@@ -152,23 +299,24 @@ fn main() {
     );
     // Entities with no serializable components are not serialized, so this entire chunkset should be skipped in the output
     world.insert(
-        (Unregistered(4., 5., 6.,),),
-        vec![
-            (Unregistered(4., 5., 6.),),
-            (Unregistered(4., 5., 6.),),
-        ],
+        (Unregistered(4., 5., 6.),),
+        vec![(Unregistered(4., 5., 6.),), (Unregistered(4., 5., 6.),)],
     );
 
-    let registrations = [
-        ComponentRegistration::of::<Pos>(),
-        ComponentRegistration::of::<Vel>(),
-    ];
+    let registrations = [TypeRegistration::of::<Pos>(), TypeRegistration::of::<Vel>()];
 
     use std::iter::FromIterator;
     let ser_helper = SerializeImpl {
         types: HashMap::from_iter(registrations.iter().map(|reg| (reg.ty, reg.clone()))),
     };
+    let de_helper = DeserializeImpl {
+        types: HashMap::from_iter(registrations.iter().map(|reg| (reg.ty, reg.clone()))),
+        types_by_uuid: HashMap::from_iter(registrations.iter().map(|reg| (reg.uuid, reg.clone()))),
+        entity_map: RefCell::new(HashMap::new()),
+    };
 
     let serializable = legion::ser::serializable_world(&world, &ser_helper);
     println!("{}", serde_json::to_string(&serializable).unwrap());
+    let deserialized_world = universe.create_world();
+    legion::de::deserializable_world(&deserialized_world, &de_helper);
 }

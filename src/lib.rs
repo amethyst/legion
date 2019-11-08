@@ -241,6 +241,8 @@ pub mod system;
 pub mod world;
 #[cfg(feature = "serde-1")]
 pub mod ser;
+#[cfg(feature = "serde-1")]
+pub mod de;
 
 mod cons;
 mod tuple;
