@@ -260,13 +260,13 @@ fn mutate_add_component() {
     let mut query_without_scale = <(Read<Pos>, Read<Rot>)>::query();
     let mut query_with_scale = <(Read<Pos>, Read<Rot>, Read<Scale>)>::query();
 
-    assert_eq!(3, query_without_scale.iter(&world).count());
-    assert_eq!(0, query_with_scale.iter(&world).count());
+    assert_eq!(3, query_without_scale.iter(&mut world).count());
+    assert_eq!(0, query_with_scale.iter(&mut world).count());
 
     world.add_component(*entities.get(1).unwrap(), Scale(0.5, 0.5, 0.5));
 
-    assert_eq!(3, query_without_scale.iter(&world).count());
-    assert_eq!(1, query_with_scale.iter(&world).count());
+    assert_eq!(3, query_without_scale.iter(&mut world).count());
+    assert_eq!(1, query_with_scale.iter(&mut world).count());
 }
 
 #[test]
@@ -288,13 +288,13 @@ fn mutate_remove_component() {
     let mut query_without_rot = Read::<Pos>::query().filter(!component::<Rot>());
     let mut query_with_rot = <(Read<Pos>, Read<Rot>)>::query();
 
-    assert_eq!(0, query_without_rot.iter(&world).count());
-    assert_eq!(3, query_with_rot.iter(&world).count());
+    assert_eq!(0, query_without_rot.iter(&mut world).count());
+    assert_eq!(3, query_with_rot.iter(&mut world).count());
 
     world.remove_component::<Rot>(*entities.get(1).unwrap());
 
-    assert_eq!(1, query_without_rot.iter(&world).count());
-    assert_eq!(2, query_with_rot.iter(&world).count());
+    assert_eq!(1, query_without_rot.iter(&mut world).count());
+    assert_eq!(2, query_with_rot.iter(&mut world).count());
 }
 
 #[test]
@@ -316,13 +316,13 @@ fn mutate_add_tag() {
     let mut query_without_static = <(Read<Pos>, Read<Rot>)>::query();
     let mut query_with_static = <(Read<Pos>, Read<Rot>, Tagged<Static>)>::query();
 
-    assert_eq!(3, query_without_static.iter(&world).count());
-    assert_eq!(0, query_with_static.iter(&world).count());
+    assert_eq!(3, query_without_static.iter(&mut world).count());
+    assert_eq!(0, query_with_static.iter(&mut world).count());
 
     world.add_tag(*entities.get(1).unwrap(), Static);
 
-    assert_eq!(3, query_without_static.iter(&world).count());
-    assert_eq!(1, query_with_static.iter(&world).count());
+    assert_eq!(3, query_without_static.iter(&mut world).count());
+    assert_eq!(1, query_with_static.iter(&mut world).count());
 }
 
 #[test]
@@ -344,13 +344,13 @@ fn mutate_remove_tag() {
     let mut query_without_static = <(Read<Pos>, Read<Rot>)>::query().filter(!tag::<Static>());
     let mut query_with_static = <(Read<Pos>, Read<Rot>, Tagged<Static>)>::query();
 
-    assert_eq!(0, query_without_static.iter(&world).count());
-    assert_eq!(3, query_with_static.iter(&world).count());
+    assert_eq!(0, query_without_static.iter(&mut world).count());
+    assert_eq!(3, query_with_static.iter(&mut world).count());
 
     world.remove_tag::<Static>(*entities.get(1).unwrap());
 
-    assert_eq!(1, query_without_static.iter(&world).count());
-    assert_eq!(2, query_with_static.iter(&world).count());
+    assert_eq!(1, query_without_static.iter(&mut world).count());
+    assert_eq!(2, query_with_static.iter(&mut world).count());
 }
 
 #[test]
@@ -391,8 +391,8 @@ fn mutate_change_tag() {
     let mut query_model_3 = <(Read<Pos>, Read<Rot>)>::query().filter(tag_value(&Model(3)));
     let mut query_model_5 = <(Read<Pos>, Read<Rot>)>::query().filter(tag_value(&Model(5)));
 
-    assert_eq!(3, query_model_5.iter(&world).count());
-    assert_eq!(0, query_model_3.iter(&world).count());
+    assert_eq!(3, query_model_5.iter(&mut world).count());
+    assert_eq!(0, query_model_3.iter(&mut world).count());
 
     log::trace!("STARTING CHANGE");
     world.add_tag(*entities.get(1).unwrap(), Model(3));
@@ -401,7 +401,7 @@ fn mutate_change_tag() {
     assert_eq!(
         1,
         query_model_3
-            .iter_entities(&world)
+            .iter_entities(&mut world)
             .map(|e| {
                 log::trace!("iter: {:?}", e);
                 e
@@ -413,5 +413,5 @@ fn mutate_change_tag() {
         Model(3)
     );
 
-    assert_eq!(2, query_model_5.iter(&world).count());
+    assert_eq!(2, query_model_5.iter(&mut world).count());
 }

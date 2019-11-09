@@ -56,9 +56,7 @@ pub struct Universe {
 
 impl Universe {
     /// Creates a new `Universe`.
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Creates a new `World` within this `Unvierse`.
     ///
@@ -79,9 +77,7 @@ impl Universe {
     }
 
     #[cfg(feature = "events")]
-    pub fn channel(&mut self) -> &mut Channel<WorldCreatedEvent> {
-        &mut self.channel
-    }
+    pub fn channel(&mut self) -> &mut Channel<WorldCreatedEvent> { &mut self.channel }
 }
 
 impl Default for Universe {
@@ -129,22 +125,14 @@ impl World {
     }
 
     #[cfg(feature = "events")]
-    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> {
-        &mut self.channel
-    }
+    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> { &mut self.channel }
 
-    pub(crate) fn storage(&self) -> &Storage {
-        unsafe { &*self.storage.get() }
-    }
+    pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
 
-    pub(crate) fn storage_mut(&mut self) -> &mut Storage {
-        unsafe { &mut *self.storage.get() }
-    }
+    pub(crate) fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
 
     /// Gets the unique ID of this world.
-    pub fn id(&self) -> WorldId {
-        self.id
-    }
+    pub fn id(&self) -> WorldId { self.id }
 
     /// Inserts new entities into the world.
     ///
@@ -513,11 +501,6 @@ impl World {
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
-    ///
-    /// # Panics
-    ///
-    /// This function borrows all components of type `T` in the world. It may panic if
-    /// any other code is currently borrowing `T` mutably (such as in a query).
     pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
         if !self.is_alive(entity) {
             return None;
@@ -545,11 +528,17 @@ impl World {
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
     ///
+    /// # Safety
+    ///
+    /// Accessing a component which is already being concurrently accessed elsewhere is undefined behavior.
+    ///
     /// # Panics
     ///
-    /// This function borrows all components of type `T` in the world. It may panic if
-    /// any other code is currently borrowing `T` (such as in a query).
-    pub fn get_component_mut<T: Component>(&self, entity: Entity) -> Option<RefMut<Exclusive, T>> {
+    /// This function may panic if any other code is currently borrowing `T` (such as in a query).
+    pub unsafe fn get_component_mut_unchecked<T: Component>(
+        &self,
+        entity: Entity,
+    ) -> Option<RefMut<Exclusive, T>> {
         if !self.is_alive(entity) {
             return None;
         }
@@ -560,16 +549,31 @@ impl World {
             .chunksets()
             .get(location.set())?
             .get(location.chunk())?;
-        let (slice_borrow, slice) = unsafe {
-            chunk
-                .components(ComponentTypeId::of::<T>())?
-                .data_slice_mut::<T>()
-                .deconstruct()
-        };
+        let (slice_borrow, slice) = chunk
+            .components(ComponentTypeId::of::<T>())?
+            .data_slice_mut::<T>()
+            .deconstruct();
         let component = slice.get_mut(location.component())?;
 
         Some(RefMut::new(slice_borrow, component))
     }
+
+    /// Mutably borrows entity data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    pub fn get_component_mut<T: Component>(
+        &mut self,
+        entity: Entity,
+    ) -> Option<RefMut<Exclusive, T>> {
+        // safe because the &mut self ensures exclusivity
+        unsafe { self.get_component_mut_unchecked(entity) }
+    }
+
+    /// Mutably borrows entity data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
 
     /// Gets tag data for the given entity.
     ///
@@ -588,9 +592,7 @@ impl World {
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
-    pub fn is_alive(&self, entity: Entity) -> bool {
-        self.entity_allocator.is_alive(entity)
-    }
+    pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
     /// Iteratively defragments the world's internal memory.
     ///
@@ -1060,9 +1062,7 @@ struct DynamicComponentLayout<'a> {
 impl<'a> ComponentLayout for DynamicComponentLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter {
-        self
-    }
+    fn get_filter(&mut self) -> &mut Self::Filter { self }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy components from existing archetype into new
@@ -1120,9 +1120,7 @@ unsafe impl<'a> Sync for DynamicTagLayout<'a> {}
 impl<'a> TagLayout for DynamicTagLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter {
-        self
-    }
+    fn get_filter(&mut self) -> &mut Self::Filter { self }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy tags from existing archetype into new
@@ -1146,9 +1144,7 @@ impl<'a> TagLayout for DynamicTagLayout<'a> {
 impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
     type Iter = SliceVecIter<'b, TagTypeId>;
 
-    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter {
-        source.tag_types.iter()
-    }
+    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter { source.tag_types.iter() }
 
     fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(

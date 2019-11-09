@@ -45,7 +45,7 @@
 //! let mut query = <(Write<Position>, Read<Velocity>)>::query();
 //!
 //! // Iterate through all entities that match the query in the world
-//! for (mut pos, vel) in query.iter(&world) {
+//! for (mut pos, vel) in query.iter(&mut world) {
 //!     pos.x += vel.dx;
 //!     pos.y += vel.dy;
 //! }
@@ -82,7 +82,7 @@
 //! // It is possible to specify that entities must contain data beyond that being fetched
 //! let mut query = Read::<Position>::query()
 //!     .filter(component::<Velocity>());
-//! for position in query.iter(&world) {
+//! for position in query.iter(&mut world) {
 //!     // these entities also have `Velocity`
 //! }
 //! ```
@@ -110,7 +110,7 @@
 //! // Filters can be combined with boolean operators
 //! let mut query = Read::<Position>::query()
 //!     .filter(tag::<Static>() | !component::<Velocity>());
-//! for position in query.iter(&world) {
+//! for position in query.iter(&mut world) {
 //!     // these entities are also either marked as `Static`, or do *not* have a `Velocity`
 //! }
 //! ```
@@ -138,7 +138,7 @@
 //! // Filters can filter by specific tag values
 //! let mut query = Read::<Position>::query()
 //!     .filter(tag_value(&Model(3)));
-//! for position in query.iter(&world) {
+//! for position in query.iter(&mut world) {
 //!     // these entities all have tag value `Model(3)`
 //! }
 //! ```
@@ -167,7 +167,7 @@
 //! // has not changed since the last time the query was iterated.
 //! let mut query = <(Read<Position>, Tagged<Model>)>::query()
 //!     .filter(changed::<Position>());
-//! for (pos, model) in query.iter(&world) {
+//! for (pos, model) in query.iter(&mut world) {
 //!     // entities who have changed position
 //! }
 //! ```
@@ -209,7 +209,7 @@
 //! let mut query = Read::<Transform>::query()
 //!     .filter(tag::<Model>());
 //!
-//! for chunk in query.iter_chunks(&world) {
+//! for chunk in query.iter_chunks(&mut world) {
 //!     // get the chunk's model
 //!     let model: &Model = chunk.tag().unwrap();
 //!
