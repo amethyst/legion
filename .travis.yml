@@ -8,3 +8,6 @@ matrix:
     - rust: nightly
   fast_finish: true
 cache: cargo
+script:
+  - cargo test --all-features
+  - cargo test --no-default-features
