@@ -6,6 +6,7 @@ use crate::filter::{
     ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, EntityFilter, Filter,
 };
 use crate::iterator::FissileIterator;
+use crate::query::ReadOnly;
 use crate::query::{
     Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write,
 };
@@ -99,6 +100,18 @@ where
     }
 
     /// Gets an iterator which iterates through all chunks that match the query.
+    pub fn iter_chunks_immutable<'a, 'b>(
+        &'b mut self,
+        world: &PreparedWorld,
+    ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
+    where
+        V: ReadOnly,
+    {
+        // safe because the view can only read data immutably
+        unsafe { self.iter_chunks_unchecked(world) }
+    }
+
+    /// Gets an iterator which iterates through all chunks that match the query.
     pub fn iter_chunks<'a, 'b>(
         &'b mut self,
         world: &mut PreparedWorld,
@@ -127,6 +140,23 @@ where
         ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
     > {
         (&mut *self.query).iter_entities_unchecked(&*world.world)
+    }
+
+    /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
+    #[inline]
+    pub fn iter_entities_immutable<'a, 'b>(
+        &'b mut self,
+        world: &PreparedWorld,
+    ) -> ChunkEntityIter<
+        'a,
+        V,
+        ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+    >
+    where
+        V: ReadOnly,
+    {
+        // safe because the view can only read data immutably
+        unsafe { self.iter_entities_unchecked(world) }
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
@@ -167,6 +197,23 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query.
     #[inline]
+    pub fn iter_immutable<'a, 'data>(
+        &'a mut self,
+        world: &PreparedWorld,
+    ) -> ChunkDataIter<
+        'data,
+        V,
+        ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+    >
+    where
+        V: ReadOnly,
+    {
+        // safe because the view can only read data immutably
+        unsafe { self.iter_unchecked(world) }
+    }
+
+    /// Gets an iterator which iterates through all entity data that matches the query.
+    #[inline]
     pub fn iter<'a, 'data>(
         &'a mut self,
         world: &mut PreparedWorld,
@@ -195,6 +242,17 @@ where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
         (&mut *self.query).for_each_unchecked(&*world.world, f)
+    }
+
+    /// Iterates through all entity data that matches the query.
+    #[inline]
+    pub fn for_each_immutable<'a, 'data, T>(&'a mut self, world: &PreparedWorld, f: T)
+    where
+        T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
+        V: ReadOnly,
+    {
+        // safe because the view can only read data immutably
+        unsafe { self.for_each_unchecked(world, f) }
     }
 
     /// Iterates through all entity data that matches the query.
@@ -232,6 +290,18 @@ where
     /// Iterates through all entity data that matches the query.
     #[cfg(feature = "par-iter")]
     #[inline]
+    pub fn for_each_entities_immutable<'a, 'data, T>(&'a mut self, world: &PreparedWorld, f: T)
+    where
+        T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
+        V: ReadOnly,
+    {
+        // safe because the view can only read data immutably
+        unsafe { self.for_each_entities_unchecked(world, f) }
+    }
+
+    /// Iterates through all entity data that matches the query.
+    #[cfg(feature = "par-iter")]
+    #[inline]
     pub fn for_each_entities<'a, 'data, T>(&'a mut self, world: &mut PreparedWorld, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
@@ -260,6 +330,21 @@ where
         <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
     {
         (&mut *self.query).par_entities_for_each_unchecked(&*world.world, f)
+    }
+
+    /// Iterates through all entities that matches the query in parallel by chunk.
+    #[cfg(feature = "par-iter")]
+    #[inline]
+    pub fn par_entities_for_each_immutable<'a, T>(&'a mut self, world: &PreparedWorld, f: T)
+    where
+        T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
+        V: ReadOnly,
+    {
+        // safe because the view can only read data immutably
+        unsafe { self.par_entities_for_each_unchecked(world, f) }
     }
 
     /// Iterates through all entities that matches the query in parallel by chunk.
@@ -301,6 +386,21 @@ where
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
     #[inline]
+    pub fn par_for_each_immutable<'a, T>(&'a mut self, world: &PreparedWorld, f: T)
+    where
+        T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
+        V: ReadOnly,
+    {
+        // safe because the view can only read data immutably
+        unsafe { self.par_for_each_unchecked(world, f) }
+    }
+
+    /// Iterates through all entity data that matches the query in parallel.
+    #[cfg(feature = "par-iter")]
+    #[inline]
     pub fn par_for_each<'a, T>(&'a mut self, world: &mut PreparedWorld, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
@@ -332,6 +432,21 @@ where
         <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
     {
         (&mut *self.query).par_for_each_chunk_unchecked(&*world.world, f)
+    }
+
+    /// Gets a parallel iterator of chunks that match the query.
+    #[cfg(feature = "par-iter")]
+    #[inline]
+    pub fn par_for_each_chunk_immutable<'a, T>(&'a mut self, world: &PreparedWorld, f: T)
+    where
+        T: Fn(Chunk<'a, V>) + Send + Sync,
+        <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunksetFilter as Filter<ChunksetFilterData<'a>>>::Iter: FissileIterator,
+        <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
+        V: ReadOnly,
+    {
+        // safe because the view can only read data immutably
+        unsafe { self.par_for_each_chunk_unchecked(world, f) }
     }
 
     /// Gets a parallel iterator of chunks that match the query.
@@ -1290,7 +1405,7 @@ mod tests {
                 assert_eq!(resource.0, 123);
                 let mut count = 0;
                 {
-                    for (entity, pos) in queries.0.iter_entities(world) {
+                    for (entity, pos) in queries.0.iter_entities_immutable(world) {
                         assert_eq!(expected.get(&entity).unwrap().0, *pos);
                         count += 1;
                     }
