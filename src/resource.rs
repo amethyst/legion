@@ -138,6 +138,12 @@ impl<'a, T: Resource> Deref for Fetch<'a, T> {
     fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
+impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for Fetch<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.deref())
+    }
+}
+
 /// Ergonomic wrapper type which contains a `RefMut` type.
 pub struct FetchMut<'a, T: Resource> {
     inner: RefMut<'a, Exclusive<'a>, Box<dyn Resource>>,
@@ -177,6 +183,12 @@ impl<'a, T: 'a + Resource> DerefMut for FetchMut<'a, T> {
     #[cfg(not(debug_assertions))]
     #[inline]
     fn deref_mut(&mut self) -> &mut T { unsafe { self.inner.downcast_mut_unchecked::<T>() } }
+}
+
+impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for FetchMut<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.deref())
+    }
 }
 
 /// Resources container. This container stores its underlying resources in a `HashMap` keyed on
