@@ -56,9 +56,7 @@ pub struct Universe {
 
 impl Universe {
     /// Creates a new `Universe`.
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Creates a new `World` within this `Unvierse`.
     ///
@@ -79,9 +77,7 @@ impl Universe {
     }
 
     #[cfg(feature = "events")]
-    pub fn channel(&mut self) -> &mut Channel<WorldCreatedEvent> {
-        &mut self.channel
-    }
+    pub fn channel(&mut self) -> &mut Channel<WorldCreatedEvent> { &mut self.channel }
 }
 
 impl Default for Universe {
@@ -129,22 +125,14 @@ impl World {
     }
 
     #[cfg(feature = "events")]
-    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> {
-        &mut self.channel
-    }
+    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> { &mut self.channel }
 
-    pub(crate) fn storage(&self) -> &Storage {
-        unsafe { &*self.storage.get() }
-    }
+    pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
 
-    pub(crate) fn storage_mut(&mut self) -> &mut Storage {
-        unsafe { &mut *self.storage.get() }
-    }
+    pub(crate) fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
 
     /// Gets the unique ID of this world.
-    pub fn id(&self) -> WorldId {
-        self.id
-    }
+    pub fn id(&self) -> WorldId { self.id }
 
     /// Inserts new entities into the world.
     ///
@@ -215,7 +203,7 @@ impl World {
 
         let entities = self.entity_allocator.allocation_buffer();
 
-        #[cfg(feature = "events")]
+        #[cfg(all(feature = "events", feature = "par-iter"))]
         {
             entities.par_iter().for_each(|e| {
                 self.channel
@@ -588,9 +576,7 @@ impl World {
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
-    pub fn is_alive(&self, entity: Entity) -> bool {
-        self.entity_allocator.is_alive(entity)
-    }
+    pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
     /// Iteratively defragments the world's internal memory.
     ///
@@ -1060,9 +1046,7 @@ struct DynamicComponentLayout<'a> {
 impl<'a> ComponentLayout for DynamicComponentLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter {
-        self
-    }
+    fn get_filter(&mut self) -> &mut Self::Filter { self }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy components from existing archetype into new
@@ -1120,9 +1104,7 @@ unsafe impl<'a> Sync for DynamicTagLayout<'a> {}
 impl<'a> TagLayout for DynamicTagLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter {
-        self
-    }
+    fn get_filter(&mut self) -> &mut Self::Filter { self }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy tags from existing archetype into new
@@ -1146,9 +1128,7 @@ impl<'a> TagLayout for DynamicTagLayout<'a> {
 impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
     type Iter = SliceVecIter<'b, TagTypeId>;
 
-    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter {
-        source.tag_types.iter()
-    }
+    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter { source.tag_types.iter() }
 
     fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
