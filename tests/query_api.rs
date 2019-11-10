@@ -141,6 +141,22 @@ fn query_try_read_entity_data() {
 }
 
 #[test]
+fn query_try_write_entity_data() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+    world.insert((), Some((Pos(1., 2., 3.),)));
+    let entity = world.insert((), Some((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))))[0];
+
+    let mut query = TryWrite::<Rot>::query();
+    for mut x in query.iter(&world).filter_map(|x| x) {
+        *x = Rot(9.0, 9.0, 9.0);
+    }
+    assert_eq!(world.get_component::<Rot>(entity).map(|x| *x), Some(Rot(9.0, 9.0, 9.0)));
+}
+
+#[test]
 fn query_cached_read_entity_data() {
     let _ = env_logger::builder().is_test(true).try_init();
 

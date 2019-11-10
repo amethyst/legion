@@ -2,6 +2,7 @@ use crate::borrow::Exclusive;
 use crate::borrow::RefIter;
 use crate::borrow::TryRefIter;
 use crate::borrow::RefIterMut;
+use crate::borrow::TryRefIterMut;
 use crate::borrow::RefMap;
 use crate::borrow::RefMapMut;
 use crate::borrow::Shared;
@@ -238,6 +239,51 @@ impl<'a, T: Component> View<'a> for Write<T> {
 }
 
 impl<T: Component> ViewElement for Write<T> {
+    type Component = T;
+}
+
+/// Writes a single entity data component type from a chunk, if it's present.
+#[derive(Derivative, Debug)]
+#[derivative(Default(bound = ""))]
+pub struct TryWrite<T: Component>(PhantomData<T>);
+
+impl<'a, T: Component> DefaultFilter for TryWrite<T> {
+    type Filter = EntityFilterTuple<Passthrough, Passthrough, Passthrough>;
+
+    fn filter() -> Self::Filter { super::filter::filter_fns::passthrough() }
+}
+
+impl<'a, T: Component> View<'a> for TryWrite<T> {
+    type Iter = TryRefIterMut<'a, Exclusive<'a>, T, IterMut<'a, T>>;
+
+    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
+        unsafe {
+            chunk
+                .components(ComponentTypeId::of::<T>())
+                .map(|x| {
+                    let (borrow, slice) = x.data_slice_mut::<T>().deconstruct();
+                    TryRefIterMut::found(borrow, slice.iter_mut())
+                })
+                .unwrap_or_else(|| TryRefIterMut::missing(chunk.len()))
+        }
+    }
+
+    fn validate() -> bool { true }
+
+    #[inline]
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
+
+    #[inline]
+    fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
+
+    #[inline]
+    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+
+    #[inline]
+    fn write_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+}
+
+impl<T: Component> ViewElement for TryWrite<T> {
     type Component = T;
 }
 
