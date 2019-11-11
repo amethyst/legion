@@ -222,6 +222,7 @@
 //! ```
 #![allow(dead_code)]
 
+pub mod accessor;
 pub mod borrow;
 pub mod command;
 pub mod entity;

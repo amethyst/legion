@@ -41,6 +41,7 @@ use rayon::prelude::*;
 
 #[cfg(feature = "events")]
 use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
+use crate::accessor::{EntityAccessor, EntityAccessorMut};
 
 /// The `Universe` is a factory for creating `World`s.
 ///
@@ -495,6 +496,31 @@ impl World {
             // move the entity into a suitable chunk
             self.move_entity(entity, &[], &[], &[], &[TagTypeId::of::<T>()]);
         }
+    }
+
+    /// Returns an immutable accessor to components for `entity`.
+    ///
+    /// If the entity is dead, returns `None`.
+    pub fn get_accessor(&self, entity: Entity) -> Option<EntityAccessor> {
+        EntityAccessor::new(self, entity)
+    }
+
+    /// Returns a mutable accessor to components for `entity`.
+    ///
+    /// If the entity is dead, returns `None`.
+    pub fn get_accessor_mut(&mut self, entity: Entity) -> Option<EntityAccessorMut> {
+        // safe because the &mut self ensures exclusivity
+        unsafe { EntityAccessorMut::new(self, entity) }
+    }
+
+    /// Returns a mutable accessor to components for `entity`.
+    ///
+    /// If the entity is dead, returns `None`.
+    ///
+    /// # Safety
+    /// Accessing a component which is already being concurrently accessed elsewhere is undefined behavior.
+    pub unsafe fn get_accessor_mut_unchecked(&self, entity: Entity) -> Option<EntityAccessorMut> {
+        EntityAccessorMut::new(self, entity)
     }
 
     /// Borrows component data for the given entity.
