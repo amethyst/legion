@@ -7,7 +7,7 @@ use legion::{
     },
 };
 use serde::{
-    de::IgnoredAny, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer,
+    de::{IgnoredAny, DeserializeSeed}, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::{any::TypeId, cell::RefCell, collections::HashMap};
 use type_uuid::TypeUuid;
@@ -203,10 +203,10 @@ struct DeserializeImpl {
     entity_map: RefCell<HashMap<uuid::Bytes, Entity>>,
 }
 impl legion::de::WorldDeserializer for DeserializeImpl {
-    fn deserialize_archetype_description<D: for<'de> Deserializer<'de>>(
+    fn deserialize_archetype_description<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
-    ) -> Result<ArchetypeDescription, <D as Deserializer>::Error> {
+    ) -> Result<ArchetypeDescription, <D as Deserializer<'de>>::Error> {
         let serialized_desc =
             <SerializedArchetypeDescription as Deserialize>::deserialize(deserializer)?;
         let mut desc = ArchetypeDescription::default();
@@ -316,7 +316,9 @@ fn main() {
     };
 
     let serializable = legion::ser::serializable_world(&world, &ser_helper);
-    println!("{}", serde_json::to_string(&serializable).unwrap());
-    let deserialized_world = universe.create_world();
-    legion::de::deserializable_world(&deserialized_world, &de_helper);
+    let json_data = serde_json::to_string(&serializable).unwrap();
+    println!("{}", json_data);
+    let mut deserialized_world = universe.create_world();
+     let mut deserializer = serde_json::Deserializer::from_str(&json_data);
+    let deserialize = legion::de::deserialize(&mut deserialized_world, &de_helper, &mut deserializer);
 }

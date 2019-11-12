@@ -233,7 +233,7 @@ impl Storage {
 }
 
 /// Stores metadata decribing the type of a tag.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct TagMeta {
     size: usize,
     align: usize,
@@ -269,7 +269,7 @@ impl TagMeta {
 }
 
 /// Stores metadata describing the type of a component.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct ComponentMeta {
     size: usize,
     align: usize,
@@ -289,7 +289,7 @@ impl ComponentMeta {
 
 /// Describes the layout of an archetype, including what components
 /// and tags shall be attached to entities stored within an archetype.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub struct ArchetypeDescription {
     tags: Vec<(TagTypeId, TagMeta)>,
     components: Vec<(ComponentTypeId, ComponentMeta)>,
