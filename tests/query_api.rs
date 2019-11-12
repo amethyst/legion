@@ -135,9 +135,15 @@ fn query_try_read_entity_data() {
     world.insert((), Some((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))));
 
     let mut query = TryRead::<Rot>::query();
-    let rots = query.iter(&world).map(|x| x.map(|x| *x)).collect::<Vec<_>>();
+    let rots = query
+        .iter(&mut world)
+        .map(|x| x.map(|x| *x))
+        .collect::<Vec<_>>();
     assert_eq!(rots.iter().filter(|x| x.is_none()).count(), 1);
-    assert_eq!(rots.iter().cloned().filter_map(|x| x).collect::<Vec<_>>(), &[Rot(0.4, 0.5, 0.6)]);
+    assert_eq!(
+        rots.iter().cloned().filter_map(|x| x).collect::<Vec<_>>(),
+        &[Rot(0.4, 0.5, 0.6)]
+    );
 }
 
 #[test]
@@ -150,10 +156,13 @@ fn query_try_write_entity_data() {
     let entity = world.insert((), Some((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))))[0];
 
     let mut query = TryWrite::<Rot>::query();
-    for mut x in query.iter(&world).filter_map(|x| x) {
+    for mut x in query.iter(&mut world).filter_map(|x| x) {
         *x = Rot(9.0, 9.0, 9.0);
     }
-    assert_eq!(world.get_component::<Rot>(entity).map(|x| *x), Some(Rot(9.0, 9.0, 9.0)));
+    assert_eq!(
+        world.get_component::<Rot>(entity).map(|x| *x),
+        Some(Rot(9.0, 9.0, 9.0))
+    );
 }
 
 #[test]
