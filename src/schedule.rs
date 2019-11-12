@@ -16,6 +16,7 @@ use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
 };
+use tracing::{span, trace, Level};
 
 #[cfg(feature = "par-iter")]
 use rayon::prelude::*;
@@ -104,7 +105,12 @@ impl StageExecutor {
             let mut component_mutated = HashMap::<ComponentTypeId, Vec<usize>>::with_capacity(64);
 
             for (i, system) in systems.iter().enumerate() {
-                log::debug!("Building dependency: {}", system.name());
+                let span = span!(
+                    Level::TRACE,
+                    "Building system dependencies",
+                    system = %system.name()
+                );
+                let _guard = span.enter();
 
                 let (read_res, read_comp) = system.reads();
                 let (write_res, write_comp) = system.writes();
@@ -112,22 +118,23 @@ impl StageExecutor {
                 // find resource access dependencies
                 let mut dependencies = HashSet::with_capacity(64);
                 for res in read_res {
-                    log::trace!("Read resource: {:?}", res);
+                    trace!(resource = ?res, "Read resource");
                     if let Some(n) = resource_last_mutated.get(res) {
+                        trace!(system_index = n, "Added write dependency");
                         dependencies.insert(*n);
                     }
                     resource_last_read.insert(*res, i);
                 }
                 for res in write_res {
-                    log::trace!("Write resource: {:?}", res);
+                    trace!(resource = ?res, "Write resource");
                     // Writes have to be exclusive, so we are dependent on reads too
                     if let Some(n) = resource_last_read.get(res) {
-                        log::trace!("Added dep: {:?}", n);
+                        trace!(system_index = n, "Added read dependency");
                         dependencies.insert(*n);
                     }
 
                     if let Some(n) = resource_last_mutated.get(res) {
-                        log::trace!("Added dep: {:?}", n);
+                        trace!(system_index = n, "Added write dependency");
                         dependencies.insert(*n);
                     }
 
@@ -135,9 +142,8 @@ impl StageExecutor {
                 }
 
                 static_dependency_counts.push(AtomicUsize::from(dependencies.len()));
-                log::debug!("dependencies: {:?}", dependencies);
+                trace!(dependants = ?dependencies, "Computed static dependants");
                 for dep in dependencies {
-                    log::debug!("static_dependants.push: {:?}", dep);
                     static_dependants[dep].push(i);
                 }
 
@@ -161,16 +167,18 @@ impl StageExecutor {
                         .or_insert_with(Vec::new)
                         .push(i);
                 }
-                log::debug!("comp_dependencies: {:?}", &comp_dependencies);
+
+                trace!(depentants = ?comp_dependencies, "Computed dynamic dependants");
                 for dep in comp_dependencies {
                     dynamic_dependants[dep].push(i);
                 }
             }
 
-            if log::log_enabled!(log::Level::Debug) {
-                log::debug!("static_dependants: {:?}", static_dependants);
-                log::debug!("dynamic_dependants: {:?}", dynamic_dependants);
-            }
+            trace!(
+                ?static_dependants,
+                ?dynamic_dependants,
+                "Computed system dependencies"
+            );
 
             let mut awaiting = Vec::with_capacity(systems.len());
             systems
@@ -221,18 +229,14 @@ impl StageExecutor {
     /// Call from within `rayon::ThreadPool::install()` to execute within a specific thread pool.
     #[cfg(feature = "par-iter")]
     pub fn execute(&mut self, world: &mut World) {
-        log::trace!("execute");
-
         rayon::join(
             || {},
             || {
                 match self.systems.len() {
                     1 => {
-                        log::trace!("Single system, just run it");
                         self.systems[0].run(world);
                     }
                     _ => {
-                        log::trace!("Begin pool execution");
                         let systems = &mut self.systems;
                         let static_dependency_counts = &self.static_dependency_counts;
                         let awaiting = &mut self.awaiting;
@@ -268,8 +272,6 @@ impl StageExecutor {
                             awaiting[i].store(count.load(Ordering::Relaxed), Ordering::Relaxed);
                         }
 
-                        log::trace!("Initialized awaiting: {:?}", awaiting);
-
                         let awaiting = &self.awaiting;
 
                         // execute all systems with no outstanding dependencies
@@ -293,7 +295,6 @@ impl StageExecutor {
     /// Recursively execute through the generated depedency cascade and exhaust it.
     #[cfg(feature = "par-iter")]
     fn run_recursive(&self, i: usize, world: &World) {
-        log::trace!("run_recursive: {}", i);
         self.systems[i].run(world);
 
         self.static_dependants[i].par_iter().for_each(|dep| {
@@ -496,7 +497,9 @@ impl<S: Stage> SystemScheduler<S> {
     /// Panics if scheduled systems have impossible schedule constraints.
     pub fn execute(&mut self, world: &mut World) {
         self.construct_stages();
-        for (_, executor) in &mut self.scheduled {
+        for (stage, executor) in &mut self.scheduled {
+            let span = span!(Level::INFO, "Running stage", %stage);
+            let _guard = span.enter();
             executor.execute(world);
         }
     }

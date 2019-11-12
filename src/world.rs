@@ -35,6 +35,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use tracing::{info, span, trace, Level};
 
 #[cfg(feature = "par-iter")]
 use rayon::prelude::*;
@@ -64,7 +65,10 @@ impl Universe {
     /// unique `Entity` IDs, even across worlds. See also `World::new`.
     pub fn create_world(&self) -> World {
         let id = self.world_count.fetch_add(1, Ordering::SeqCst);
-        let world = World::new_in_universe(WorldId(id), EntityAllocator::new(self.allocator.clone()));
+        let world =
+            World::new_in_universe(WorldId(id), EntityAllocator::new(self.allocator.clone()));
+
+        info!(world = world.id().0, "Created world");
 
         #[cfg(feature = "events")]
         {
@@ -94,6 +98,10 @@ impl Default for Universe {
 #[derive(Default, Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct WorldId(usize);
 
+impl WorldId {
+    pub fn index(self) -> usize { self.0 }
+}
+
 /// Contains queryable collections of data associated with `Entity`s.
 pub struct World {
     id: WorldId,
@@ -117,7 +125,10 @@ impl World {
     /// `Entity` IDs in such a world will only be unique within that world. See also
     /// `Universe::create_world`.
     pub fn new() -> Self {
-        Self::new_in_universe(WorldId(0), EntityAllocator::new(Arc::new(Mutex::new(BlockAllocator::new()))))
+        Self::new_in_universe(
+            WorldId(0),
+            EntityAllocator::new(Arc::new(Mutex::new(BlockAllocator::new()))),
+        )
     }
 
     fn new_in_universe(id: WorldId, allocator: EntityAllocator) -> Self {
@@ -171,6 +182,9 @@ impl World {
         T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         C: IntoComponentSource,
     {
+        let span = span!(Level::TRACE, "Inserting entities", world = self.id().0);
+        let _guard = span.enter();
+
         // find or create archetype
         let mut components = components.into();
         let archetype_index = self.find_or_create_archetype(&mut tags, &mut components);
@@ -210,6 +224,8 @@ impl World {
         }
 
         let entities = self.entity_allocator.allocation_buffer();
+
+        trace!(count = entities.len(), "Inserted entities");
 
         #[cfg(all(feature = "events", feature = "par-iter"))]
         {
@@ -262,6 +278,8 @@ impl World {
                 self.entity_allocator
                     .set_location(swapped.index(), location);
             }
+
+            trace!(world = self.id().0, ?entity, "Deleted entity");
 
             true
         } else {
@@ -367,12 +385,6 @@ impl World {
             add_tags,
             remove_tags,
         );
-        log::trace!("src  = {:?}", location);
-        log::trace!(
-            "target_arch_index={}, target_chunkset_index={}",
-            target_arch_index,
-            target_chunkset_index
-        );
 
         // Safety Note:
         // It is only safe for us to have 2 &mut references to storage here because
@@ -406,22 +418,9 @@ impl World {
         // move existing data over into new chunk
         if let Some(swapped) = current_chunk.move_entity(target_chunk, location.component()) {
             // update location of any entity that was moved into the previous location
-            log::trace!("SWAP location! {:?}, {:?}", swapped, location);
-
             self.entity_allocator
                 .set_location(swapped.index(), location);
         }
-
-        log::trace!(
-            "Set location! {:?}, {:?}",
-            entity,
-            EntityLocation::new(
-                target_arch_index,
-                target_chunkset_index,
-                target_chunk_index,
-                target_chunk.len() - 1,
-            )
-        );
 
         // record the entity's new location
         self.entity_allocator.set_location(
@@ -445,6 +444,13 @@ impl World {
             return;
         }
 
+        trace!(
+            world = self.id().0,
+            ?entity,
+            component = std::any::type_name::<T>(),
+            "Adding component to entity"
+        );
+
         // move the entity into a suitable chunk
         let target_chunk = self.move_entity(
             entity,
@@ -455,7 +461,8 @@ impl World {
         );
 
         // push new component into chunk
-        let (_, components) = target_chunk.write();
+        let mut writer = target_chunk.writer();
+        let (_, components) = writer.get();
         let slice = [component];
         unsafe {
             let components = &mut *components.get();
@@ -471,6 +478,13 @@ impl World {
     /// Removes a component from an entity.
     pub fn remove_component<T: Component>(&mut self, entity: Entity) {
         if self.get_component::<T>(entity).is_some() {
+            trace!(
+                world = self.id().0,
+                ?entity,
+                component = std::any::type_name::<T>(),
+                "Removing component from entity"
+            );
+
             // move the entity into a suitable chunk
             self.move_entity(entity, &[], &[ComponentTypeId::of::<T>()], &[], &[]);
         }
@@ -482,6 +496,13 @@ impl World {
         if self.get_tag::<T>(entity).is_some() {
             self.remove_tag::<T>(entity);
         }
+
+        trace!(
+            world = self.id().0,
+            ?entity,
+            tag = std::any::type_name::<T>(),
+            "Adding tag to entity"
+        );
 
         // move the entity into a suitable chunk
         self.move_entity(
@@ -500,6 +521,13 @@ impl World {
     /// Removes a tag from an entity.
     pub fn remove_tag<T: Tag>(&mut self, entity: Entity) {
         if self.get_tag::<T>(entity).is_some() {
+            trace!(
+                world = self.id().0,
+                ?entity,
+                tag = std::any::type_name::<T>(),
+                "Removing tag from entity"
+            );
+
             // move the entity into a suitable chunk
             self.move_entity(entity, &[], &[], &[], &[TagTypeId::of::<T>()]);
         }
@@ -610,6 +638,14 @@ impl World {
     /// in one call. Subsequent calls to `defrag` will resume progress from the
     /// previous call.
     pub fn defrag(&mut self, budget: Option<usize>) {
+        let span = span!(
+            Level::INFO,
+            "Defragmenting",
+            world = self.id().0,
+            start_archetype = self.defrag_progress
+        );
+        let _guard = span.enter();
+
         let archetypes = unsafe { &mut *self.storage.get() }.archetypes_mut();
         let mut budget = budget.unwrap_or(std::usize::MAX);
         let start = self.defrag_progress;
@@ -632,6 +668,10 @@ impl World {
     }
 
     pub fn merge(&mut self, world: World) {
+        let span =
+            span!(Level::INFO, "Merging worlds", source = world.id().0, destination = ?self.id());
+        let _guard = span.enter();
+
         self.entity_allocator.merge(world.entity_allocator);
 
         for archetype in unsafe { &mut *world.storage.get() }.drain(..) {
@@ -746,9 +786,7 @@ impl World {
 }
 
 impl Default for World {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 /// Describes the types of a set of components attached to an entity.
@@ -894,7 +932,8 @@ mod tuple_impls {
                     #![allow(unused_unsafe)]
                     #![allow(non_snake_case)]
                     let space = chunk.capacity() - chunk.len();
-                    let (entities, components) = chunk.write();
+                    let mut writer = chunk.writer();
+                    let (entities, components) = writer.get();
                     let mut count = 0;
 
                     unsafe {
@@ -1253,14 +1292,14 @@ mod tests {
 
     #[test]
     fn create_universe() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         Universe::default();
     }
 
     #[test]
     fn create_world() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
         universe.create_world();
@@ -1268,7 +1307,7 @@ mod tests {
 
     #[test]
     fn insert_many() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1295,7 +1334,7 @@ mod tests {
 
     #[test]
     fn insert() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1308,7 +1347,7 @@ mod tests {
 
     #[test]
     fn get_component() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1340,7 +1379,7 @@ mod tests {
 
     #[test]
     fn get_component_wrong_type() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1353,7 +1392,7 @@ mod tests {
 
     #[test]
     fn get_tag() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1373,7 +1412,7 @@ mod tests {
 
     #[test]
     fn get_tag_wrong_type() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1386,7 +1425,7 @@ mod tests {
 
     #[test]
     fn delete() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1410,7 +1449,7 @@ mod tests {
 
     #[test]
     fn delete_last() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1439,7 +1478,7 @@ mod tests {
 
     #[test]
     fn delete_first() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1468,7 +1507,7 @@ mod tests {
 
     #[test]
     fn add_component() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1495,7 +1534,7 @@ mod tests {
 
     #[test]
     fn remove_component() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1518,7 +1557,7 @@ mod tests {
 
     #[test]
     fn add_tag() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1546,7 +1585,7 @@ mod tests {
 
     #[test]
     fn remove_tag() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
 
@@ -1573,7 +1612,7 @@ mod tests {
 
     #[test]
     fn add_component2() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
         struct Transform {
             translation: Vec<f32>,
         }

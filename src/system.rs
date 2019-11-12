@@ -22,6 +22,7 @@ use shrinkwraprs::Shrinkwrap;
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::marker::PhantomData;
+use tracing::{debug, info, span, Level};
 
 /// Structure used by `SystemAccess` for describing access to the provided `T`
 #[derive(Derivative, Debug, Clone)]
@@ -790,6 +791,10 @@ where
     }
 
     fn run(&self, world: &World) {
+        let span = span!(Level::INFO, "System", system = %self.name);
+        let _guard = span.enter();
+
+        debug!("Initializing");
         let mut resources = R::fetch(&world.resources);
         let mut queries = self.queries.get_mut();
         let mut prepared_queries = unsafe { queries.prepare() };
@@ -800,6 +805,7 @@ where
         // This should usually just pull a free block, or allocate a new one...
         // TODO: The BlockAllocator should *ensure* keeping at least 1 free block so this prevents an allocation
 
+        info!("Running");
         use std::ops::DerefMut;
         let mut borrow = self.run_fn.get_mut();
         SystemDisposable::run(
@@ -949,7 +955,6 @@ where
 ///            .with_query(<(Read<Position>, Tagged<Model>)>::query()
 ///                         .filter(!tag::<Static>() | changed::<Position>()))
 ///            .build(move |commands, world, resource, queries| {
-///                log::trace!("Hello world");
 ///               let mut count = 0;
 ///                {
 ///                    for (entity, pos) in queries.iter_entities(&mut *world) {
@@ -1307,7 +1312,7 @@ mod tests {
 
     #[test]
     fn builder_schedule_execute() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
         let mut world = universe.create_world();
@@ -1343,7 +1348,7 @@ mod tests {
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
             .build(move |_commands, _world, _resource, _queries| {
-                log::trace!("system_one");
+                tracing::trace!("system_one");
                 system_one_runs
                     .lock()
                     .unwrap()
@@ -1355,7 +1360,7 @@ mod tests {
             .write_resource::<TestResourceTwo>()
             .with_query(Read::<Vel>::query())
             .build(move |_commands, _world, _resource, _queries| {
-                log::trace!("system_two");
+                tracing::trace!("system_two");
                 system_two_runs
                     .lock()
                     .unwrap()
@@ -1367,7 +1372,7 @@ mod tests {
             .read_resource::<TestResourceTwo>()
             .with_query(Read::<Vel>::query())
             .build(move |_commands, _world, _resource, _queries| {
-                log::trace!("system_three");
+                tracing::trace!("system_three");
                 system_three_runs
                     .lock()
                     .unwrap()
@@ -1378,7 +1383,7 @@ mod tests {
             .write_resource::<TestResourceTwo>()
             .with_query(Read::<Vel>::query())
             .build(move |_commands, _world, _resource, _queries| {
-                log::trace!("system_four");
+                tracing::trace!("system_four");
                 system_four_runs
                     .lock()
                     .unwrap()
@@ -1406,7 +1411,7 @@ mod tests {
         }
         #[cfg(not(feature = "par-iter"))]
         {
-            let mut executor = StageExecutor::new(&mut systems);
+            let mut executor = StageExecutor::new(systems);
             executor.execute(&mut world);
         }
 
@@ -1415,7 +1420,7 @@ mod tests {
 
     #[test]
     fn builder_create_and_execute() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
         let mut world = universe.create_world();
@@ -1456,7 +1461,7 @@ mod tests {
 
     #[test]
     fn fnmut_stateful_system_test() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
         let mut world = universe.create_world();
@@ -1492,7 +1497,7 @@ mod tests {
     #[cfg(feature = "par-iter")]
     fn par_res_write() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         #[derive(Default)]
         struct AtomicRes(AtomicRefCell<AtomicUsize>);
@@ -1530,10 +1535,10 @@ mod tests {
             .build()
             .unwrap();
 
-        println!(
-            "System access: reads[{:?}], writes[{:?}]",
-            system1.reads(),
-            system1.writes()
+        tracing::debug!(
+            reads = ?system1.reads(),
+            writes = ?system1.writes(),
+            "System access"
         );
 
         let systems = vec![system1, system2, system3];
@@ -1560,7 +1565,7 @@ mod tests {
     #[cfg(feature = "par-iter")]
     fn par_res_readwrite() {
         use std::sync::atomic::{AtomicUsize, Ordering};
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         #[derive(Default)]
         struct AtomicRes(AtomicRefCell<AtomicUsize>);
@@ -1598,10 +1603,10 @@ mod tests {
             .build()
             .unwrap();
 
-        println!(
-            "System access: reads[{:?}], writes[{:?}]",
-            system1.reads(),
-            system1.writes()
+        tracing::debug!(
+            reads = ?system1.reads(),
+            writes = ?system1.writes(),
+            "System access"
         );
 
         let systems = vec![system1, system2, system3];
@@ -1617,7 +1622,7 @@ mod tests {
     #[cfg(feature = "par-iter")]
     #[allow(clippy::float_cmp)]
     fn par_comp_readwrite() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
         let mut world = universe.create_world();
@@ -1731,10 +1736,10 @@ mod tests {
             .build()
             .unwrap();
 
-        println!(
-            "System access: reads[{:?}], writes[{:?}]",
-            system1.reads(),
-            system1.writes()
+        tracing::debug!(
+            reads = ?system1.reads(),
+            writes = ?system1.writes(),
+            "System access"
         );
 
         let systems = vec![system1, system2, system3, system4, system5];

@@ -17,7 +17,7 @@ struct Static;
 
 #[test]
 fn insert() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -31,7 +31,7 @@ fn insert() {
 
 #[test]
 fn get_component() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -61,7 +61,7 @@ fn get_component() {
 
 #[test]
 fn get_component_wrong_type() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -73,7 +73,7 @@ fn get_component_wrong_type() {
 
 #[test]
 fn get_shared() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -97,7 +97,7 @@ fn get_shared() {
 
 #[test]
 fn get_shared_wrong_type() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -109,7 +109,7 @@ fn get_shared_wrong_type() {
 
 #[test]
 fn delete() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -137,7 +137,7 @@ fn delete() {
 
 #[test]
 fn delete_last() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -172,7 +172,7 @@ fn delete_last() {
 
 #[test]
 fn delete_first() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -208,7 +208,7 @@ fn delete_first() {
 
 #[test]
 fn merge() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world_1 = universe.create_world();
@@ -243,7 +243,7 @@ fn merge() {
 
 #[test]
 fn mutate_add_component() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -271,7 +271,7 @@ fn mutate_add_component() {
 
 #[test]
 fn mutate_remove_component() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -299,7 +299,7 @@ fn mutate_remove_component() {
 
 #[test]
 fn mutate_add_tag() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -327,7 +327,7 @@ fn mutate_add_tag() {
 
 #[test]
 fn mutate_remove_tag() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -355,7 +355,7 @@ fn mutate_remove_tag() {
 
 #[test]
 fn mutate_change_tag_minimum_test() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -365,16 +365,16 @@ fn mutate_change_tag_minimum_test() {
 
     let entities = world.insert(shared, components).to_vec();
 
-    log::trace!("STARTING CHANGE");
+    tracing::trace!("STARTING CHANGE");
     world.add_tag(entities[0], Model(3));
-    log::trace!("CHANGED\n");
+    tracing::trace!("CHANGED\n");
 
     assert_eq!(*world.get_tag::<Model>(entities[0]).unwrap(), Model(3));
 }
 
 #[test]
 fn mutate_change_tag() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -394,16 +394,16 @@ fn mutate_change_tag() {
     assert_eq!(3, query_model_5.iter(&mut world).count());
     assert_eq!(0, query_model_3.iter(&mut world).count());
 
-    log::trace!("STARTING CHANGE");
+    tracing::trace!("STARTING CHANGE");
     world.add_tag(*entities.get(1).unwrap(), Model(3));
-    log::trace!("CHANGED\n");
+    tracing::trace!("CHANGED\n");
 
     assert_eq!(
         1,
         query_model_3
             .iter_entities(&mut world)
             .map(|e| {
-                log::trace!("iter: {:?}", e);
+                tracing::trace!("iter: {:?}", e);
                 e
             })
             .count()
