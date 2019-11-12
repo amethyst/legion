@@ -509,11 +509,6 @@ impl World {
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
-    ///
-    /// # Panics
-    ///
-    /// This function borrows all components of type `T` in the world. It may panic if
-    /// any other code is currently borrowing `T` mutably (such as in a query).
     pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
         if !self.is_alive(entity) {
             return None;
@@ -541,11 +536,17 @@ impl World {
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
     ///
+    /// # Safety
+    ///
+    /// Accessing a component which is already being concurrently accessed elsewhere is undefined behavior.
+    ///
     /// # Panics
     ///
-    /// This function borrows all components of type `T` in the world. It may panic if
-    /// any other code is currently borrowing `T` (such as in a query).
-    pub fn get_component_mut<T: Component>(&self, entity: Entity) -> Option<RefMut<Exclusive, T>> {
+    /// This function may panic if any other code is currently borrowing `T` (such as in a query).
+    pub unsafe fn get_component_mut_unchecked<T: Component>(
+        &self,
+        entity: Entity,
+    ) -> Option<RefMut<Exclusive, T>> {
         if !self.is_alive(entity) {
             return None;
         }
@@ -556,16 +557,31 @@ impl World {
             .chunksets()
             .get(location.set())?
             .get(location.chunk())?;
-        let (slice_borrow, slice) = unsafe {
-            chunk
-                .components(ComponentTypeId::of::<T>())?
-                .data_slice_mut::<T>()
-                .deconstruct()
-        };
+        let (slice_borrow, slice) = chunk
+            .components(ComponentTypeId::of::<T>())?
+            .data_slice_mut::<T>()
+            .deconstruct();
         let component = slice.get_mut(location.component())?;
 
         Some(RefMut::new(slice_borrow, component))
     }
+
+    /// Mutably borrows entity data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
+    pub fn get_component_mut<T: Component>(
+        &mut self,
+        entity: Entity,
+    ) -> Option<RefMut<Exclusive, T>> {
+        // safe because the &mut self ensures exclusivity
+        unsafe { self.get_component_mut_unchecked(entity) }
+    }
+
+    /// Mutably borrows entity data for the given entity.
+    ///
+    /// Returns `Some(data)` if the entity was found and contains the specified data.
+    /// Otherwise `None` is returned.
 
     /// Gets tag data for the given entity.
     ///

@@ -58,27 +58,27 @@ fn ideal(data: &mut Vec<(Position, Orientation, Scale, Transform)>) {
     }
 }
 
-fn sequential(world: &World) {
+fn sequential(world: &mut World) {
     for (pos, orient, scale, mut trans) in <(
         Read<Position>,
         Read<Orientation>,
         Read<Scale>,
         Write<Transform>,
     )>::query()
-    .iter(&world)
+    .iter(world)
     {
         trans.0 = process(&pos.0, &orient.0, &scale.0);
     }
 }
 
-fn par_for_each(world: &World) {
+fn par_for_each(world: &mut World) {
     <(
         Read<Position>,
         Read<Orientation>,
         Read<Scale>,
         Write<Transform>,
     )>::query()
-    .par_for_each(&world, |(pos, orient, scale, mut trans)| {
+    .par_for_each(world, |(pos, orient, scale, mut trans)| {
         trans.0 = process(&pos.0, &orient.0, &scale.0);
     });
 }
@@ -96,13 +96,13 @@ fn bench_transform(c: &mut Criterion) {
         )
         .with_function("sequential", |b, n| {
             let data = data(*n);
-            let world = setup(data);
-            b.iter(|| sequential(&world));
+            let mut world = setup(data);
+            b.iter(|| sequential(&mut world));
         })
         .with_function("par_for_each", |b, n| {
             let data = data(*n);
-            let world = setup(data);
-            join(|| {}, || b.iter(|| par_for_each(&world)));
+            let mut world = setup(data);
+            join(|| {}, || b.iter(|| par_for_each(&mut world)));
         }),
     );
 }

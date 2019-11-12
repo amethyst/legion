@@ -23,13 +23,33 @@ use rayon::prelude::*;
 pub trait Schedulable: Runnable + Send + Sync {}
 impl<T> Schedulable for T where T: Runnable + Send + Sync {}
 
+/// Describes which archetypes a system declares access to.
+pub enum ArchetypeAccess {
+    /// All archetypes.
+    All,
+    /// Some archetypes.
+    Some(BitSet),
+}
+
+impl ArchetypeAccess {
+    pub fn is_disjoint(&self, other: &ArchetypeAccess) -> bool {
+        match self {
+            Self::All => false,
+            Self::Some(mine) => match other {
+                Self::All => false,
+                Self::Some(theirs) => mine.is_disjoint(theirs),
+            },
+        }
+    }
+}
+
 /// Trait describing a schedulable type. This is implemented by `System`
 pub trait Runnable {
     fn name(&self) -> &str;
     fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]);
     fn writes(&self) -> (&[ResourceTypeId], &[ComponentTypeId]);
     fn prepare(&mut self, world: &World);
-    fn accesses_archetypes(&self) -> &BitSet;
+    fn accesses_archetypes(&self) -> &ArchetypeAccess;
     fn run(&self, world: &World);
     fn dispose(self: Box<Self>, world: &mut World);
     fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;

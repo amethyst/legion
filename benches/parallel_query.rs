@@ -103,40 +103,40 @@ fn ideal(ab: &mut Vec<(A, B)>, ac: &mut Vec<(A, C)>) {
     }
 }
 
-fn sequential(world: &World) {
-    for (mut b, a) in <(Write<B>, Read<A>)>::query().iter(&world) {
+fn sequential(world: &mut World) {
+    for (mut b, a) in <(Write<B>, Read<A>)>::query().iter(world) {
         b.0 = a.0;
     }
 
-    for (mut c, a) in <(Write<C>, Read<A>)>::query().iter(&world) {
+    for (mut c, a) in <(Write<C>, Read<A>)>::query().iter(world) {
         c.0 = a.0;
     }
 }
 
-fn parallel(world: &World) {
+fn parallel(world: &mut World) {
     join(
-        || {
-            for (mut b, a) in <(Write<B>, Read<A>)>::query().iter(&world) {
+        || unsafe {
+            for (mut b, a) in <(Write<B>, Read<A>)>::query().iter_unchecked(&world) {
                 b.0 = a.0;
             }
         },
-        || {
-            for (mut c, a) in <(Write<C>, Read<A>)>::query().iter(&world) {
+        || unsafe {
+            for (mut c, a) in <(Write<C>, Read<A>)>::query().iter_unchecked(&world) {
                 c.0 = a.0;
             }
         },
     );
 }
 
-fn par_for_each(world: &World) {
+fn par_for_each(world: &mut World) {
     join(
-        || {
-            <(Write<B>, Read<A>)>::query().par_for_each(&world, |(mut b, a)| {
+        || unsafe {
+            <(Write<B>, Read<A>)>::query().par_for_each_unchecked(&world, |(mut b, a)| {
                 b.0 = a.0;
             });
         },
-        || {
-            <(Write<C>, Read<A>)>::query().par_for_each(&world, |(mut c, a)| {
+        || unsafe {
+            <(Write<C>, Read<A>)>::query().par_for_each_unchecked(&world, |(mut c, a)| {
                 c.0 = a.0;
             });
         },
@@ -157,18 +157,18 @@ fn bench_ordered(c: &mut Criterion) {
         )
         .with_function("sequential", |b, n| {
             let data = data(*n);
-            let world = setup(&data);
-            b.iter(|| sequential(&world));
+            let mut world = setup(&data);
+            b.iter(|| sequential(&mut world));
         })
         .with_function("parallel", |b, n| {
             let data = data(*n);
-            let world = setup(&data);
-            join(|| {}, || b.iter(|| parallel(&world)));
+            let mut world = setup(&data);
+            join(|| {}, || b.iter(|| parallel(&mut world)));
         })
         .with_function("par_for_each", |b, n| {
             let data = data(*n);
-            let world = setup(&data);
-            join(|| {}, || b.iter(|| par_for_each(&world)));
+            let mut world = setup(&data);
+            join(|| {}, || b.iter(|| par_for_each(&mut world)));
         }),
     );
 }

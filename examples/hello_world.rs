@@ -23,26 +23,17 @@ fn main() {
 
     // update positions
     let mut query = <(Write<Pos>, Read<Vel>)>::query();
-    for (mut pos, vel) in query.iter(&world) {
+    for (mut pos, vel) in query.iter(&mut world) {
         pos.0 += vel.0;
         pos.1 += vel.1;
         pos.2 += vel.2;
     }
 
-    // update positions in parallel
-    let mut query = <(Write<Pos>, Read<Vel>)>::query();
     #[cfg(feature = "par-iter")]
     {
-        query.par_for_each(&world, |(mut pos, vel)| {
-            pos.0 += vel.0;
-            pos.1 += vel.1;
-            pos.2 += vel.2;
-        });
-    }
-
-    #[cfg(not(feature = "par-iter"))]
-    {
-        query.for_each(&world, |(mut pos, vel)| {
+        // update positions in parallel
+        let mut query = <(Write<Pos>, Read<Vel>)>::query();
+        query.par_for_each(&mut world, |(mut pos, vel)| {
             pos.0 += vel.0;
             pos.1 += vel.1;
             pos.2 += vel.2;
