@@ -58,13 +58,13 @@ impl Universe {
     /// Creates a new `Universe`.
     pub fn new() -> Self { Self::default() }
 
-    /// Creates a new `World` within this `Unvierse`.
+    /// Creates a new `World` within this `Universe`.
     ///
     /// Entities inserted into worlds created within the same universe are guarenteed to have
-    /// unique `Entity` IDs, even across worlds.
+    /// unique `Entity` IDs, even across worlds. See also `World::new`.
     pub fn create_world(&self) -> World {
         let id = self.world_count.fetch_add(1, Ordering::SeqCst);
-        let world = World::new(WorldId(id), EntityAllocator::new(self.allocator.clone()));
+        let world = World::new_in_universe(WorldId(id), EntityAllocator::new(self.allocator.clone()));
 
         #[cfg(feature = "events")]
         {
@@ -112,7 +112,15 @@ unsafe impl Send for World {}
 unsafe impl Sync for World {}
 
 impl World {
-    fn new(id: WorldId, allocator: EntityAllocator) -> Self {
+    /// Create a new `World` independent of any `Universe`.
+    ///
+    /// `Entity` IDs in such a world will only be unique within that world. See also
+    /// `Universe::create_world`.
+    pub fn new() -> Self {
+        Self::new_in_universe(WorldId(0), EntityAllocator::new(Arc::new(Mutex::new(BlockAllocator::new()))))
+    }
+
+    fn new_in_universe(id: WorldId, allocator: EntityAllocator) -> Self {
         Self {
             id,
             storage: UnsafeCell::new(Storage::new(id)),
@@ -131,7 +139,7 @@ impl World {
 
     pub(crate) fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
 
-    /// Gets the unique ID of this world.
+    /// Gets the unique ID of this world within its universe.
     pub fn id(&self) -> WorldId { self.id }
 
     /// Inserts new entities into the world.
@@ -203,7 +211,7 @@ impl World {
 
         let entities = self.entity_allocator.allocation_buffer();
 
-        #[cfg(feature = "events")]
+        #[cfg(all(feature = "events", feature = "par-iter"))]
         {
             entities.par_iter().for_each(|e| {
                 self.channel
@@ -429,7 +437,7 @@ impl World {
         target_chunk
     }
 
-    /// Adds a component to an entity, or set's its value if the component is
+    /// Adds a component to an entity, or sets its value if the component is
     /// already present.
     pub fn add_component<T: Component>(&mut self, entity: Entity, component: T) {
         if let Some(mut comp) = self.get_component_mut(entity) {
@@ -468,7 +476,7 @@ impl World {
         }
     }
 
-    /// Adds a tag to an entity, or set's its value if the tag is
+    /// Adds a tag to an entity, or sets its value if the tag is
     /// already present.
     pub fn add_tag<T: Tag>(&mut self, entity: Entity, tag: T) {
         if self.get_tag::<T>(entity).is_some() {
@@ -734,6 +742,12 @@ impl World {
         } else {
             self.create_chunk_set(archetype, tags)
         }
+    }
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
