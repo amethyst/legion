@@ -8,6 +8,7 @@ use rayon::prelude::*;
 
 #[cfg(feature = "par-iter")]
 use crossbeam::queue::{ArrayQueue, PopError, PushError};
+use crate::storage::ArchetypeId;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ListenerId(usize);
@@ -139,6 +140,12 @@ pub struct WorldCreatedEvent(pub WorldId);
 pub enum ComponentEvent {
     ComponentAdded,
     ComponentRemoved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ArchetypeEvent {
+    /// Indicates that an archetype was created.
+    Created(ArchetypeId),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

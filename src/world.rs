@@ -11,7 +11,7 @@ use crate::filter::ChunksetFilterData;
 use crate::filter::Filter;
 use crate::iterator::SliceVecIter;
 use crate::resource::Resources;
-use crate::storage::ArchetypeData;
+use crate::storage::{ArchetypeData, ArchetypeId};
 use crate::storage::ArchetypeDescription;
 use crate::storage::Component;
 use crate::storage::ComponentMeta;
@@ -40,7 +40,7 @@ use std::sync::Arc;
 use rayon::prelude::*;
 
 #[cfg(feature = "events")]
-use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
+use crate::event::{Channel, EntityEvent, ArchetypeEvent, WorldCreatedEvent};
 
 /// The `Universe` is a factory for creating `World`s.
 ///
@@ -102,7 +102,9 @@ pub struct World {
     defrag_progress: usize,
 
     #[cfg(feature = "events")]
-    channel: Channel<EntityEvent>,
+    entity_channel: Channel<EntityEvent>,
+    #[cfg(feature = "events")]
+    archetype_channel: Channel<ArchetypeEvent>,
 
     pub resources: Resources,
 }
@@ -127,13 +129,21 @@ impl World {
             entity_allocator: allocator,
             defrag_progress: 0,
             #[cfg(feature = "events")]
-            channel: Channel::default(),
+            entity_channel: Channel::default(),
+            #[cfg(feature = "events")]
+            archetype_channel: Channel::default(),
             resources: Resources::default(),
         }
     }
 
     #[cfg(feature = "events")]
-    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> { &mut self.channel }
+    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> { &mut self.entity_channel }
+
+    /// Returns a reference to the archetype event channel,
+    /// which can be used to listen to archetype creation
+    /// events. For low-level uses only.
+    #[cfg(feature = "events")]
+    pub fn archetype_channel(&mut self) -> &mut Channel<ArchetypeEvent> { &mut self.archetype_channel }
 
     pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
 
@@ -214,7 +224,7 @@ impl World {
         #[cfg(all(feature = "events", feature = "par-iter"))]
         {
             entities.par_iter().for_each(|e| {
-                self.channel
+                self.entity_channel
                     .write(EntityEvent::Created(*e))
                     .expect("Failed to write to WorldCreatedEvent channel.");
             });
@@ -238,7 +248,7 @@ impl World {
     pub fn delete(&mut self, entity: Entity) -> bool {
         #[cfg(feature = "events")]
         {
-            self.channel
+            self.entity_channel
                 .write(EntityEvent::Deleted(entity))
                 .expect("Failed to write to EntityEvent::Deleted channel.");
         }
@@ -687,6 +697,12 @@ impl World {
         components.tailor_archetype(&mut description);
 
         let (index, _) = self.storage_mut().alloc_archetype(description);
+
+        #[cfg(feature = "events")]
+            {
+                self.archetype_channel.write(ArchetypeEvent::Created(ArchetypeId::new(self.id, index))).expect("failed to write archetype creation event");
+            }
+
         index
     }
 
