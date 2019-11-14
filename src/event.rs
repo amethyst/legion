@@ -9,6 +9,12 @@ use rayon::prelude::*;
 #[cfg(feature = "par-iter")]
 use crossbeam::queue::{ArrayQueue, PushError};
 
+#[cfg(not(feature = "par-iter"))]
+use std::collections::VecDeque;
+
+#[cfg(not(feature = "par-iter"))]
+use std::cell::RefCell;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ListenerId(usize);
 
