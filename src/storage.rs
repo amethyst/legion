@@ -1095,6 +1095,7 @@ impl ComponentStorage {
     fn update_mem_gauge(&self) {
         #[cfg(feature = "metrics")]
         {
+            use std::convert::TryInto;
             metrics::gauge!(
                 "chunk_memory",
                 if self.is_allocated() { self.component_layout.size().try_into().unwrap() } else { 0 },
@@ -1109,9 +1110,10 @@ impl ComponentStorage {
     fn update_count_gauge(&self) {
         #[cfg(feature = "metrics")]
         {
+            use std::convert::TryInto;
             metrics::gauge!(
                 "entity_count",
-                self.len(),
+                self.len().try_into().unwrap(),
                 "world" => self.id.archetype_id().world().index().to_string(),
                 "archetype" => self.id.archetype_id().index().to_string(),
                 "chunkset" => self.id.set().to_string(),
