@@ -102,7 +102,7 @@ impl<'a> StageExecutor<'a> {
             let mut component_mutated = HashMap::<ComponentTypeId, Vec<usize>>::with_capacity(64);
 
             for (i, system) in systems.iter().enumerate() {
-                log::debug!("Building dependency: {}", system.name());
+                log::debug!("Building dependency: {} ({})", system.name(), i);
 
                 let (read_res, read_comp) = system.reads();
                 let (write_res, write_comp) = system.writes();
@@ -161,7 +161,9 @@ impl<'a> StageExecutor<'a> {
                 }
                 log::debug!("comp_dependencies: {:?}", &comp_dependencies);
                 for dep in comp_dependencies {
-                    dynamic_dependants[dep].push(i);
+                    if dep != i { // dont be dependent on ourselves
+                        dynamic_dependants[dep].push(i);
+                    }
                 }
             }
 
@@ -243,6 +245,8 @@ impl<'a> StageExecutor<'a> {
                         )
                         .par_bridge()
                         .for_each(|(sys, static_dep, dyn_dep)| {
+                            use std::any::Any;
+
                             let archetypes = sys.accesses_archetypes();
                             for i in (0..dyn_dep.len()).rev() {
                                 let dep = dyn_dep[i];
@@ -269,7 +273,6 @@ impl<'a> StageExecutor<'a> {
 
                         // execute all systems with no outstanding dependencies
                         (0..systems.len())
-                            .into_par_iter()
                             .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
                             .for_each(|i| {
                                 self.run_recursive(i, world);
@@ -288,7 +291,7 @@ impl<'a> StageExecutor<'a> {
     /// Recursively execute through the generated depedency cascade and exhaust it.
     #[cfg(feature = "par-iter")]
     fn run_recursive(&self, i: usize, world: &World) {
-        log::trace!("run_recursive: {}", i);
+        log::trace!("run_recursive: {} ({})", self.systems[i].name(), i);
         self.systems[i].run(world);
 
         self.static_dependants[i].par_iter().for_each(|dep| {
