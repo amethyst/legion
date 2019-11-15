@@ -1,11 +1,11 @@
 use crate::borrow::Exclusive;
 use crate::borrow::RefIter;
-use crate::borrow::TryRefIter;
 use crate::borrow::RefIterMut;
-use crate::borrow::TryRefIterMut;
 use crate::borrow::RefMap;
 use crate::borrow::RefMapMut;
 use crate::borrow::Shared;
+use crate::borrow::TryRefIter;
+use crate::borrow::TryRefIterMut;
 use crate::entity::Entity;
 use crate::filter::And;
 use crate::filter::ArchetypeFilterData;

@@ -14,10 +14,12 @@ edition = "2018"
 travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
-default = ["par-iter", "events", "ffi"]
-par-iter = ["rayon", "crossbeam"]
+default = ["par-iter", "par-schedule", "events", "ffi"]
+par-iter = ["rayon"]
+par-schedule = ["rayon", "crossbeam"]
+log = ["tracing/log", "tracing/log-always"]
 ffi = []
-events = []
+events = ["rayon", "crossbeam"]
 
 [dependencies]
 parking_lot = "0.9"
@@ -29,13 +31,15 @@ derivative = "1"
 smallvec = "0.6"
 bit-set = "0.5"
 paste = "0.1"
-log = "0.4"
+tracing = "0.1"
+metrics = { version = "0.12", optional = true }
 shrinkwraprs = "0.2"
+petgraph = "0.4"
 
 [dev-dependencies]
-env_logger = "0.7"
 criterion = "0.3"
 cgmath = "0.17"
+tracing-subscriber = "0.1.6"
 
 [[bench]]
 name = "benchmarks"

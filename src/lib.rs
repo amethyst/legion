@@ -51,10 +51,6 @@
 //! }
 //! ```
 //!
-//! # Features
-//!
-//! Legion aims to be a more complete game-ready ECS than many of its predecessors.
-//!
 //! ### Advanced Query Filters
 //!
 //! The query API can do much more than pull entity data out of the world.
@@ -191,7 +187,9 @@
 //!
 //! ### Chunk Iteration
 //!
-//! Entity data is allocated in blocks called "chunks", each approximately containing 64KiB of data. The query API exposes each chunk via 'iter_chunk'. As all entities in a chunk are guarenteed to contain the same set of entity data and shared data values, it is possible to do batch processing via the chunk API.
+//! Entity data is allocated in blocks called "chunks", each approximately containing 64KiB of data.
+//! The query API exposes each chunk via 'iter_chunk'. As all entities in a chunk are guarenteed to contain the same set of entity
+//! data and shared data values, it is possible to do batch processing via the chunk API.
 //!
 //! ```rust
 //! # use legion::prelude::*;
@@ -220,6 +218,14 @@
 //!     render_instanced(model, &transforms);
 //! }
 //! ```
+//!
+//! # Feature Flags
+//!
+//!  * `par-iter`: Enables parallel APIs on queries (enabled by default).
+//!  * `par-schedule`: Configures system schedulers to try and run systems in parallel where possible (enabled by default).
+//!  * `log`: Configures `tracing` to redirect events to the `log` crate. This is a convenience feature for applications
+//!  that use `log` and do not wish to interact with `tracing`.
+//!  * `events`: Enables eventing APIs on worlds (enabled by default).
 #![allow(dead_code)]
 
 pub mod borrow;
@@ -247,9 +253,9 @@ pub mod prelude {
     pub use crate::command::CommandBuffer;
     pub use crate::entity::Entity;
     pub use crate::filter::filter_fns::*;
-    pub use crate::query::{IntoQuery, Query, Read, TryRead, Tagged, Write, TryWrite};
+    pub use crate::query::{IntoQuery, Query, Read, Tagged, TryRead, TryWrite, Write};
     pub use crate::resource::{ResourceSet, Resources};
-    pub use crate::schedule::{Runnable, Schedulable, StageExecutor};
+    pub use crate::schedule::{Runnable, Schedulable, Stage, StageExecutor, SystemScheduler};
     pub use crate::system::{System, SystemBuilder};
     pub use crate::world::{Universe, World};
     pub use bit_set::BitSet;

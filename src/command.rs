@@ -10,10 +10,10 @@ use bit_set::BitSet;
 use derivative::Derivative;
 use std::{marker::PhantomData, sync::Arc};
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "par-schedule")]
 use crossbeam::queue::SegQueue;
 
-#[cfg(not(feature = "par-iter"))]
+#[cfg(not(feature = "par-schedule"))]
 use crate::borrow::{AtomicRefCell, Exclusive, RefMut};
 
 pub trait WorldWritable {
@@ -108,7 +108,6 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        log::trace!("Adding component: {}", std::any::type_name::<C>());
         world.add_component::<C>(consumed.entity, consumed.component)
     }
 
@@ -194,9 +193,9 @@ where
 
 #[derive(Default)]
 pub struct CommandBuffer {
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     commands: SegQueue<EntityCommand>,
-    #[cfg(not(feature = "par-iter"))]
+    #[cfg(not(feature = "par-schedule"))]
     commands: AtomicRefCell<Vec<EntityCommand>>,
     block: Option<EntityBlock>,
     used_entities: BitSet,
@@ -211,17 +210,17 @@ pub enum CommandError {
 }
 
 impl CommandBuffer {
-    #[cfg(not(feature = "par-iter"))]
+    #[cfg(not(feature = "par-schedule"))]
     #[inline]
     fn get_commands(&self) -> RefMut<'_, Exclusive, Vec<EntityCommand>> { self.commands.get_mut() }
 
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     #[inline]
     fn get_commands(&self) -> &SegQueue<EntityCommand> { &self.commands }
 
     pub fn write(&self, world: &mut World) {
-        log::trace!("Performing drain");
-        #[cfg(feature = "par-iter")]
+        tracing::trace!("Draining command buffer");
+        #[cfg(feature = "par-schedule")]
         {
             while let Ok(command) = self.get_commands().pop() {
                 match command {
@@ -232,7 +231,7 @@ impl CommandBuffer {
             }
         }
 
-        #[cfg(not(feature = "par-iter"))]
+        #[cfg(not(feature = "par-schedule"))]
         {
             while let Some(command) = self.get_commands().pop() {
                 match command {
@@ -351,7 +350,7 @@ mod tests {
 
     #[test]
     fn simple_write_test() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
         let mut world = universe.create_world();

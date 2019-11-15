@@ -220,7 +220,6 @@ impl EntityAllocator {
     }
 
     pub(crate) fn set_location(&mut self, entity: EntityIndex, location: EntityLocation) {
-        log::trace!("Setting new location: {:?}", location);
         self.blocks
             .iter_mut()
             .rev()

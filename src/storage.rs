@@ -26,6 +26,7 @@ use std::slice::Iter;
 use std::slice::IterMut;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use tracing::trace;
 
 static VERSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -183,16 +184,14 @@ impl Storage {
     /// Returns the index of the newly created archetype and an exclusive reference to the
     /// achetype's data.
     pub fn alloc_archetype(&mut self, desc: ArchetypeDescription) -> (usize, &mut ArchetypeData) {
+        let id = ArchetypeId(self.world_id, self.archetypes.len());
         self.component_types
             .0
             .push(desc.components.iter().map(|(type_id, _)| *type_id));
         self.tag_types
             .0
             .push(desc.tags.iter().map(|(type_id, _)| *type_id));
-        self.archetypes.push(ArchetypeData::new(
-            ArchetypeId(self.world_id, self.archetypes.len()),
-            desc,
-        ));
+        self.archetypes.push(ArchetypeData::new(id, desc));
 
         let index = self.archetypes.len() - 1;
         (index, unsafe {
@@ -294,6 +293,8 @@ impl ComponentMeta {
 pub struct ArchetypeDescription {
     tags: Vec<(TagTypeId, TagMeta)>,
     components: Vec<(ComponentTypeId, ComponentMeta)>,
+    tag_names: Vec<&'static str>,
+    component_names: Vec<&'static str>,
 }
 
 impl ArchetypeDescription {
@@ -306,21 +307,26 @@ impl ArchetypeDescription {
     /// Adds a tag to the description.
     pub fn register_tag_raw(&mut self, type_id: TagTypeId, type_meta: TagMeta) {
         self.tags.push((type_id, type_meta));
+        self.tag_names.push("<unknown>");
     }
 
     /// Adds a tag to the description.
     pub fn register_tag<T: Tag>(&mut self) {
-        self.register_tag_raw(TagTypeId::of::<T>(), TagMeta::of::<T>());
+        self.tags.push((TagTypeId::of::<T>(), TagMeta::of::<T>()));
+        self.tag_names.push(std::any::type_name::<T>());
     }
 
     /// Adds a component to the description.
     pub fn register_component_raw(&mut self, type_id: ComponentTypeId, type_meta: ComponentMeta) {
         self.components.push((type_id, type_meta));
+        self.component_names.push("<unknown>");
     }
 
     /// Adds a component to the description.
     pub fn register_component<T: Component>(&mut self) {
-        self.register_component_raw(ComponentTypeId::of::<T>(), ComponentMeta::of::<T>());
+        self.components
+            .push((ComponentTypeId::of::<T>(), ComponentMeta::of::<T>()));
+        self.component_names.push(std::any::type_name::<T>());
     }
 }
 
@@ -535,6 +541,15 @@ impl ArchetypeData {
             std::alloc::Layout::from_size_align(data_capacity, COMPONENT_STORAGE_ALIGNMENT)
                 .expect("invalid component data size/alignment");
 
+        trace!(
+            world = id.world().index(),
+            archetype = id.index(),
+            chunk_entity_capacity = entity_capacity,
+            components = ?desc.component_names,
+            tags = ?desc.tag_names,
+            "Created archetype"
+        );
+
         ArchetypeData {
             desc,
             id,
@@ -615,6 +630,17 @@ impl ArchetypeData {
             .component_layout
             .alloc_storage(ChunkId(self.id, set_index, count));
         unsafe { self.chunk_sets.get_unchecked_mut(set_index).push(chunk) };
+
+        trace!(
+            world = self.id.world().index(),
+            archetype = self.id.index(),
+            chunkset = set_index,
+            chunk = count,
+            components = ?self.desc.component_names,
+            tags = ?self.desc.tag_names,
+            "Created chunk"
+        );
+
         count
     }
 
@@ -641,6 +667,11 @@ impl ArchetypeData {
         budget: &mut usize,
         mut on_moved: F,
     ) -> bool {
+        trace!(
+            world = self.id().world().index(),
+            archetype = self.id().index(),
+            "Defragmenting archetype"
+        );
         let arch_index = self.id.index();
         for (i, chunkset) in self.chunk_sets.iter_mut().enumerate() {
             let complete = chunkset.defrag(budget, |e, chunk, component| {
@@ -784,6 +815,8 @@ impl Chunkset {
             return true;
         }
 
+        trace!("Defragmenting chunkset");
+
         loop {
             // find the first chunk that is not full
             while first < last && slice[first].is_full() {
@@ -890,6 +923,20 @@ pub struct ComponentStorage {
     component_data: Option<NonNull<u8>>,
 }
 
+pub struct StorageWriter<'a> {
+    storage: &'a mut ComponentStorage,
+}
+
+impl<'a> StorageWriter<'a> {
+    pub fn get(&mut self) -> (&mut Vec<Entity>, &UnsafeCell<Components>) {
+        (&mut self.storage.entities, &self.storage.component_info)
+    }
+}
+
+impl<'a> Drop for StorageWriter<'a> {
+    fn drop(&mut self) { self.storage.update_count_gauge(); }
+}
+
 impl ComponentStorage {
     /// Gets the unique ID of the chunk.
     pub fn id(&self) -> ChunkId { self.id }
@@ -926,6 +973,8 @@ impl ComponentStorage {
             component.writer().swap_remove(index, drop);
         }
 
+        self.update_count_gauge();
+
         if self.entities.len() > index {
             Some(*self.entities.get(index).unwrap())
         } else {
@@ -947,6 +996,8 @@ impl ComponentStorage {
         if !target.is_allocated() {
             target.allocate();
         }
+
+        trace!(index, source = ?self.id, destination = ?target.id, "Moving entity");
 
         let entity = unsafe { *self.entities.get_unchecked(index) };
         target.entities.push(entity);
@@ -970,16 +1021,18 @@ impl ComponentStorage {
             }
         }
 
+        target.update_count_gauge();
+
         // remove the entity from this chunk
         self.swap_remove(index, false)
     }
 
     /// Gets mutable references to the internal data of the chunk.
-    pub fn write(&mut self) -> (&mut Vec<Entity>, &UnsafeCell<Components>) {
+    pub fn writer(&mut self) -> StorageWriter {
         if !self.is_allocated() {
             self.allocate();
         }
-        (&mut self.entities, &self.component_info)
+        StorageWriter { storage: self }
     }
 
     fn free(&mut self) {
@@ -987,6 +1040,15 @@ impl ComponentStorage {
         debug_assert_eq!(0, self.len());
 
         self.entities.shrink_to_fit();
+
+        trace!(
+            world = self.id.archetype_id().world().index(),
+            archetype = self.id.archetype_id().index(),
+            chunkset = self.id.set(),
+            chunk = self.id.index(),
+            layout = ?self.component_layout,
+            "Freeing chunk memory"
+        );
 
         // Safety Note:
         // accessors are left with pointers pointing to invalid memory (although aligned properly)
@@ -998,11 +1060,21 @@ impl ComponentStorage {
             let ptr = self.component_data.take().unwrap();
             std::alloc::dealloc(ptr.as_ptr(), self.component_layout);
         }
+
+        self.update_mem_gauge();
     }
 
     fn allocate(&mut self) {
         debug_assert!(!self.is_allocated());
 
+        trace!(
+            world = self.id.archetype_id().world().index(),
+            archetype = self.id.archetype_id().index(),
+            chunkset = self.id.set(),
+            chunk = self.id.index(),
+            layout = ?self.component_layout,
+            "Allocating chunk memory"
+        );
         self.entities.reserve_exact(self.capacity);
 
         unsafe {
@@ -1015,6 +1087,38 @@ impl ComponentStorage {
                 let offset = self.component_offsets.get(type_id).unwrap();
                 *component.ptr.get_mut() = ptr.add(*offset);
             }
+        }
+
+        self.update_mem_gauge();
+    }
+
+    fn update_mem_gauge(&self) {
+        #[cfg(feature = "metrics")]
+        {
+            use std::convert::TryInto;
+            metrics::gauge!(
+                "chunk_memory",
+                if self.is_allocated() { self.component_layout.size().try_into().unwrap() } else { 0 },
+                "world" => self.id.archetype_id().world().index().to_string(),
+                "archetype" => self.id.archetype_id().index().to_string(),
+                "chunkset" => self.id.set().to_string(),
+                "chunk" => self.id.index().to_string()
+            );
+        }
+    }
+
+    fn update_count_gauge(&self) {
+        #[cfg(feature = "metrics")]
+        {
+            use std::convert::TryInto;
+            metrics::gauge!(
+                "entity_count",
+                self.len().try_into().unwrap(),
+                "world" => self.id.archetype_id().world().index().to_string(),
+                "archetype" => self.id.archetype_id().index().to_string(),
+                "chunkset" => self.id.set().to_string(),
+                "chunk" => self.id.index().to_string()
+            );
         }
     }
 }
@@ -1359,7 +1463,7 @@ impl TagStorage {
             };
 
             if ptr.is_null() {
-                log::trace!("out of memory");
+                tracing::error!("out of memory");
                 std::process::abort()
             }
 
@@ -1414,7 +1518,7 @@ mod test {
 
     #[test]
     pub fn create() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut archetypes = Storage::new(WorldId::default());
 
@@ -1434,7 +1538,8 @@ mod test {
             .unwrap()
             .get_mut(chunk_index)
             .unwrap();
-        let (chunk_entities, chunk_components) = components.write();
+        let mut writer = components.writer();
+        let (chunk_entities, chunk_components) = writer.get();
 
         chunk_entities.push(Entity::new(1, Wrapping(0)));
         unsafe {
@@ -1448,7 +1553,7 @@ mod test {
 
     #[test]
     pub fn create_lazy_allocated() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut archetypes = Storage::new(WorldId::default());
 
@@ -1471,14 +1576,14 @@ mod test {
 
         assert!(!chunk.is_allocated());
 
-        chunk.write();
+        chunk.writer();
 
         assert!(chunk.is_allocated());
     }
 
     #[test]
     pub fn create_free_when_empty() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut archetypes = Storage::new(WorldId::default());
 
@@ -1501,15 +1606,18 @@ mod test {
 
         assert!(!chunk.is_allocated());
 
-        let (chunk_entities, chunk_components) = chunk.write();
+        {
+            let mut writer = chunk.writer();
+            let (chunk_entities, chunk_components) = writer.get();
 
-        chunk_entities.push(Entity::new(1, Wrapping(0)));
-        unsafe {
-            (&mut *chunk_components.get())
-                .get_mut(ComponentTypeId::of::<isize>())
-                .unwrap()
-                .writer()
-                .push(&[1usize]);
+            chunk_entities.push(Entity::new(1, Wrapping(0)));
+            unsafe {
+                (&mut *chunk_components.get())
+                    .get_mut(ComponentTypeId::of::<isize>())
+                    .unwrap()
+                    .writer()
+                    .push(&[1usize]);
+            }
         }
 
         assert!(chunk.is_allocated());
@@ -1521,7 +1629,7 @@ mod test {
 
     #[test]
     pub fn read_components() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut archetypes = Storage::new(WorldId::default());
 
@@ -1546,7 +1654,8 @@ mod test {
             (Entity::new(3, Wrapping(0)), 3isize, 3usize, ZeroSize),
         ];
 
-        let (chunk_entities, chunk_components) = components.write();
+        let mut writer = components.writer();
+        let (chunk_entities, chunk_components) = writer.get();
         for (entity, c1, c2, c3) in entities.iter() {
             chunk_entities.push(*entity);
             unsafe {
@@ -1603,7 +1712,7 @@ mod test {
 
     #[test]
     pub fn read_tags() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut archetypes = Storage::new(WorldId::default());
 
@@ -1647,7 +1756,7 @@ mod test {
 
     #[test]
     pub fn create_zero_size_tags() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut archetypes = Storage::new(WorldId::default());
 
@@ -1669,7 +1778,8 @@ mod test {
             .unwrap()
             .get_mut(chunk_index)
             .unwrap();
-        let (chunk_entities, chunk_components) = components.write();
+        let mut writer = components.writer();
+        let (chunk_entities, chunk_components) = writer.get();
 
         chunk_entities.push(Entity::new(1, Wrapping(0)));
         unsafe {
@@ -1683,7 +1793,7 @@ mod test {
 
     #[test]
     pub fn create_zero_size_components() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let mut archetypes = Storage::new(WorldId::default());
 
@@ -1703,7 +1813,8 @@ mod test {
             .unwrap()
             .get_mut(chunk_index)
             .unwrap();
-        let (chunk_entities, chunk_components) = components.write();
+        let mut writer = components.writer();
+        let (chunk_entities, chunk_components) = writer.get();
 
         chunk_entities.push(Entity::new(1, Wrapping(0)));
         unsafe {

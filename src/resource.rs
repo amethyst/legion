@@ -380,7 +380,7 @@ mod tests {
 
     #[test]
     fn simple_read_write_test() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         struct TestOne {
             value: String,
