@@ -502,7 +502,7 @@ fn query_on_changed_self_changes() {
 
 #[test]
 fn query_try_with_changed_filter() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Sum(f32);
