@@ -7,7 +7,9 @@ use legion::{
     },
 };
 use serde::{
-    de::{IgnoredAny, DeserializeSeed}, ser::SerializeStruct, Deserialize, Deserializer, Serialize, Serializer,
+    de::{DeserializeSeed, IgnoredAny},
+    ser::SerializeStruct,
+    Deserialize, Deserializer, Serialize, Serializer,
 };
 use std::{any::TypeId, cell::RefCell, collections::HashMap};
 use type_uuid::TypeUuid;
@@ -222,45 +224,46 @@ impl legion::de::WorldDeserializer for DeserializeImpl {
         }
         Ok(desc)
     }
-    fn deserialize_components<DD: for<'b> Deserializer<'b>>(
+    fn deserialize_components<'de, D: Deserializer<'de>>(
         &self,
-        deserializer: DD,
+        deserializer: D,
         component_type: &ComponentTypeId,
         component_meta: &ComponentMeta,
         components: &mut ComponentResourceSet,
-    ) -> Result<(), <DD as Deserializer>::Error> {
+    ) -> Result<(), <D as Deserializer<'de>>::Error> {
         if let Some(reg) = self.types.get(&component_type.0) {
             let mut writer = components.writer();
             let mut erased = erased_serde::Deserializer::erase(deserializer);
             (reg.comp_deserialize_fn)(&mut erased, &mut writer)
-                .map_err(<<DD as serde::Deserializer>::Error as serde::de::Error>::custom)?;
+                .map_err(<<D as serde::Deserializer<'de>>::Error as serde::de::Error>::custom)?;
         } else {
             <IgnoredAny>::deserialize(deserializer)?;
         }
         Ok(())
     }
-    fn deserialize_tags<D: for<'de> Deserializer<'de>>(
+    fn deserialize_tags<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
         tag_type: &TagTypeId,
         tag_meta: &TagMeta,
         tags: &mut TagStorage,
-    ) -> Result<(), <D as Deserializer>::Error> {
+    ) -> Result<(), <D as Deserializer<'de>>::Error> {
         if let Some(reg) = self.types.get(&tag_type.0) {
             let mut erased = erased_serde::Deserializer::erase(deserializer);
+            println!("deserialized {:?}", tag_type.0);
             (reg.tag_deserialize_fn)(&mut erased, tags)
-                .map_err(<<D as serde::Deserializer>::Error as serde::de::Error>::custom)?;
+                .map_err(<<D as serde::Deserializer<'de>>::Error as serde::de::Error>::custom)?;
         } else {
             <IgnoredAny>::deserialize(deserializer)?;
         }
         Ok(())
     }
-    fn deserialize_entities<D: for<'de> Deserializer<'de>>(
+    fn deserialize_entities<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
         entity_allocator: &mut EntityAllocator,
         entities: &mut Vec<Entity>,
-    ) -> Result<(), <D as Deserializer>::Error> {
+    ) -> Result<(), <D as Deserializer<'de>>::Error> {
         let entity_uuids = <Vec<uuid::Bytes> as Deserialize>::deserialize(deserializer)?;
         let mut entity_map = self.entity_map.borrow_mut();
         for id in entity_uuids {
@@ -289,7 +292,7 @@ fn main() {
     );
     // Unserializable components are not serialized, so only the Pos components should be serialized in this chunkset
     world.insert(
-        (Unregistered(4., 5., 6.),),
+        (Pos(4., 5., 6.), Unregistered(4., 5., 6.)),
         vec![
             (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
             (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
@@ -319,6 +322,7 @@ fn main() {
     let json_data = serde_json::to_string(&serializable).unwrap();
     println!("{}", json_data);
     let mut deserialized_world = universe.create_world();
-     let mut deserializer = serde_json::Deserializer::from_str(&json_data);
-    let deserialize = legion::de::deserialize(&mut deserialized_world, &de_helper, &mut deserializer);
+    let mut deserializer = serde_json::Deserializer::from_str(&json_data);
+    let deserialize =
+        legion::de::deserialize(&mut deserialized_world, &de_helper, &mut deserializer);
 }

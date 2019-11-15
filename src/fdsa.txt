@@ -1,0 +1,29 @@
+So, I will try to respecify
+* Users declare an ordered set of barriers, e.g. "Transform Update".
+* Users declare a set of jobs, each of which contains:
+  * Optionally, a single run after barrier relationship
+  * If the job mutates entities, a barrier at which structural changes will be committed (an implicit run-before).
+  * Job exclusivity rules (which jobs this job can/can't run concurrently with - based upon resource access and/or archetype filter analysis).
+* Generate a dependency graph with the following method.
+  * Assign a number to each barrier based on their relative ordering
+  * Put all jobs in a list sorted by barrier and registration order
+  * Create a dummy root node
+  * Create a node for each barrier
+  * Create a map to keep track of the last observed job that mutated a certain resource
+  * Iterate over the sorted jobs, creating a new node for each job:
+    * If the job has a "run after" barrier:
+        * Create an edge from the barrier's node to the current job node
+    * If the job mutates entities:
+        * Create an edge from the current job node to the node of the job's structural change barrier 
+    * For each resource accessed by the job:
+        * Create an edge from the job node that last accessed the resource mutably (or root if none) to the current job node.
+        * If the resource is accessed mutably, update the map created in step 5
+* Topologically sort the graph to get a flat, ordered vector
+* Create a bitset that keeps track of job completion
+* Create a bitset that keeps track of whether a job has been scheduled
+* Create a bitset for each job in the graph and fill it with the job dependencies' indices
+* Create a bitset for each barrier in the graph and fill it with the barrier's reverse dependencies' indices
+
+* Scheduling logic:
+  * Iterate over jobs that have not been scheduled
+    * 

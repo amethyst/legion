@@ -614,12 +614,13 @@ impl ArchetypeData {
     }
 
     /// Finds a chunk with space free for at least one entity, creating one if needed.
-    pub(crate) fn get_free_chunk(&mut self, set_index: usize) -> usize {
+    pub(crate) fn get_free_chunk(&mut self, set_index: usize, minimum_space: usize) -> usize {
         let count = {
             let chunks = &mut self.chunk_sets[set_index];
             let len = chunks.len();
             for (i, chunk) in chunks.iter_mut().enumerate() {
-                if !chunk.is_full() {
+                let space_left = chunk.capacity() - chunk.len();
+                if space_left >= minimum_space {
                     return i;
                 }
             }
