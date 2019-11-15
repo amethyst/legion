@@ -19,83 +19,9 @@ struct Model(u32);
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 struct Static;
 
-// fn create_test_world() -> (
-//     World,
-//     HashMap<
-//         Entity,
-//         (
-//             Option<Pos>,
-//             Option<Rot>,
-//             Option<Vel>,
-//             Option<Model>,
-//             Option<Static>,
-//         ),
-//     >,
-// ) {
-//     let universe = Universe::new(None, None);
-//     let mut world = universe.create_world();
-//     let mut expected: HashMap<
-//         Entity,
-//         (
-//             Option<Pos>,
-//             Option<Rot>,
-//             Option<Vel>,
-//             Option<Model>,
-//             Option<Static>,
-//         ),
-//     > = HashMap::new();
-
-// // pos, rot
-// let data = Vec::from_iter(std::iter::unfold(0f32, |x| {*x += 1.; Some((Pos(*x + 1., *x + 1., *x + 2.), Rot(*x + 3., *x + 4., *x + 5.))) }).take(1000));
-// for (i, e) in world.insert_from((), data.clone()).iter().enumerate() {
-//     let (pos, rot) = data.get(i).unwrap();
-//     expected.insert(*e, (Some(*pos), Some(*rot), None, None, None));
-// }
-
-// // model(1) | pos, rot
-// let data = Vec::from_iter(std::iter::unfold(0f32, |x| {*x += 1.; Some((Pos(*x + 1., *x + 1., *x + 2.), Rot(*x + 3., *x + 4., *x + 5.))) }).take(1000));
-// for (i, e) in world.insert_from((Model(1),), data.clone()).iter().enumerate() {
-//     let (pos, rot) = data.get(i).unwrap();
-//     expected.insert(*e, (Some(*pos), Some(*rot), None, Some(Model(1)), None));
-// }
-
-// // model(2) | pos, rot
-// let data = Vec::from_iter(std::iter::unfold(0f32, |x| {*x += 1.; Some((Pos(*x + 1., *x + 1., *x + 2.), Rot(*x + 3., *x + 4., *x + 5.))) }).take(1000));
-// for (i, e) in world.insert_from((Model(2),), data.clone()).iter().enumerate() {
-//     let (pos, rot) = data.get(i).unwrap();
-//     expected.insert(*e, (Some(*pos), Some(*rot), None, Some(Model(2)), None));
-// }
-
-// // static | pos, rot
-// let data = Vec::from_iter(std::iter::unfold(0f32, |x| {*x += 1.; Some((Pos(*x + 1., *x + 1., *x + 2.), Rot(*x + 3., *x + 4., *x + 5.))) }).take(1000));
-// for (i, e) in world.insert_from((Static,), data.clone()).iter().enumerate() {
-//     let (pos, rot) = data.get(i).unwrap();
-//     expected.insert(*e, (Some(*pos), Some(*rot), None, None, Some(Static)));
-// }
-
-// // static, model(1) | pos, rot
-// let data = Vec::from_iter(std::iter::unfold(0f32, |x| {*x += 1.; Some((Pos(*x + 1., *x + 1., *x + 2.), Rot(*x + 3., *x + 4., *x + 5.))) }).take(1000));
-// for (i, e) in world.insert_from((Static, Model(1)), data.clone()).iter().enumerate() {
-//     let (pos, rot) = data.get(i).unwrap();
-//     expected.insert(*e, (Some(*pos), Some(*rot), None, Some(Model(1)), Some(Static)));
-// }
-
-// // pos, rot, vel
-// let data = Vec::from_iter(std::iter::unfold(0f32, |x| {
-//     *x += 1.;
-//     Some((Pos(*x + 1., *x + 1., *x + 2.), Rot(*x + 3., *x + 4., *x + 5.), Vel(*x + 6., *x + 7., *x + 8.)))
-// }).take(1000));
-// for (i, e) in world.insert_from((), data.clone()).iter().enumerate() {
-//     let (pos, rot, vel) = data.get(i).unwrap();
-//     expected.insert(*e, (Some(*pos), Some(*rot), Some(*vel), None, None));
-// }
-
-//     (world, expected)
-// }
-
 #[test]
 fn query_read_entity_data() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -127,7 +53,7 @@ fn query_read_entity_data() {
 
 #[test]
 fn query_try_read_entity_data() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -148,7 +74,7 @@ fn query_try_read_entity_data() {
 
 #[test]
 fn query_try_write_entity_data() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -167,7 +93,7 @@ fn query_try_write_entity_data() {
 
 #[test]
 fn query_cached_read_entity_data() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -200,7 +126,7 @@ fn query_cached_read_entity_data() {
 #[test]
 #[cfg(feature = "par-iter")]
 fn query_read_entity_data_par() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -234,7 +160,7 @@ fn query_read_entity_data_par() {
 #[test]
 #[cfg(feature = "par-iter")]
 fn query_read_entity_data_par_foreach() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -264,7 +190,7 @@ fn query_read_entity_data_par_foreach() {
 
 #[test]
 fn query_read_entity_data_tuple() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -297,7 +223,7 @@ fn query_read_entity_data_tuple() {
 
 #[test]
 fn query_write_entity_data() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -331,7 +257,7 @@ fn query_write_entity_data() {
 
 #[test]
 fn query_write_entity_data_tuple() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -367,7 +293,7 @@ fn query_write_entity_data_tuple() {
 
 #[test]
 fn query_mixed_entity_data_tuple() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -402,7 +328,7 @@ fn query_mixed_entity_data_tuple() {
 
 #[test]
 fn query_partial_match() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -437,7 +363,7 @@ fn query_partial_match() {
 
 #[test]
 fn query_read_shared_data() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -463,7 +389,7 @@ fn query_read_shared_data() {
 
 #[test]
 fn query_on_changed_first() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -495,7 +421,7 @@ fn query_on_changed_first() {
 
 #[test]
 fn query_on_changed_no_changes() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();
@@ -535,7 +461,7 @@ fn query_on_changed_no_changes() {
 
 #[test]
 fn query_on_changed_self_changes() {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
     let mut world = universe.create_world();

@@ -1,13 +1,19 @@
 use crate::{entity::Entity, filter::EntityFilter, world::WorldId};
 use derivative::Derivative;
 use shrinkwraprs::Shrinkwrap;
-use std::{cell::RefCell, collections::VecDeque, marker::PhantomData};
+use std::marker::PhantomData;
 
 #[cfg(feature = "par-iter")]
 use rayon::prelude::*;
 
 #[cfg(feature = "par-iter")]
-use crossbeam::queue::{ArrayQueue, PopError, PushError};
+use crossbeam::queue::{ArrayQueue, PushError};
+
+#[cfg(not(feature = "par-iter"))]
+use std::collections::VecDeque;
+
+#[cfg(not(feature = "par-iter"))]
+use std::cell::RefCell;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ListenerId(usize);

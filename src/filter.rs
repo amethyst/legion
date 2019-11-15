@@ -1141,9 +1141,9 @@ mod test {
 
     #[test]
     pub fn create() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let filter = component::<usize>() | tag_value(&5isize);
-        log::trace!("{:?}", filter);
+        tracing::trace!(?filter);
     }
 }

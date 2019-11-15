@@ -108,7 +108,6 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        log::trace!("Adding component: {}", std::any::type_name::<C>());
         world.add_component::<C>(consumed.entity, consumed.component)
     }
 
@@ -220,7 +219,7 @@ impl CommandBuffer {
     fn get_commands(&self) -> &SegQueue<EntityCommand> { &self.commands }
 
     pub fn write(&self, world: &mut World) {
-        log::trace!("Performing drain");
+        tracing::trace!("Draining command buffer");
         #[cfg(feature = "par-iter")]
         {
             while let Ok(command) = self.get_commands().pop() {
@@ -351,7 +350,7 @@ mod tests {
 
     #[test]
     fn simple_write_test() {
-        let _ = env_logger::builder().is_test(true).try_init();
+        let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
         let mut world = universe.create_world();
