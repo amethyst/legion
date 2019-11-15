@@ -10,10 +10,10 @@ use bit_set::BitSet;
 use derivative::Derivative;
 use std::{marker::PhantomData, sync::Arc};
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "par-schedule")]
 use crossbeam::queue::SegQueue;
 
-#[cfg(not(feature = "par-iter"))]
+#[cfg(not(feature = "par-schedule"))]
 use crate::borrow::{AtomicRefCell, Exclusive, RefMut};
 
 pub trait WorldWritable {
@@ -193,9 +193,9 @@ where
 
 #[derive(Default)]
 pub struct CommandBuffer {
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     commands: SegQueue<EntityCommand>,
-    #[cfg(not(feature = "par-iter"))]
+    #[cfg(not(feature = "par-schedule"))]
     commands: AtomicRefCell<Vec<EntityCommand>>,
     block: Option<EntityBlock>,
     used_entities: BitSet,
@@ -210,17 +210,17 @@ pub enum CommandError {
 }
 
 impl CommandBuffer {
-    #[cfg(not(feature = "par-iter"))]
+    #[cfg(not(feature = "par-schedule"))]
     #[inline]
     fn get_commands(&self) -> RefMut<'_, Exclusive, Vec<EntityCommand>> { self.commands.get_mut() }
 
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     #[inline]
     fn get_commands(&self) -> &SegQueue<EntityCommand> { &self.commands }
 
     pub fn write(&self, world: &mut World) {
         tracing::trace!("Draining command buffer");
-        #[cfg(feature = "par-iter")]
+        #[cfg(feature = "par-schedule")]
         {
             while let Ok(command) = self.get_commands().pop() {
                 match command {
@@ -231,7 +231,7 @@ impl CommandBuffer {
             }
         }
 
-        #[cfg(not(feature = "par-iter"))]
+        #[cfg(not(feature = "par-schedule"))]
         {
             while let Some(command) = self.get_commands().pop() {
                 match command {
