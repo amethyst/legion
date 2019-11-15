@@ -1,0 +1,69 @@
+name: CI
+
+on: [push]
+
+jobs:
+  check:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust: 
+          - stable
+          - beta
+          - nightly
+        features:
+          - --all-features
+          - --no-default-features
+          - --no-default-features --features events
+          - --no-default-features --features par-iter
+          - --no-default-features --features par-schedule
+          - --no-default-features --features metrics
+          - --no-default-features --features ffi
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: ${{ matrix.rust }}
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: check
+          args: ${{ matrix.features }}
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: ${{ matrix.features }} 
+
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: rustup component add rustfmt
+      - uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: rustup component add clippy
+      - uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings.
