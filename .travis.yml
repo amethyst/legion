@@ -14,3 +14,8 @@ script:
   - cargo test --no-default-features --features events
   - cargo test --no-default-features --features par-iter
   - cargo test --no-default-features --features ffi
+  - cargo test --release --all-features
+  - cargo test --release --no-default-features
+  - cargo test --release --no-default-features --features events
+  - cargo test --release --no-default-features --features par-iter
+  - cargo test --release --no-default-features --features ffi
