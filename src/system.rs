@@ -1399,21 +1399,8 @@ mod tests {
 
         let systems = vec![system_one, system_two, system_three, system_four];
 
-        #[cfg(feature = "par-iter")]
-        {
-            let pool = rayon::ThreadPoolBuilder::new()
-                .num_threads(8)
-                .build()
-                .unwrap();
-
-            let mut executor = StageExecutor::new(systems);
-            pool.install(|| executor.execute(&mut world));
-        }
-        #[cfg(not(feature = "par-iter"))]
-        {
-            let mut executor = StageExecutor::new(systems);
-            executor.execute(&mut world);
-        }
+        let mut executor = StageExecutor::new(systems);
+        executor.execute(&mut world);
 
         assert_eq!(*(runs.lock().unwrap()), order);
     }
@@ -1494,7 +1481,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     fn par_res_write() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let _ = tracing_subscriber::fmt::try_init();
@@ -1562,7 +1549,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     fn par_res_readwrite() {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let _ = tracing_subscriber::fmt::try_init();
@@ -1619,7 +1606,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     #[allow(clippy::float_cmp)]
     fn par_comp_readwrite() {
         let _ = tracing_subscriber::fmt::try_init();

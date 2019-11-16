@@ -18,7 +18,7 @@ use std::{
 };
 use tracing::{span, trace, Level};
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "par-schedule")]
 use rayon::prelude::*;
 
 /// Empty trait which defines a `System` as schedulable by the dispatcher - this requires that the
@@ -70,25 +70,29 @@ pub trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq + Display + Debug {}
 /// Executes all systems that are to be run within a single given stage.
 pub struct StageExecutor {
     systems: Vec<Box<dyn Schedulable>>,
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     static_dependants: Vec<Vec<usize>>,
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     dynamic_dependants: Vec<Vec<usize>>,
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     static_dependency_counts: Vec<AtomicUsize>,
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     awaiting: Vec<AtomicUsize>,
 }
 
 impl StageExecutor {
-    #[cfg(not(feature = "par-iter"))]
+    /// Constructs a new executor for all systems to be run in a single stage.
+    ///
+    /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
+    /// are to be observed.
+    #[cfg(not(feature = "par-schedule"))]
     pub fn new(systems: Vec<Box<dyn Schedulable>>) -> Self { Self { systems } }
 
     /// Constructs a new executor for all systems to be run in a single stage.
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     #[allow(clippy::cognitive_complexity)]
     // TODO: we should break this up
     pub fn new(systems: Vec<Box<dyn Schedulable>>) -> Self {
@@ -208,8 +212,8 @@ impl StageExecutor {
 
     /// This is a linear executor which just runs the system in their given order.
     ///
-    /// Only enabled with par-iter is disabled
-    #[cfg(not(feature = "par-iter"))]
+    /// Only enabled with par-schedule is disabled
+    #[cfg(not(feature = "par-schedule"))]
     pub fn execute(&mut self, world: &mut World) {
         self.systems.iter_mut().for_each(|system| {
             system.run(world);
@@ -227,7 +231,7 @@ impl StageExecutor {
     /// systems in this stage have completed.
     ///
     /// Call from within `rayon::ThreadPool::install()` to execute within a specific thread pool.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     pub fn execute(&mut self, world: &mut World) {
         rayon::join(
             || {},
@@ -293,7 +297,7 @@ impl StageExecutor {
     }
 
     /// Recursively execute through the generated depedency cascade and exhaust it.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "par-schedule")]
     fn run_recursive(&self, i: usize, world: &World) {
         self.systems[i].run(world);
 
@@ -333,9 +337,9 @@ pub struct Schedule<S: Stage> {
 /// Each stage is executed sequentially, with system command buffers flushed at the end
 /// of each stage.
 ///
-/// Systems within a stage may be scheduled concurrently. Dependency ordering is guarenteed
-/// only in terms of the order in which reads and writes to resources and entities might
-/// be observed.
+/// If the `par-schedule` feature is enabled, systems within a stage may be scheduled concurrently.
+/// Dependency ordering is guarenteed only in terms of the order in which reads and writes to
+/// resources and entities might be observed.
 ///
 /// Every system within a scheduler must have a unique system ID.
 pub struct SystemScheduler<S: Stage> {

@@ -37,7 +37,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{info, span, trace, Level};
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "events")]
 use rayon::prelude::*;
 
 #[cfg(feature = "events")]
@@ -227,7 +227,7 @@ impl World {
 
         trace!(count = entities.len(), "Inserted entities");
 
-        #[cfg(all(feature = "events", feature = "par-iter"))]
+        #[cfg(all(feature = "events"))]
         {
             entities.par_iter().for_each(|e| {
                 self.channel

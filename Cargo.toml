@@ -14,11 +14,12 @@ edition = "2018"
 travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
-default = ["par-iter", "events", "ffi"]
-par-iter = ["rayon", "crossbeam"]
+default = ["par-iter", "par-schedule", "events", "ffi"]
+par-iter = ["rayon"]
+par-schedule = ["rayon", "crossbeam"]
 log = ["tracing/log", "tracing/log-always"]
 ffi = []
-events = []
+events = ["rayon", "crossbeam"]
 
 [dependencies]
 parking_lot = "0.9"

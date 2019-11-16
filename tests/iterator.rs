@@ -20,7 +20,7 @@ fn slice_vec_iterator_split() {
     vec.push(vec![1, 2, 3, 4]);
     vec.push(vec![5, 6, 7, 8]);
     vec.push(vec![9, 10]);
-    
+
     let (mut left, mut right, left_len) = vec.iter().split();
     assert_eq!(left_len, 1);
 

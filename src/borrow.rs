@@ -565,7 +565,7 @@ impl<'a, State: 'a + Clone, T: 'a, I: Iterator<Item = &'a T>> TryRefIter<'a, Sta
                 borrow,
                 iter,
                 _phantom: PhantomData,
-            }
+            },
         }
     }
 
@@ -585,8 +585,11 @@ impl<'a, State: 'a + Clone, T: 'a, I: Iterator<Item = &'a T>> Iterator
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner {
-            TryIter::Found { ref borrow, ref mut iter, .. } => 
-                Some(Ref::new(borrow.clone(), iter.next()?)),
+            TryIter::Found {
+                ref borrow,
+                ref mut iter,
+                ..
+            } => Some(Ref::new(borrow.clone(), iter.next()?)),
             TryIter::Missing(ref mut n) => {
                 *n = n.checked_sub(1)?;
                 None
@@ -656,7 +659,9 @@ pub struct TryRefIterMut<'a, State: 'a + UnsafeClone, T: 'a, I: Iterator<Item = 
     inner: TryIter<'a, State, I>,
 }
 
-impl<'a, State: 'a + UnsafeClone, T: 'a, I: Iterator<Item = &'a mut T>> TryRefIterMut<'a, State, T, I> {
+impl<'a, State: 'a + UnsafeClone, T: 'a, I: Iterator<Item = &'a mut T>>
+    TryRefIterMut<'a, State, T, I>
+{
     #[inline(always)]
     pub(crate) fn found(borrow: State, iter: I) -> Self {
         Self {
@@ -664,7 +669,7 @@ impl<'a, State: 'a + UnsafeClone, T: 'a, I: Iterator<Item = &'a mut T>> TryRefIt
                 borrow,
                 iter,
                 _phantom: PhantomData,
-            }
+            },
         }
     }
 
@@ -684,8 +689,11 @@ impl<'a, State: 'a + UnsafeClone, T: 'a, I: Iterator<Item = &'a mut T>> Iterator
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         Some(match self.inner {
-            TryIter::Found { ref borrow, ref mut iter, .. } => 
-                Some(RefMut::new(unsafe { borrow.clone() }, iter.next()?)),
+            TryIter::Found {
+                ref borrow,
+                ref mut iter,
+                ..
+            } => Some(RefMut::new(unsafe { borrow.clone() }, iter.next()?)),
             TryIter::Missing(ref mut n) => {
                 *n = n.checked_sub(1)?;
                 None
@@ -701,7 +709,7 @@ impl<'a, State: 'a + UnsafeClone, T: 'a, I: Iterator<Item = &'a mut T>> Iterator
     }
 }
 
-impl<'a, State: 'a + UnsafeClone, T: 'a, I: Iterator<Item = &'a mut T> + ExactSizeIterator> ExactSizeIterator
-    for TryRefIterMut<'a, State, T, I>
+impl<'a, State: 'a + UnsafeClone, T: 'a, I: Iterator<Item = &'a mut T> + ExactSizeIterator>
+    ExactSizeIterator for TryRefIterMut<'a, State, T, I>
 {
 }
