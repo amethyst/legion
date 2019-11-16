@@ -471,6 +471,8 @@ impl<S: Stage> SystemScheduler<S> {
                 let executor = StageExecutor::new(systems);
                 self.scheduled.insert(executor_index, (stage, executor));
                 return Some((result, schedule));
+            } else if let Some(index) = self.unscheduled.iter().position(|s| s.name() == &id) {
+                self.unscheduled.swap_remove(index);
             }
         }
 

@@ -1346,7 +1346,7 @@ mod tests {
         let system_one = SystemBuilder::<()>::new("TestSystem1")
             .read_resource::<TestResource>()
             .with_query(Read::<Pos>::query())
-            .with_query(Read::<Vel>::query())
+            .with_query(Write::<Vel>::query())
             .build(move |_commands, _world, _resource, _queries| {
                 tracing::trace!("system_one");
                 system_one_runs
