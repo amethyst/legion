@@ -112,7 +112,8 @@ impl StageExecutor {
                 let span = span!(
                     Level::TRACE,
                     "Building system dependencies",
-                    system = %system.name()
+                    system = %system.name(),
+                    index = i,
                 );
                 let _guard = span.enter();
 
@@ -174,7 +175,9 @@ impl StageExecutor {
 
                 trace!(depentants = ?comp_dependencies, "Computed dynamic dependants");
                 for dep in comp_dependencies {
-                    dynamic_dependants[dep].push(i);
+                    if dep != i { // dont be dependent on ourselves
+                        dynamic_dependants[dep].push(i);
+                    }
                 }
             }
 
@@ -256,6 +259,8 @@ impl StageExecutor {
                         )
                         .par_bridge()
                         .for_each(|(sys, static_dep, dyn_dep)| {
+                            use std::any::Any;
+
                             let archetypes = sys.accesses_archetypes();
                             for i in (0..dyn_dep.len()).rev() {
                                 let dep = dyn_dep[i];
@@ -280,7 +285,6 @@ impl StageExecutor {
 
                         // execute all systems with no outstanding dependencies
                         (0..systems.len())
-                            .into_par_iter()
                             .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
                             .for_each(|i| {
                                 self.run_recursive(i, world);
