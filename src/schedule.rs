@@ -60,15 +60,12 @@ pub trait Runnable {
     fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;
 }
 
-/// Stages represent discrete steps of a game's loop, such as "start", "update", "draw", "end", etc.
-/// Stages have a defined execution order.
+/// Executes a sequence of systems, potentially in parallel, and then commits their command buffers.
 ///
-/// Systems run within a stage, and commit any buffered changes to the ecs at the end of a stage
-/// (which may or may not be the stage within which they run, but cannot be an earlier stage).
-pub trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq + Display + Debug {}
-
-/// Executes all systems that are to be run within a single given stage.
-pub struct StageExecutor {
+/// Systems are provided in execution order. When the `par-schedule` feature is enabled, the `Executor`
+/// may run some systems in parallel. The order in which side-effects (e.g. writes to resources
+/// or entities) are observed is maintained.
+pub struct Executor {
     systems: Vec<Box<dyn Schedulable>>,
     #[cfg(feature = "par-schedule")]
     static_dependants: Vec<Vec<usize>>,
@@ -80,7 +77,7 @@ pub struct StageExecutor {
     awaiting: Vec<AtomicUsize>,
 }
 
-impl StageExecutor {
+impl Executor {
     /// Constructs a new executor for all systems to be run in a single stage.
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
@@ -193,7 +190,7 @@ impl StageExecutor {
                 .iter()
                 .for_each(|_| awaiting.push(AtomicUsize::new(0)));
 
-            Self {
+            Executor {
                 awaiting,
                 static_dependants,
                 dynamic_dependants,
@@ -201,7 +198,7 @@ impl StageExecutor {
                 systems,
             }
         } else {
-            Self {
+            Executor {
                 awaiting: Vec::with_capacity(0),
                 static_dependants: Vec::with_capacity(0),
                 dynamic_dependants: Vec::with_capacity(0),
@@ -214,29 +211,30 @@ impl StageExecutor {
     /// Converts this executor into a vector of its component systems.
     pub fn into_vec(self) -> Vec<Box<dyn Schedulable>> { self.systems }
 
-    /// This is a linear executor which just runs the system in their given order.
+    /// Executes all systems and then flushes their command buffers.
+    pub fn execute(&mut self, world: &mut World) {
+        self.run_systems(world);
+        self.flush_command_buffers(world);
+    }
+
+    /// Executes all systems sequentially.
     ///
     /// Only enabled with par-schedule is disabled
     #[cfg(not(feature = "par-schedule"))]
-    pub fn execute(&mut self, world: &mut World) {
+    pub fn run_systems(&mut self, world: &mut World) {
         self.systems.iter_mut().for_each(|system| {
             system.run(world);
         });
-
-        // Flush the command buffers of all the systems
-        self.systems.iter().for_each(|system| {
-            system.command_buffer_mut().write(world);
-        });
     }
 
-    /// Executes this stage. Execution is recursively conducted in a draining fashion. Systems are
-    /// ordered based on 1. their resource access, and then 2. their insertion order. systems are
-    /// executed in the pool provided at construction, and this function does not return until all
-    /// systems in this stage have completed.
+    /// Executes all systems, potentially in parallel.
+    ///
+    /// Ordering is retained in so far as the order of observed resource and component
+    /// accesses is maintained.
     ///
     /// Call from within `rayon::ThreadPool::install()` to execute within a specific thread pool.
     #[cfg(feature = "par-schedule")]
-    pub fn execute(&mut self, world: &mut World) {
+    pub fn run_systems(&mut self, world: &mut World) {
         rayon::join(
             || {},
             || {
@@ -292,8 +290,10 @@ impl StageExecutor {
                 }
             },
         );
+    }
 
-        // Flush the command buffers of all the systems
+    /// Flushes the recorded command buffers for all systems.
+    pub fn flush_command_buffers(&mut self, world: &mut World) {
         self.systems.iter().for_each(|system| {
             system.command_buffer_mut().write(world);
         });
@@ -322,6 +322,104 @@ impl StageExecutor {
     }
 }
 
+pub struct Builder {
+    steps: Vec<Step>,
+    accumulator: Vec<Box<dyn Schedulable>>,
+}
+
+impl Builder {
+    pub fn add_system<T: Into<Box<dyn Schedulable>>>(&mut self, system: T) {
+        self.accumulator.push(system.into());
+    }
+
+    pub fn add_sync_point(&mut self) {
+        self.finalize_executor();
+        self.steps.push(Step::FlushCmdBuffers);
+    }
+
+    fn finalize_executor(&mut self) {
+        if !self.accumulator.is_empty() {
+            let mut systems = Vec::new();
+            std::mem::swap(&mut self.accumulator, &mut systems);
+            let executor = Executor::new(systems);
+            self.steps.push(Step::Systems(executor));
+        }
+    }
+
+    pub fn add_thread_local<F: FnMut(&mut World) + 'static>(&mut self, f: F) {
+        self.finalize_executor();
+        self.steps.push(Step::ThreadLocalFn(
+            Box::new(f) as Box<dyn FnMut(&mut World)>
+        ));
+    }
+
+    pub fn add_thread_local_system<S: Into<Box<dyn Runnable>>>(&mut self, system: S) {
+        let system = system.into();
+        self.add_thread_local(move |world| system.run(world));
+    }
+}
+
+impl Default for Builder {
+    fn default() -> Self {
+        Self {
+            steps: Vec::new(),
+            accumulator: Vec::new(),
+        }
+    }
+}
+
+pub enum Step {
+    Systems(Executor),
+    FlushCmdBuffers,
+    ThreadLocalFn(Box<dyn FnMut(&mut World)>),
+}
+
+pub struct Scheduler {
+    steps: Vec<Step>,
+}
+
+impl Scheduler {
+    pub fn builder() -> Builder { Builder::default() }
+
+    pub fn execute(&mut self, world: &mut World) {
+        let mut waiting_flush: Vec<&mut Executor> = Vec::new();
+        for step in &mut self.steps {
+            match step {
+                Step::Systems(executor) => {
+                    executor.run_systems(world);
+                    waiting_flush.push(executor);
+                }
+                Step::FlushCmdBuffers => waiting_flush
+                    .drain(..)
+                    .for_each(|e| e.flush_command_buffers(world)),
+                Step::ThreadLocalFn(function) => function(world),
+            }
+        }
+    }
+
+    pub fn into_vec(self) -> Vec<Step> { self.steps }
+}
+
+impl From<Builder> for Scheduler {
+    fn from(mut builder: Builder) -> Self {
+        builder.add_sync_point();
+        Self {
+            steps: builder.steps,
+        }
+    }
+}
+
+impl From<Vec<Step>> for Scheduler {
+    fn from(steps: Vec<Step>) -> Self { Self { steps } }
+}
+
+/// Stages represent discrete steps of a game's loop, such as "start", "update", "draw", "end", etc.
+/// Stages have a defined execution order.
+///
+/// Systems run within a stage, and commit any buffered changes to the ecs at the end of a stage
+/// (which may or may not be the stage within which they run, but cannot be an earlier stage).
+pub trait Stage: Copy + PartialOrd + Ord + PartialEq + Eq + Display + Debug {}
+
 /// Describes the scheduling constraints of a system.
 #[derive(Debug, Clone)]
 pub struct Schedule<S: Stage> {
@@ -348,7 +446,7 @@ pub struct Schedule<S: Stage> {
 pub struct SystemScheduler<S: Stage> {
     _stage: PhantomData<S>,
     dependencies: HashMap<SystemId, Schedule<S>>,
-    scheduled: Vec<(S, StageExecutor)>,
+    scheduled: Vec<(S, Executor)>,
     unscheduled: Vec<Box<dyn Schedulable>>,
 }
 
@@ -471,7 +569,7 @@ impl<S: Stage> SystemScheduler<S> {
                 let system_index = systems.iter().position(|s| s.name() == &id).unwrap();
                 let result = systems.remove(system_index);
 
-                let executor = StageExecutor::new(systems);
+                let executor = Executor::new(systems);
                 self.scheduled.insert(executor_index, (stage, executor));
                 return Some((result, schedule));
             } else if let Some(index) = self.unscheduled.iter().position(|s| s.name() == &id) {
@@ -612,7 +710,7 @@ impl<S: Stage> SystemScheduler<S> {
                         .drain(..)
                         .map(|id| systems.remove(&node_to_system[&id]).unwrap())
                         .collect();
-                    let executor = StageExecutor::new(systems);
+                    let executor = Executor::new(systems);
                     self.scheduled.push((stage, executor));
                 }
                 Err(cycle) => panic!(

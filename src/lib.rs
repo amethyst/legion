@@ -255,7 +255,7 @@ pub mod prelude {
     pub use crate::filter::filter_fns::*;
     pub use crate::query::{IntoQuery, Query, Read, Tagged, TryRead, TryWrite, Write};
     pub use crate::resource::{ResourceSet, Resources};
-    pub use crate::schedule::{Runnable, Schedulable, Stage, StageExecutor, SystemScheduler};
+    pub use crate::schedule::{Executor, Runnable, Schedulable, Stage, SystemScheduler};
     pub use crate::system::{System, SystemBuilder};
     pub use crate::world::{Universe, World};
     pub use bit_set::BitSet;

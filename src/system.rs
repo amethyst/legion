@@ -1399,7 +1399,7 @@ mod tests {
 
         let systems = vec![system_one, system_two, system_three, system_four];
 
-        let mut executor = StageExecutor::new(systems);
+        let mut executor = Executor::new(systems);
         executor.execute(&mut world);
 
         assert_eq!(*(runs.lock().unwrap()), order);
@@ -1529,7 +1529,7 @@ mod tests {
         );
 
         let systems = vec![system1, system2, system3];
-        let mut executor = StageExecutor::new(systems);
+        let mut executor = Executor::new(systems);
         pool.install(|| {
             for _ in 0..1000 {
                 executor.execute(&mut world);
@@ -1597,7 +1597,7 @@ mod tests {
         );
 
         let systems = vec![system1, system2, system3];
-        let mut executor = StageExecutor::new(systems);
+        let mut executor = Executor::new(systems);
         pool.install(|| {
             for _ in 0..1000 {
                 executor.execute(&mut world);
@@ -1730,7 +1730,7 @@ mod tests {
         );
 
         let systems = vec![system1, system2, system3, system4, system5];
-        let mut executor = StageExecutor::new(systems);
+        let mut executor = Executor::new(systems);
         pool.install(|| {
             for _ in 0..1000 {
                 executor.execute(&mut world);
