@@ -21,7 +21,7 @@ pub fn deserializable<'a, 'b, WD: WorldDeserializer>(
     deserialize_impl: &'b WD,
 ) -> WorldDeserialize<'a, 'b, WD> {
     WorldDeserialize {
-        world: world,
+        world,
         user: deserialize_impl,
     }
 }
@@ -208,7 +208,7 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de>
                 Err(de::Error::missing_field("data"))
             }
         }
-        const FIELDS: &'static [&'static str] = &["description", "tags", "chunk_sets"];
+        const FIELDS: &[&str] = &["description", "tags", "chunk_sets"];
         deserializer.deserialize_struct("Archetype", FIELDS, self)
     }
 }
@@ -283,13 +283,7 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for TagsDeserializ
         D: Deserializer<'de>,
     {
         let (mut deserialized_tags, this) = deserializer.deserialize_seq(self)?;
-        let tag_types = this
-            .archetype
-            .description()
-            .tags()
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let tag_types = this.archetype.description().tags().to_vec();
         let mut chunkset_map = ChunkSetMapping::new();
         let mut world_tag_storages = Vec::new();
         for (tag_type, _) in tag_types.iter() {
@@ -383,15 +377,17 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> Visitor<'de> for TagsDeserializer<'a, '
     {
         let tag_types = self.archetype.description().tags();
         let mut deserialized_tags = Vec::new();
-        for idx in 0..tag_types.len() {
-            let (tag_type, tag_meta) = tag_types[idx];
-            let mut tag_storage = TagStorage::new(tag_meta);
-            if let None = seq.next_element_seed(TagStorageDeserializer {
-                user: self.user,
-                tag_storage: &mut tag_storage,
-                tag_type: &tag_type,
-                tag_meta: &tag_meta,
-            })? {
+        for (tag_type, tag_meta) in tag_types {
+            let mut tag_storage = TagStorage::new(*tag_meta);
+            if seq
+                .next_element_seed(TagStorageDeserializer {
+                    user: self.user,
+                    tag_storage: &mut tag_storage,
+                    tag_type: &tag_type,
+                    tag_meta: &tag_meta,
+                })?
+                .is_none()
+            {
                 break;
             }
             deserialized_tags.push(tag_storage);
@@ -450,12 +446,15 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> Visitor<'de> for ChunkSetDeserializer<'
     {
         for idx in 0.. {
             let chunkset_idx = self.chunkset_map.get(&idx).cloned();
-            if let None = seq.next_element_seed(ChunkListDeserializer {
-                user: self.user,
-                world: self.world,
-                archetype_idx: self.archetype_idx,
-                chunkset_idx: chunkset_idx,
-            })? {
+            if seq
+                .next_element_seed(ChunkListDeserializer {
+                    user: self.user,
+                    world: self.world,
+                    archetype_idx: self.archetype_idx,
+                    chunkset_idx,
+                })?
+                .is_none()
+            {
                 break;
             }
         }
@@ -493,12 +492,15 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> Visitor<'de> for ChunkListDeserializer<
         A: de::SeqAccess<'de>,
     {
         loop {
-            if let None = seq.next_element_seed(ChunkDeserializer {
-                user: self.user,
-                world: self.world,
-                archetype_idx: self.archetype_idx,
-                chunkset_idx: self.chunkset_idx.expect("expected chunkset_idx"),
-            })? {
+            if seq
+                .next_element_seed(ChunkDeserializer {
+                    user: self.user,
+                    world: self.world,
+                    archetype_idx: self.archetype_idx,
+                    chunkset_idx: self.chunkset_idx.expect("expected chunkset_idx"),
+                })?
+                .is_none()
+            {
                 break;
             }
         }
@@ -669,13 +671,16 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> Visitor<'de> for ComponentsDeserializer
             let desc = archetype.description();
             let (comp_type, comp_meta) = desc.components()[idx];
             let mut chunkset = &mut archetype.chunksets_mut()[self.chunkset_idx];
-            if let None = seq.next_element_seed(ComponentDataDeserializer {
-                user: self.user,
-                comp_type: &comp_type,
-                comp_meta: &comp_meta,
-                chunkset: &mut chunkset,
-                chunk_ranges: self.chunk_ranges,
-            })? {
+            if seq
+                .next_element_seed(ComponentDataDeserializer {
+                    user: self.user,
+                    comp_type: &comp_type,
+                    comp_meta: &comp_meta,
+                    chunkset: &mut chunkset,
+                    chunk_ranges: self.chunk_ranges,
+                })?
+                .is_none()
+            {
                 break;
             }
         }

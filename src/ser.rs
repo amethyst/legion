@@ -128,7 +128,7 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for WorldSerializable<'a, 'b, CS> {
                         })
                         .map(|(idx, (ty, meta))| (idx, ty, meta))
                         .collect::<Vec<_>>();
-                    if valid_tags.len() != 0 || valid_components.len() != 0 {
+                    if !valid_tags.is_empty() || !valid_components.is_empty() {
                         Some(ArchetypeSerializer {
                             world_serializer: self.world_serializer,
                             archetype,

@@ -261,7 +261,11 @@ impl TagMeta {
 
     pub(crate) unsafe fn clone(&self, src: *const u8, dst: *mut u8) { (self.clone_fn)(src, dst) }
 
-    pub(crate) unsafe fn drop(&self, val: *mut u8) { self.drop_fn.map(|drop_fn| (drop_fn)(val)); }
+    pub(crate) unsafe fn drop(&self, val: *mut u8) {
+        if let Some(drop_fn) = self.drop_fn {
+            (drop_fn)(val);
+        }
+    }
 
     pub(crate) fn layout(&self) -> std::alloc::Layout {
         unsafe { std::alloc::Layout::from_size_align_unchecked(self.size, self.align) }
