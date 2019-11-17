@@ -15,6 +15,15 @@ jobs:
           override: true
       - uses: actions-rs/cargo@v1
         with:
+          command: generate-lockfile
+      - uses: actions/cache@v1.0.1
+        with:
+          path: target
+          key: ${{ runner.OS }}-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.OS }}-build-
+      - uses: actions-rs/cargo@v1
+        with:
           command: test
   
   check-features:
@@ -38,6 +47,15 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: generate-lockfile
+      - uses: actions/cache@v1.0.1
+        with:
+          path: target
+          key: ${{ runner.OS }}-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.OS }}-build-
       - uses: actions-rs/cargo@v1
         with:
           command: test
