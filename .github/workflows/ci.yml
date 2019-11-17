@@ -4,14 +4,25 @@ on: [push, pull_request]
 
 jobs:
   check:
-    name: Test Suite
+    name: Compile
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+  
+  check-features:
+    name: Features
+    runs-on: ubuntu-latest
+    needs: [check]
     strategy:
       matrix:
-        rust: 
-          - stable
-          - beta
-          - nightly
         features:
           - --all-features
           - --no-default-features
@@ -25,12 +36,8 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: ${{ matrix.rust }}
+          toolchain: stable
           override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: check
-          args: ${{ matrix.features }}
       - uses: actions-rs/cargo@v1
         with:
           command: test
