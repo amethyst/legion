@@ -13,6 +13,9 @@ use serde::{
 };
 use std::{cell::RefCell, collections::HashMap, ptr::NonNull};
 
+/// Returns a type that implements `serde::DeserializeSeed`.
+/// Pass the returned value to your `serde::Deserializer`.
+/// The caller must provide an implementation for `WorldDeserializer`.
 pub fn deserializable<'a, 'b, WD: WorldDeserializer>(
     world: &'a mut World,
     deserialize_impl: &'b WD,
@@ -23,6 +26,8 @@ pub fn deserializable<'a, 'b, WD: WorldDeserializer>(
     }
 }
 
+/// Deserializes data into the provided World using the provided `serde::Deserializer`.
+/// The caller must provide an implementation for `WorldDeserializer`.
 pub fn deserialize<'dd, 'a, 'b, WD: WorldDeserializer, D: Deserializer<'dd>>(
     world: &'a mut World,
     deserialize_impl: &'b WD,
@@ -32,11 +37,27 @@ pub fn deserialize<'dd, 'a, 'b, WD: WorldDeserializer, D: Deserializer<'dd>>(
     <WorldDeserialize<WD> as DeserializeSeed>::deserialize(deserializable, deserializer)
 }
 
+/// User must implement this trait to deserialize a World.
+/// The implementation must match that of the `WorldSerializer` provided
+/// when serializing the data that is to be deserialized by this impl.
 pub trait WorldDeserializer {
+    /// Deserializes an ArchetypeDescription
     fn deserialize_archetype_description<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
     ) -> Result<ArchetypeDescription, <D as Deserializer<'de>>::Error>;
+    /// Deserializes component data.
+    /// `get_next_storage_fn` will return Some(component_data_ptr, num_elements) until all
+    /// reserved memory has been exhausted, whereupon it will return None.
+    /// `component_data_ptr` are pointers to reserved memory in chunks
+    /// that have been reserved to accomodate the number of entities that were previously deserialized
+    /// by `deserialize_entities`.
+    ///
+    /// # Safety
+    ///
+    /// The implementation must ensure `get_next_storage_fn` is called until it returns
+    /// None, and that all memory returned by `get_next_storage_fn` is properly initialized
+    /// before this function returns.
     fn deserialize_components<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
@@ -44,6 +65,7 @@ pub trait WorldDeserializer {
         component_meta: &ComponentMeta,
         get_next_storage_fn: &mut dyn FnMut() -> Option<(NonNull<u8>, usize)>,
     ) -> Result<(), <D as Deserializer<'de>>::Error>;
+    /// Deserializes tag data into a TagStorage.
     fn deserialize_tags<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
@@ -51,6 +73,7 @@ pub trait WorldDeserializer {
         tag_meta: &TagMeta,
         tags: &mut TagStorage,
     ) -> Result<(), <D as Deserializer<'de>>::Error>;
+    /// Deserializes entity identifiers into the provided buffer.
     fn deserialize_entities<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
@@ -59,6 +82,7 @@ pub trait WorldDeserializer {
     ) -> Result<(), <D as Deserializer<'de>>::Error>;
 }
 
+/// Implements `DeserializeSeed` and can be passed to a `serde::Deserializer`.
 pub struct WorldDeserialize<'a, 'b, WD: WorldDeserializer> {
     user: &'b WD,
     world: &'a mut World,

@@ -8,11 +8,13 @@ use crate::{
 };
 use serde::{ser::SerializeStruct, Serialize, Serializer};
 
+/// Implements `Serialize` and can be passed to a `serde::Serializer`.
 pub struct WorldSerializable<'a, 'b, CS: WorldSerializer> {
     world_serializer: &'b CS,
     world: &'a World,
 }
 
+/// Returns a value that implements `Serialize` and can be passed to a `serde::Serializer`.
 pub fn serializable_world<'a, 'b, CS: WorldSerializer>(
     world: &'a World,
     serialize_impl: &'b CS,
@@ -59,14 +61,21 @@ pub fn serializable_world<'a, 'b, CS: WorldSerializer>(
 ]
 */
 
+/// User must implement this trait to serialize a World.
 pub trait WorldSerializer {
-    fn can_serialize_tag(&self, ty: &TagTypeId, _meta: &TagMeta) -> bool;
-    fn can_serialize_component(&self, ty: &ComponentTypeId, _meta: &ComponentMeta) -> bool;
+    /// Returns whether this serializer can serialize a tag type or not.
+    /// If not, the tag type will not be passed to `serialize_tags`.
+    fn can_serialize_tag(&self, ty: &TagTypeId, meta: &TagMeta) -> bool;
+    /// Returns whether this serializer can serialize a component type or not.
+    /// If not, the component type will not be passed to `serialize_components`.
+    fn can_serialize_component(&self, ty: &ComponentTypeId, meta: &ComponentMeta) -> bool;
+    /// Serialize an `ArchetypeDescription`
     fn serialize_archetype_description<S: Serializer>(
         &self,
         serializer: S,
         archetype_desc: &ArchetypeDescription,
     ) -> Result<S::Ok, S::Error>;
+    /// Serialize all data in a `ComponentResourceSet`.
     fn serialize_components<S: Serializer>(
         &self,
         serializer: S,
@@ -74,6 +83,7 @@ pub trait WorldSerializer {
         component_meta: &ComponentMeta,
         components: &ComponentResourceSet,
     ) -> Result<S::Ok, S::Error>;
+    /// Serialize all tags in a `TagStorage`.
     fn serialize_tags<S: Serializer>(
         &self,
         serializer: S,
@@ -81,6 +91,7 @@ pub trait WorldSerializer {
         tag_meta: &TagMeta,
         tags: &TagStorage,
     ) -> Result<S::Ok, S::Error>;
+    /// Serialize entities in the provided slice.
     fn serialize_entities<S: Serializer>(
         &self,
         serializer: S,
