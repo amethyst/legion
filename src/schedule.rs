@@ -260,8 +260,6 @@ impl StageExecutor {
                         )
                         .par_bridge()
                         .for_each(|(sys, static_dep, dyn_dep)| {
-                            use std::any::Any;
-
                             let archetypes = sys.accesses_archetypes();
                             for i in (0..dyn_dep.len()).rev() {
                                 let dep = dyn_dep[i];
