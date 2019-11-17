@@ -601,7 +601,7 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for EntitiesDeseri
                     chunk
                 }
             };
-            chunk.write().0.push(entity);
+            chunk.writer().get().0.push(entity);
             entities_in_chunk += 1;
         }
         if entities_in_chunk > 0 {
@@ -685,7 +685,7 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de>
                     range_idx += 1;
                     let chunk = &mut self.chunkset[chunk_range.0];
                     unsafe {
-                        let comp_storage = (&mut *chunk.write().1.get())
+                        let comp_storage = (&mut *chunk.writer().get().1.get())
                             .get_mut(*self.comp_type)
                             .expect(
                                 "expected ComponentResourceSet when deserializing component data",
