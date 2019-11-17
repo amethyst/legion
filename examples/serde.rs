@@ -87,7 +87,8 @@ impl<'de, 'a, T: for<'b> Deserialize<'b> + 'static> Visitor<'de>
     where
         A: de::SeqAccess<'de>,
     {
-        loop {
+        let size = seq.size_hint();
+        for _ in 0..size.unwrap_or(std::usize::MAX) {
             match (self.get_next_storage_fn)() {
                 Some((storage_ptr, storage_len)) => {
                     let storage_ptr = storage_ptr.as_ptr() as *mut T;
@@ -369,7 +370,7 @@ fn main() {
         ],
     );
     // Unserializable components are not serialized, so only the Pos components should be serialized in this chunkset
-    for _ in 0..100000 {
+    for _ in 0..1000 {
         world.insert(
             (Pos(4., 5., 6.), Unregistered(4., 5., 6.)),
             vec![
@@ -395,8 +396,7 @@ fn main() {
     };
 
     let serializable = legion::ser::serializable_world(&world, &ser_helper);
-    let json_data = serde_json::to_string(&serializable).unwrap();
-    // println!("{}", json_data);
+    let serialized_data = serde_json::to_string(&serializable).unwrap();
     let de_helper = DeserializeImpl {
         types: HashMap::from_iter(registrations.iter().map(|reg| (reg.ty, reg.clone()))),
         types_by_uuid: HashMap::from_iter(registrations.iter().map(|reg| (reg.uuid, reg.clone()))),
@@ -409,11 +409,9 @@ fn main() {
                 .map(|(e, uuid)| (uuid, e)),
         )),
     };
-    println!("serialized");
     let mut deserialized_world = universe.create_world();
-    let mut deserializer = serde_json::Deserializer::from_str(&json_data);
+    let mut deserializer = serde_json::Deserializer::from_str(&serialized_data);
     legion::de::deserialize(&mut deserialized_world, &de_helper, &mut deserializer).unwrap();
-    println!("deserialized");
     let ser_helper = SerializeImpl {
         types: HashMap::from_iter(registrations.iter().map(|reg| (reg.ty, reg.clone()))),
         // re-use the entity-uuid mapping
@@ -426,7 +424,6 @@ fn main() {
         )),
     };
     let serializable = legion::ser::serializable_world(&deserialized_world, &ser_helper);
-    let roundtrip_json_data = serde_json::to_string(&serializable).unwrap();
-    println!("roundtripped");
-    assert_eq!(roundtrip_json_data, json_data);
+    let roundtrip_data = serde_json::to_string(&serializable).unwrap();
+    assert_eq!(roundtrip_data, serialized_data);
 }

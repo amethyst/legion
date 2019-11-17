@@ -1,15 +1,12 @@
 use crate::{
     entity::Entity,
     storage::{
-        ArchetypeData, ArchetypeDescription, ComponentMeta, ComponentResourceSet,
-        ComponentStorage, ComponentTypeId, TagMeta, TagStorage, TagTypeId,
+        ArchetypeData, ArchetypeDescription, ComponentMeta, ComponentResourceSet, ComponentStorage,
+        ComponentTypeId, TagMeta, TagStorage, TagTypeId,
     },
     world::World,
 };
-use serde::{
-    ser::SerializeStruct,
-    Serialize, Serializer,
-};
+use serde::{ser::SerializeStruct, Serialize, Serializer};
 
 pub struct WorldSerializable<'a, 'b, CS: WorldSerializer> {
     world_serializer: &'b CS,
@@ -102,15 +99,24 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for WorldSerializable<'a, 'b, CS> {
                 .archetypes()
                 .iter()
                 .filter_map(|archetype| {
-                    let valid_tags = archetype.description()
+                    let valid_tags = archetype
+                        .description()
                         .tags()
                         .iter()
                         .enumerate()
                         .filter(|(_, (ty, meta))| self.world_serializer.can_serialize_tag(ty, meta))
-                        .map(|(idx, (ty, meta))| (idx, ty, meta)).collect::<Vec<_>>();
-                    let valid_components = archetype.description().components().iter().enumerate().filter(|(_, (ty, meta))| {
-                        self.world_serializer.can_serialize_component(ty, meta)
-                    }).map(|(idx, (ty, meta))| (idx, ty, meta)).collect::<Vec<_>>();
+                        .map(|(idx, (ty, meta))| (idx, ty, meta))
+                        .collect::<Vec<_>>();
+                    let valid_components = archetype
+                        .description()
+                        .components()
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, (ty, meta))| {
+                            self.world_serializer.can_serialize_component(ty, meta)
+                        })
+                        .map(|(idx, (ty, meta))| (idx, ty, meta))
+                        .collect::<Vec<_>>();
                     if valid_tags.len() != 0 || valid_components.len() != 0 {
                         Some(ArchetypeSerializer {
                             world_serializer: self.world_serializer,
@@ -121,7 +127,8 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for WorldSerializable<'a, 'b, CS> {
                     } else {
                         None
                     }
-                }),
+                })
+                .collect::<Vec<_>>(),
         )
     }
 }
@@ -146,7 +153,8 @@ impl<'a, 'b, CS: WorldSerializer> Serialize for ArchetypeSerializer<'a, 'b, CS> 
                 desc,
             },
         )?;
-        let tags: Vec<_> = self.valid_tags
+        let tags: Vec<_> = self
+            .valid_tags
             .iter()
             .map(|(_idx, ty, meta)| {
                 let tag_storage = self

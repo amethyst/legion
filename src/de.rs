@@ -13,17 +13,23 @@ use serde::{
 };
 use std::{cell::RefCell, collections::HashMap, ptr::NonNull};
 
-pub fn deserialize<'dd, 'a, 'b, CS: WorldDeserializer, D: Deserializer<'dd>>(
+pub fn deserializable<'a, 'b, WD: WorldDeserializer>(
     world: &'a mut World,
-    deserialize_impl: &'b CS,
+    deserialize_impl: &'b WD,
+) -> WorldDeserialize<'a, 'b, WD> {
+    WorldDeserialize {
+        world: world,
+        user: deserialize_impl,
+    }
+}
+
+pub fn deserialize<'dd, 'a, 'b, WD: WorldDeserializer, D: Deserializer<'dd>>(
+    world: &'a mut World,
+    deserialize_impl: &'b WD,
     deserializer: D,
 ) -> Result<(), <D as Deserializer<'dd>>::Error> {
-    let world_refcell = RefCell::new(world);
-    let deserializable = WorldDeserialize {
-        world: &world_refcell,
-        user: deserialize_impl,
-    };
-    <WorldDeserialize<CS> as DeserializeSeed>::deserialize(deserializable, deserializer)
+    let deserializable = deserializable(world, deserialize_impl);
+    <WorldDeserialize<WD> as DeserializeSeed>::deserialize(deserializable, deserializer)
 }
 
 pub trait WorldDeserializer {
@@ -53,9 +59,9 @@ pub trait WorldDeserializer {
     ) -> Result<(), <D as Deserializer<'de>>::Error>;
 }
 
-struct WorldDeserialize<'a, 'b, WD: WorldDeserializer> {
+pub struct WorldDeserialize<'a, 'b, WD: WorldDeserializer> {
     user: &'b WD,
-    world: &'a RefCell<&'a mut World>,
+    world: &'a mut World,
 }
 impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for WorldDeserialize<'a, 'b, WD> {
     type Value = ();
@@ -63,9 +69,10 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for WorldDeseriali
     where
         D: Deserializer<'de>,
     {
+        let world_refcell = RefCell::new(self.world);
         deserializer.deserialize_seq(SeqDeserializer(ArchetypeDeserializer {
             user: self.user,
-            world: self.world,
+            world: &world_refcell,
         }))?;
         Ok(())
     }
@@ -103,6 +110,33 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de>
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct Archetype")
+            }
+            fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
+            where
+                V: de::SeqAccess<'de>,
+            {
+                let archetype_idx = seq
+                    .next_element_seed(ArchetypeDescriptionDeserialize {
+                        user: self.user,
+                        world: self.world,
+                    })?
+                    .expect("expected description");
+                let mut world = self.world.borrow_mut();
+                let archetype_data = &mut world.storage_mut().archetypes_mut()[archetype_idx];
+                let chunkset_map = seq
+                    .next_element_seed(TagsDeserializer {
+                        user: self.user,
+                        archetype: archetype_data,
+                    })?
+                    .expect("expected tags");
+                seq.next_element_seed(ChunkSetDeserializer {
+                    user: self.user,
+                    world: &mut *world,
+                    archetype_idx,
+                    chunkset_map: &chunkset_map,
+                })?
+                .expect("expected chunk_sets");
+                Ok(())
             }
 
             fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
@@ -478,6 +512,27 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> Visitor<'de> for ChunkDeserializer<'a, 
         formatter.write_str("struct Chunk")
     }
 
+    fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
+    where
+        V: de::SeqAccess<'de>,
+    {
+        let chunk_ranges = seq.next_element_seed(EntitiesDeserializer {
+            user: self.user,
+            world: self.world,
+            archetype_idx: self.archetype_idx,
+            chunkset_idx: self.chunkset_idx,
+        })?;
+        seq.next_element_seed(ComponentsDeserializer {
+            user: self.user,
+            world: self.world,
+            archetype_idx: self.archetype_idx,
+            chunkset_idx: self.chunkset_idx,
+            chunk_ranges: chunk_ranges
+                .as_ref()
+                .expect("expected entities before components"),
+        })?;
+        Ok(())
+    }
     fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
     where
         V: de::MapAccess<'de>,
@@ -494,40 +549,18 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> Visitor<'de> for ChunkDeserializer<'a, 
                     })?);
                 }
                 ChunkField::Components => {
-                    Some(
-                        map.next_value_seed(ComponentsDeserializer {
-                            user: self.user,
-                            world: self.world,
-                            archetype_idx: self.archetype_idx,
-                            chunkset_idx: self.chunkset_idx,
-                            chunk_ranges: chunk_ranges
-                                .as_ref()
-                                .expect("expected entities before components"),
-                        })?,
-                    );
+                    map.next_value_seed(ComponentsDeserializer {
+                        user: self.user,
+                        world: self.world,
+                        archetype_idx: self.archetype_idx,
+                        chunkset_idx: self.chunkset_idx,
+                        chunk_ranges: chunk_ranges
+                            .as_ref()
+                            .expect("expected entities before components"),
+                    })?;
                 }
             }
         }
-        // // TODO fix mutability issue in the storage API here?
-        // let tags = unsafe { &mut *(self.archetype.tags() as *const Tags as *mut Tags) };
-        // let mut idx = 0;
-        // loop {
-        //     let chunk_set = self.world.find_or_create_chunk(self.archetype_idx, tags);
-
-        //     let (tag_type, tag_meta) = tag_types[idx];
-        //     let tag_storage = tags
-        //         .get_mut(tag_type)
-        //         .expect("tag storage not present when deserializing");
-        //     if let None = seq.next_element_seed(TagStorageDeserializer {
-        //         user: self.user,
-        //         tag_storage,
-        //         tag_type: &tag_type,
-        //         tag_meta: &tag_meta,
-        //     })? {
-        //         break;
-        //     }
-        //     idx += 1;
-        // }
         Ok(())
     }
 }
