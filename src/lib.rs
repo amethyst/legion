@@ -230,19 +230,19 @@
 
 pub mod borrow;
 pub mod command;
+#[cfg(feature = "serde-1")]
+pub mod de;
 pub mod entity;
 pub mod filter;
 pub mod iterator;
 pub mod query;
 pub mod resource;
 pub mod schedule;
+#[cfg(feature = "serde-1")]
+pub mod ser;
 pub mod storage;
 pub mod system;
 pub mod world;
-#[cfg(feature = "serde-1")]
-pub mod ser;
-#[cfg(feature = "serde-1")]
-pub mod de;
 
 mod cons;
 mod tuple;
