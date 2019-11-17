@@ -175,7 +175,8 @@ impl StageExecutor {
 
                 trace!(depentants = ?comp_dependencies, "Computed dynamic dependants");
                 for dep in comp_dependencies {
-                    if dep != i { // dont be dependent on ourselves
+                    if dep != i {
+                        // dont be dependent on ourselves
                         dynamic_dependants[dep].push(i);
                     }
                 }
