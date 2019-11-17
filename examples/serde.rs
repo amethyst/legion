@@ -11,7 +11,7 @@ use serde::{
     ser::SerializeStruct,
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::{any::TypeId, cell::RefCell, collections::HashMap};
+use std::{any::TypeId, cell::RefCell, collections::HashMap, ptr::NonNull};
 use type_uuid::TypeUuid;
 
 #[derive(TypeUuid, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -35,7 +35,7 @@ struct TypeRegistration {
     comp_serialize_fn: fn(&ComponentResourceSet, &mut dyn FnMut(&dyn erased_serde::Serialize)),
     comp_deserialize_fn: fn(
         deserializer: &mut erased_serde::Deserializer,
-        &mut ComponentWriter,
+        &mut dyn FnMut(NonNull<u8>, usize),
     ) -> Result<(), erased_serde::Error>,
     register_tag_fn: fn(&mut ArchetypeDescription),
     register_comp_fn: fn(&mut ArchetypeDescription),
@@ -77,12 +77,14 @@ impl TypeRegistration {
                 let slice = unsafe { comp_storage.data_slice::<T>() };
                 serialize_fn(&*slice);
             },
-            comp_deserialize_fn: |deserializer, comp_writer| {
+            comp_deserialize_fn: |deserializer, write_components| {
                 // TODO implement visitor to avoid allocation of Vec
                 let mut comp_vec = <Vec<T> as Deserialize>::deserialize(deserializer)?;
-                // Safe since we forget the things after
                 unsafe {
-                    comp_writer.push(&comp_vec);
+                    write_components(
+                        NonNull::new_unchecked(comp_vec.as_ptr() as *mut T as *mut u8),
+                        comp_vec.len(),
+                    );
                 }
                 for comp in comp_vec.drain(0..comp_vec.len()) {
                     std::mem::forget(comp);
@@ -93,7 +95,7 @@ impl TypeRegistration {
                 desc.register_tag::<T>();
             },
             register_comp_fn: |mut desc| {
-                desc.register_tag::<T>();
+                desc.register_component::<T>();
             },
         }
     }
@@ -229,12 +231,11 @@ impl legion::de::WorldDeserializer for DeserializeImpl {
         deserializer: D,
         component_type: &ComponentTypeId,
         component_meta: &ComponentMeta,
-        components: &mut ComponentResourceSet,
+        write_component: &mut dyn FnMut(NonNull<u8>, usize),
     ) -> Result<(), <D as Deserializer<'de>>::Error> {
         if let Some(reg) = self.types.get(&component_type.0) {
-            let mut writer = components.writer();
             let mut erased = erased_serde::Deserializer::erase(deserializer);
-            (reg.comp_deserialize_fn)(&mut erased, &mut writer)
+            (reg.comp_deserialize_fn)(&mut erased, write_component)
                 .map_err(<<D as serde::Deserializer<'de>>::Error as serde::de::Error>::custom)?;
         } else {
             <IgnoredAny>::deserialize(deserializer)?;
@@ -323,6 +324,7 @@ fn main() {
     println!("{}", json_data);
     let mut deserialized_world = universe.create_world();
     let mut deserializer = serde_json::Deserializer::from_str(&json_data);
-    let deserialize =
-        legion::de::deserialize(&mut deserialized_world, &de_helper, &mut deserializer);
+    legion::de::deserialize(&mut deserialized_world, &de_helper, &mut deserializer).unwrap();
+    let serializable = legion::ser::serializable_world(&deserialized_world, &ser_helper);
+    let roundtrip_json_data = serde_json::to_string(&serializable).unwrap();
 }
