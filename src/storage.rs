@@ -1272,6 +1272,29 @@ impl<'a> ComponentWriter<'a> {
         }
     }
 
+    /// Increases the length of the associated `ComponentResourceSet` by `count`
+    /// and returns a pointer to the start of the memory that is reserved as a result.
+    ///
+    /// # Safety
+    ///
+    /// Ensure the memory returned by this function is properly initialized before calling
+    /// any other storage function. Ensure that the data written into the returned pointer
+    /// is representative of the component types stored in the associated ComponentResourceSet.
+    ///
+    /// # Panics
+    ///
+    /// Will panic when an internal u64 counter overflows.
+    /// It will happen in 50000 years if you do 10000 mutations a millisecond.
+    pub(crate) unsafe fn reserve_raw(&mut self, count: usize) -> NonNull<u8> {
+        debug_assert!((*self.accessor.count.get() + count) <= self.accessor.capacity);
+        let ptr = self
+            .ptr
+            .add(*self.accessor.count.get() * self.accessor.element_size);
+        *self.accessor.count.get() += count;
+        *self.accessor.version.get() = next_version();
+        NonNull::new_unchecked(ptr)
+    }
+
     /// Pushes new components onto the end of the vec.
     ///
     /// # Safety
