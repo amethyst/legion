@@ -7,16 +7,24 @@ use crate::{
     world::World,
 };
 use bit_set::BitSet;
-use itertools::izip;
-use std::iter::repeat;
+
+#[cfg(feature = "par-schedule")]
+use tracing::{span, trace, Level};
+
+#[cfg(feature = "par-schedule")]
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
 };
-use tracing::{span, trace, Level};
 
 #[cfg(feature = "par-schedule")]
 use rayon::prelude::*;
+
+#[cfg(feature = "par-schedule")]
+use itertools::izip;
+
+#[cfg(feature = "par-schedule")]
+use std::iter::repeat;
 
 /// Empty trait which defines a `System` as schedulable by the dispatcher - this requires that the
 /// type is both `Send` and `Sync`.
