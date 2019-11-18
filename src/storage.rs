@@ -1571,7 +1571,7 @@ mod test {
             tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize)
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let components = data
             .chunksets_mut()
             .get_mut(set)
@@ -1606,7 +1606,7 @@ mod test {
             tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize)
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let chunk = data
             .chunksets_mut()
             .get_mut(set)
@@ -1636,7 +1636,7 @@ mod test {
             tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize)
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let chunk = data
             .chunksets_mut()
             .get_mut(set)
@@ -1680,7 +1680,7 @@ mod test {
 
         let (_arch_id, data) = archetypes.alloc_archetype(desc);
         let set = data.alloc_chunk_set(|_| {});
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let components = data
             .chunksets_mut()
             .get_mut(set)
@@ -1811,7 +1811,7 @@ mod test {
                 .push(ZeroSize);
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let components = data
             .chunksets_mut()
             .get_mut(set)
@@ -1846,7 +1846,7 @@ mod test {
             tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize);
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let components = data
             .chunksets_mut()
             .get_mut(set)
