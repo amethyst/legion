@@ -373,7 +373,7 @@ impl ArchetypeId {
 }
 
 /// Contains all of the tags attached to the entities in each chunk.
-pub struct Tags(SmallVec<[(TagTypeId, TagStorage); 3]>);
+pub struct Tags(pub(crate) SmallVec<[(TagTypeId, TagStorage); 3]>);
 
 impl Tags {
     fn new(mut data: SmallVec<[(TagTypeId, TagStorage); 3]>) -> Self {
@@ -663,6 +663,9 @@ impl ArchetypeData {
 
     /// Gets the tag storage for all chunks in the archetype.
     pub fn tags(&self) -> &Tags { &self.tags }
+
+    /// Mutably gets the tag storage for all chunks in the archetype.
+    pub fn tags_mut(&mut self) -> &mut Tags { &mut self.tags }
 
     /// Gets a slice of chunksets.
     pub fn chunksets(&self) -> &[Chunkset] { &self.chunk_sets }

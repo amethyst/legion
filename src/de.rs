@@ -2,7 +2,7 @@ use crate::{
     entity::{Entity, EntityAllocator},
     storage::{
         ArchetypeData, ArchetypeDescription, Chunkset, ComponentMeta, ComponentTypeId, TagMeta,
-        TagStorage, TagTypeId, Tags,
+        TagStorage, TagTypeId,
     },
     world::World,
 };
@@ -285,21 +285,37 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for TagsDeserializ
         let (mut deserialized_tags, this) = deserializer.deserialize_seq(self)?;
         let tag_types = this.archetype.description().tags().to_vec();
         let mut chunkset_map = ChunkSetMapping::new();
-        let mut world_tag_storages = Vec::new();
-        for (tag_type, _) in tag_types.iter() {
-            // TODO fix mutability issue in the storage API here?
-            let tags = unsafe { &mut *(this.archetype.tags() as *const Tags as *mut Tags) };
-            world_tag_storages.push(
-                tags.get_mut(*tag_type)
-                    .expect("tag storage not present when deserializing"),
-            );
-        }
+        let tags = this.archetype.tags_mut();
+        assert_eq!(tags.0.len(), tag_types.len());
+
+        // To simplify later code, shuffle the &mut tag_storage indices to match tag_types
+        let world_tag_storages = {
+            let mut world_tag_storages: Vec<&mut TagStorage> = Vec::with_capacity(tag_types.len());
+            for (tag_type, tag_storage) in tags.0.iter_mut() {
+                let type_idx = tag_types
+                    .iter()
+                    .position(|(ty, _)| ty == tag_type)
+                    .expect("tag type mismatch with Tags");
+                unsafe {
+                    std::ptr::write(
+                        world_tag_storages.as_mut_ptr().offset(type_idx as isize),
+                        tag_storage,
+                    );
+                }
+            }
+            unsafe {
+                world_tag_storages.set_len(tag_types.len());
+            }
+            world_tag_storages
+        };
+
         let num_world_values = world_tag_storages.iter().map(|ts| ts.len()).nth(0);
         let num_tag_values = deserialized_tags
             .iter()
             .map(|ts| ts.len())
             .nth(0)
             .unwrap_or(0);
+        let mut chunksets_to_add = Vec::new();
         for i in 0..num_tag_values {
             let mut matching_idx = None;
             if let Some(num_world_values) = num_world_values {
@@ -328,8 +344,8 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for TagsDeserializ
                 }
             }
             // If we have a matching tag set, we will drop our temporary values manually.
-            // The temporary TagStorages in `deserialized_tags` will be forgotten because
-            // we may be moving data into the existing World.
+            // All temporary TagStorages in `deserialized_tags` will be forgotten later
+            // because we move data into World when allocating a new chunkset
             if let Some(world_idx) = matching_idx {
                 chunkset_map.insert(i, world_idx);
                 for tag_idx in 0..tag_types.len() {
@@ -341,18 +357,23 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for TagsDeserializ
                     }
                 }
             } else {
-                let chunkset_idx = this.archetype.alloc_chunk_set(|_| {
-                    for tag_idx in 0..tag_types.len() {
-                        unsafe {
-                            let (de_ptr, stride, _) = deserialized_tags[tag_idx].data_raw();
-                            let de_offset = (i * stride) as isize;
-                            let world_storage = &mut world_tag_storages[tag_idx];
-                            world_storage.push_raw(de_ptr.as_ptr().offset(de_offset));
-                        }
-                    }
-                });
-                chunkset_map.insert(i, chunkset_idx);
+                chunksets_to_add.push(i);
             }
+        }
+        for tag_value_idx in chunksets_to_add {
+            let chunkset_idx = this.archetype.alloc_chunk_set(|tags| {
+                for (tag_idx, (tag_type, _)) in tag_types.iter().enumerate() {
+                    unsafe {
+                        let (de_ptr, stride, _) = deserialized_tags[tag_idx].data_raw();
+                        let de_offset = (tag_value_idx * stride) as isize;
+                        let world_storage = tags
+                            .get_mut(*tag_type)
+                            .expect("tag_storage should be present after allocating chunk_set");
+                        world_storage.push_raw(de_ptr.as_ptr().offset(de_offset));
+                    }
+                }
+            });
+            chunkset_map.insert(tag_value_idx, chunkset_idx);
         }
         for tag in deserialized_tags.drain(0..) {
             tag.forget_data();
