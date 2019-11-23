@@ -297,10 +297,7 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for TagsDeserializ
                     .position(|(ty, _)| ty == tag_type)
                     .expect("tag type mismatch with Tags");
                 unsafe {
-                    std::ptr::write(
-                        world_tag_storages.as_mut_ptr().offset(type_idx as isize),
-                        tag_storage,
-                    );
+                    std::ptr::write(world_tag_storages.as_mut_ptr().add(type_idx), tag_storage);
                 }
             }
             unsafe {
