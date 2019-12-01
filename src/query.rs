@@ -18,8 +18,8 @@ use crate::filter::Filter;
 use crate::filter::FilterResult;
 use crate::filter::Passthrough;
 use crate::filter::TagFilter;
-use crate::iterator::FissileEnumerate;
-use crate::iterator::FissileIterator;
+#[cfg(feature = "par-iter")]
+use crate::iterator::{FissileEnumerate, FissileIterator};
 use crate::storage::ArchetypeData;
 use crate::storage::Component;
 use crate::storage::ComponentStorage;
@@ -436,7 +436,7 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
                     .get_unchecked(index)
             },
             archetype,
-            index,
+            index: set,
             view: PhantomData,
         }
     }

@@ -2,14 +2,9 @@ use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
 use crate::command::CommandBuffer;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::entity::Entity;
-use crate::filter::{
-    ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, EntityFilter, Filter,
-};
-use crate::iterator::FissileIterator;
+use crate::filter::EntityFilter;
 use crate::query::ReadOnly;
-use crate::query::{
-    Chunk, ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write,
-};
+use crate::query::{ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write};
 use crate::resource::{Resource, ResourceSet, ResourceTypeId};
 use crate::schedule::ArchetypeAccess;
 use crate::schedule::{Runnable, Schedulable};
@@ -23,6 +18,15 @@ use std::any::TypeId;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use tracing::{debug, info, span, Level};
+
+#[cfg(feature = "par-iter")]
+use crate::filter::{ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, Filter};
+
+#[cfg(feature = "par-iter")]
+use crate::iterator::FissileIterator;
+
+#[cfg(feature = "par-iter")]
+use crate::query::Chunk;
 
 /// Structure used by `SystemAccess` for describing access to the provided `T`
 #[derive(Derivative, Debug, Clone)]
@@ -1346,7 +1350,7 @@ mod tests {
         let system_one = SystemBuilder::<()>::new("TestSystem1")
             .read_resource::<TestResource>()
             .with_query(Read::<Pos>::query())
-            .with_query(Read::<Vel>::query())
+            .with_query(Write::<Vel>::query())
             .build(move |_commands, _world, _resource, _queries| {
                 tracing::trace!("system_one");
                 system_one_runs

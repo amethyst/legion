@@ -122,7 +122,6 @@ pub struct Fetch<'a, T: 'a + Resource> {
 impl<'a, T: Resource> Deref for Fetch<'a, T> {
     type Target = T;
 
-    #[cfg(debug_assertions)]
     #[inline]
     fn deref(&self) -> &Self::Target {
         self.inner.downcast_ref::<T>().unwrap_or_else(|| {
@@ -132,10 +131,6 @@ impl<'a, T: Resource> Deref for Fetch<'a, T> {
             )
         })
     }
-
-    #[cfg(not(debug_assertions))]
-    #[inline]
-    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
 impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for Fetch<'a, T> {
@@ -152,7 +147,6 @@ pub struct FetchMut<'a, T: Resource> {
 impl<'a, T: 'a + Resource> Deref for FetchMut<'a, T> {
     type Target = T;
 
-    #[cfg(debug_assertions)]
     #[inline]
     fn deref(&self) -> &Self::Target {
         self.inner.downcast_ref::<T>().unwrap_or_else(|| {
@@ -162,14 +156,9 @@ impl<'a, T: 'a + Resource> Deref for FetchMut<'a, T> {
             )
         })
     }
-
-    #[cfg(not(debug_assertions))]
-    #[inline]
-    fn deref(&self) -> &Self::Target { unsafe { self.inner.downcast_ref_unchecked::<T>() } }
 }
 
 impl<'a, T: 'a + Resource> DerefMut for FetchMut<'a, T> {
-    #[cfg(debug_assertions)]
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
         self.inner.downcast_mut::<T>().unwrap_or_else(|| {
@@ -179,10 +168,6 @@ impl<'a, T: 'a + Resource> DerefMut for FetchMut<'a, T> {
             )
         })
     }
-
-    #[cfg(not(debug_assertions))]
-    #[inline]
-    fn deref_mut(&mut self) -> &mut T { unsafe { self.inner.downcast_mut_unchecked::<T>() } }
 }
 
 impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for FetchMut<'a, T> {

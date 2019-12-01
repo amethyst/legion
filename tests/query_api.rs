@@ -564,3 +564,24 @@ fn query_try_with_changed_filter() {
         Some(Sum(4.))
     );
 }
+
+#[test]
+fn query_iter_chunks_tag() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    world.insert((Static, Model(0)), vec![()]);
+    world.insert((Static, Model(1)), vec![()]);
+    world.insert((Static, Model(2)), vec![()]);
+
+    let mut query = <(Tagged<Static>, Tagged<Model>)>::query();
+
+    for chunk in query.iter_chunks_immutable(&world) {
+        let model = chunk.tag::<Model>().cloned();
+        for entity in chunk.entities() {
+            assert_eq!(world.get_tag::<Model>(*entity), model.as_ref());
+        }
+    }
+}

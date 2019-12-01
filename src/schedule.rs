@@ -7,19 +7,29 @@ use crate::{
     world::World,
 };
 use bit_set::BitSet;
-use itertools::izip;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::iter::repeat;
 use std::marker::PhantomData;
+use tracing::{span, Level};
+
+#[cfg(feature = "par-schedule")]
+use tracing::trace;
+
+#[cfg(feature = "par-schedule")]
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     sync::atomic::{AtomicUsize, Ordering},
 };
-use tracing::{span, trace, Level};
 
 #[cfg(feature = "par-schedule")]
 use rayon::prelude::*;
+
+#[cfg(feature = "par-schedule")]
+use itertools::izip;
+
+#[cfg(feature = "par-schedule")]
+use std::iter::repeat;
 
 /// Empty trait which defines a `System` as schedulable by the dispatcher - this requires that the
 /// type is both `Send` and `Sync`.
@@ -112,7 +122,8 @@ impl StageExecutor {
                 let span = span!(
                     Level::TRACE,
                     "Building system dependencies",
-                    system = %system.name()
+                    system = %system.name(),
+                    index = i,
                 );
                 let _guard = span.enter();
 
@@ -174,7 +185,10 @@ impl StageExecutor {
 
                 trace!(depentants = ?comp_dependencies, "Computed dynamic dependants");
                 for dep in comp_dependencies {
-                    dynamic_dependants[dep].push(i);
+                    if dep != i {
+                        // dont be dependent on ourselves
+                        dynamic_dependants[dep].push(i);
+                    }
                 }
             }
 
@@ -280,7 +294,6 @@ impl StageExecutor {
 
                         // execute all systems with no outstanding dependencies
                         (0..systems.len())
-                            .into_par_iter()
                             .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
                             .for_each(|i| {
                                 self.run_recursive(i, world);
@@ -471,6 +484,8 @@ impl<S: Stage> SystemScheduler<S> {
                 let executor = StageExecutor::new(systems);
                 self.scheduled.insert(executor_index, (stage, executor));
                 return Some((result, schedule));
+            } else if let Some(index) = self.unscheduled.iter().position(|s| s.name() == &id) {
+                self.unscheduled.swap_remove(index);
             }
         }
 
