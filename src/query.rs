@@ -436,7 +436,7 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
                     .get_unchecked(index)
             },
             archetype,
-            index,
+            index: set,
             view: PhantomData,
         }
     }
