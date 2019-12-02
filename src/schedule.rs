@@ -61,7 +61,6 @@ pub trait Runnable {
     fn prepare(&mut self, world: &World);
     fn accesses_archetypes(&self) -> &ArchetypeAccess;
     fn run(&self, world: &World);
-    fn dispose(self: Box<Self>, world: &mut World);
     fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;
 }
 
@@ -358,7 +357,7 @@ impl Builder {
     }
 
     /// Adds a thread local function to the schedule. This function will be executed on the main thread.
-    pub fn add_thread_local<F: FnMut(&mut World) + 'static>(mut self, f: F) -> Self {
+    pub fn add_thread_local_fn<F: FnMut(&mut World) + 'static>(mut self, f: F) -> Self {
         self.finalize_executor();
         self.steps.push(Step::ThreadLocalFn(
             Box::new(f) as Box<dyn FnMut(&mut World)>
@@ -367,9 +366,9 @@ impl Builder {
     }
 
     /// Adds a thread local system to the schedule. This system will be executed on the main thread.
-    pub fn add_thread_local_system<S: Into<Box<dyn Runnable>>>(self, system: S) -> Self {
+    pub fn add_thread_local<S: Into<Box<dyn Runnable>>>(self, system: S) -> Self {
         let system = system.into();
-        self.add_thread_local(move |world| system.run(world))
+        self.add_thread_local_fn(move |world| system.run(world))
     }
 
     /// Finalizes the builder into a `Schedule`.
