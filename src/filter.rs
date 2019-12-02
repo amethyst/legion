@@ -1060,8 +1060,12 @@ impl<'a, T: Component> Filter<ChunkFilterData<'a>> for ComponentChangedFilter<T>
 
     #[inline]
     fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
-        let components = item.components(ComponentTypeId::of::<T>()).unwrap();
-        let version = components.version();
+        let components = item.components(ComponentTypeId::of::<T>());
+        if components.is_none() {
+            return Some(false);
+        }
+
+        let version = components.unwrap().version();
         let mut last_read = self.last_read_version.load(Ordering::Relaxed);
         if last_read < version {
             loop {
