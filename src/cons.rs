@@ -92,6 +92,7 @@ macro_rules! cons {
 
 macro_rules! impl_flatten {
     ($($items:ident),*) => {
+    #[allow(unused_parens)] // This is added because the nightly compiler complains
         impl<$($items),*> ConsFlatten for cons!($($items),*)
         {
             type Output = ($($items),*);
