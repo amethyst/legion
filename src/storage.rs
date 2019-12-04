@@ -237,7 +237,7 @@ impl Storage {
 pub struct TagMeta {
     size: usize,
     align: usize,
-    drop_fn: Option<(fn(*mut u8))>,
+    drop_fn: Option<fn(*mut u8)>,
     eq_fn: fn(*const u8, *const u8) -> bool,
     clone_fn: fn(*const u8, *mut u8),
 }
@@ -273,7 +273,7 @@ impl TagMeta {
 pub struct ComponentMeta {
     size: usize,
     align: usize,
-    drop_fn: Option<(fn(*mut u8))>,
+    drop_fn: Option<fn(*mut u8)>,
 }
 
 impl ComponentMeta {
@@ -1331,6 +1331,10 @@ impl<'a> ComponentWriter<'a> {
 
     /// Drops the component stored at `index` without moving any other data or
     /// altering the number of elements.
+    ///
+    /// # Safety
+    ///
+    /// Ensure that this function is only ever called once on a given index.
     pub unsafe fn drop_in_place(&mut self, index: usize) {
         if let Some(drop_fn) = self.accessor.drop_fn {
             let size = self.accessor.element_size;
@@ -1426,6 +1430,10 @@ impl TagStorage {
     /// Gets a raw pointer to the start of the tag slice.
     ///
     /// Returns a tuple containing `(pointer, element_size, count)`.
+    ///
+    /// # Safety
+    /// This function returns a raw pointer with the size and length.
+    /// Ensure that you do not access outside these bounds for this pointer.
     pub unsafe fn data_raw(&self) -> (NonNull<u8>, usize, usize) {
         (self.ptr, self.element.size, self.len)
     }

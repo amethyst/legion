@@ -18,7 +18,7 @@ pub struct Channel<T> {
     bound_functions: Vec<Box<dyn Fn(T) -> Option<T> + Send + Sync>>,
 }
 
-impl<T: Copy> Channel<T> {
+impl<T: Clone> Channel<T> {
     pub fn bind_listener(&mut self, message_capacity: usize) -> ListenerId {
         let new_id = self.queues.len();
         self.queues.push(ArrayQueue::new(message_capacity));
@@ -52,12 +52,12 @@ impl<T: Copy> Channel<T> {
         if !self
             .bound_functions
             .par_iter()
-            .map(|f| (f)(event))
+            .map(|f| (f)(event.clone()))
             .any(|e| e.is_none())
         {
             self.queues
                 .par_iter()
-                .for_each(|queue| queue.push(event).unwrap());
+                .for_each(|queue| queue.push(event.clone()).unwrap());
         }
 
         Ok(())
