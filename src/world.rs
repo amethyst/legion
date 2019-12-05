@@ -1,7 +1,5 @@
-use crate::borrow::Exclusive;
 use crate::borrow::Ref;
 use crate::borrow::RefMut;
-use crate::borrow::Shared;
 use crate::entity::BlockAllocator;
 use crate::entity::Entity;
 use crate::entity::EntityAllocator;
@@ -537,7 +535,7 @@ impl World {
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
-    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
+    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<T>> {
         if !self.is_alive(entity) {
             return None;
         }
@@ -574,7 +572,7 @@ impl World {
     pub unsafe fn get_component_mut_unchecked<T: Component>(
         &self,
         entity: Entity,
-    ) -> Option<RefMut<Exclusive, T>> {
+    ) -> Option<RefMut<T>> {
         if !self.is_alive(entity) {
             return None;
         }
@@ -598,10 +596,7 @@ impl World {
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
-    pub fn get_component_mut<T: Component>(
-        &mut self,
-        entity: Entity,
-    ) -> Option<RefMut<Exclusive, T>> {
+    pub fn get_component_mut<T: Component>(&mut self, entity: Entity) -> Option<RefMut<T>> {
         // safe because the &mut self ensures exclusivity
         unsafe { self.get_component_mut_unchecked(entity) }
     }

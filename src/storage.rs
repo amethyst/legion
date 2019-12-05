@@ -1,5 +1,3 @@
-use crate::borrow::Exclusive;
-use crate::borrow::Shared;
 use crate::borrow::{AtomicRefCell, Ref, RefMap, RefMapMut, RefMut};
 use crate::entity::Entity;
 use crate::entity::EntityLocation;
@@ -1173,7 +1171,7 @@ impl ComponentResourceSet {
     ///
     /// Access to the component data within the slice is runtime borrow checked.
     /// This call will panic if borrowing rules are broken.
-    pub fn data_raw(&self) -> (Ref<Shared, *mut u8>, usize, usize) {
+    pub fn data_raw(&self) -> (Ref<*mut u8>, usize, usize) {
         (self.ptr.get(), self.element_size, unsafe {
             *self.count.get()
         })
@@ -1192,7 +1190,7 @@ impl ComponentResourceSet {
     ///
     /// Will panic when an internal u64 counter overflows.
     /// It will happen in 50000 years if you do 10000 mutations a millisecond.
-    pub fn data_raw_mut(&self) -> (RefMut<Exclusive, *mut u8>, usize, usize) {
+    pub fn data_raw_mut(&self) -> (RefMut<*mut u8>, usize, usize) {
         // this version increment is not thread safe
         // - but the pointer `get_mut` ensures exclusive access at runtime
         let ptr = self.ptr.get_mut();
@@ -1210,7 +1208,7 @@ impl ComponentResourceSet {
     ///
     /// Access to the component data within the slice is runtime borrow checked.
     /// This call will panic if borrowing rules are broken.
-    pub unsafe fn data_slice<T>(&self) -> RefMap<Shared, &[T]> {
+    pub unsafe fn data_slice<T>(&self) -> RefMap<&[T]> {
         let (ptr, _size, count) = self.data_raw();
         ptr.map_into(|ptr| std::slice::from_raw_parts(*ptr as *const _ as *const T, count))
     }
@@ -1228,7 +1226,7 @@ impl ComponentResourceSet {
     ///
     /// Will panic when an internal u64 counter overflows.
     /// It will happen in 50000 years if you do 10000 mutations a millisecond.
-    pub unsafe fn data_slice_mut<T>(&self) -> RefMapMut<Exclusive, &mut [T]> {
+    pub unsafe fn data_slice_mut<T>(&self) -> RefMapMut<&mut [T]> {
         let (ptr, _size, count) = self.data_raw_mut();
         ptr.map_into(|ptr| std::slice::from_raw_parts_mut(*ptr as *mut _ as *mut T, count))
     }
@@ -1254,7 +1252,7 @@ impl Debug for ComponentResourceSet {
 /// Provides methods adding or removing components from a component vec.
 pub struct ComponentWriter<'a> {
     accessor: &'a ComponentResourceSet,
-    ptr: RefMut<'a, Exclusive<'a>, *mut u8>,
+    ptr: RefMut<'a, *mut u8>,
 }
 
 impl<'a> ComponentWriter<'a> {

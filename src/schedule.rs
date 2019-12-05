@@ -1,9 +1,6 @@
 use crate::system::SystemId;
 use crate::{
-    borrow::{Exclusive, RefMut},
-    command::CommandBuffer,
-    resource::ResourceTypeId,
-    storage::ComponentTypeId,
+    borrow::RefMut, command::CommandBuffer, resource::ResourceTypeId, storage::ComponentTypeId,
     world::World,
 };
 use bit_set::BitSet;
@@ -61,7 +58,7 @@ pub trait Runnable {
     fn prepare(&mut self, world: &World);
     fn accesses_archetypes(&self) -> &ArchetypeAccess;
     fn run(&self, world: &World);
-    fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer>;
+    fn command_buffer_mut(&self) -> RefMut<CommandBuffer>;
 }
 
 /// Executes a sequence of systems, potentially in parallel, and then commits their command buffers.

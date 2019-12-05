@@ -1,9 +1,7 @@
-use crate::borrow::Exclusive;
 use crate::borrow::RefIter;
 use crate::borrow::RefIterMut;
 use crate::borrow::RefMap;
 use crate::borrow::RefMapMut;
-use crate::borrow::Shared;
 use crate::borrow::TryRefIter;
 use crate::borrow::TryRefIterMut;
 use crate::entity::Entity;
@@ -126,7 +124,7 @@ impl<'a, T: Component> DefaultFilter for Read<T> {
 }
 
 impl<'a, T: Component> View<'a> for Read<T> {
-    type Iter = RefIter<'a, Shared<'a>, T, Iter<'a, T>>;
+    type Iter = RefIter<'a, T, Iter<'a, T>>;
 
     fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
         let (slice_borrow, slice) = unsafe {
@@ -178,7 +176,7 @@ impl<'a, T: Component> DefaultFilter for TryRead<T> {
 }
 
 impl<'a, T: Component> View<'a> for TryRead<T> {
-    type Iter = TryRefIter<'a, Shared<'a>, T, Iter<'a, T>>;
+    type Iter = TryRefIter<'a, T, Iter<'a, T>>;
 
     fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
         unsafe {
@@ -224,7 +222,7 @@ impl<'a, T: Component> DefaultFilter for Write<T> {
 }
 
 impl<'a, T: Component> View<'a> for Write<T> {
-    type Iter = RefIterMut<'a, Exclusive<'a>, T, IterMut<'a, T>>;
+    type Iter = RefIterMut<'a, T, IterMut<'a, T>>;
 
     #[inline]
     fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
@@ -280,7 +278,7 @@ impl<'a, T: Component> DefaultFilter for TryWrite<T> {
 }
 
 impl<'a, T: Component> View<'a> for TryWrite<T> {
-    type Iter = TryRefIterMut<'a, Exclusive<'a>, T, IterMut<'a, T>>;
+    type Iter = TryRefIterMut<'a, T, IterMut<'a, T>>;
 
     fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: usize) -> Self::Iter {
         unsafe {
@@ -503,7 +501,7 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
     ///
     /// This method performs runtime borrow checking. It will panic if
     /// any other code is concurrently writing to the data slice.
-    pub fn components<T: Component>(&self) -> Option<RefMap<'a, Shared<'a>, &[T]>> {
+    pub fn components<T: Component>(&self) -> Option<RefMap<'a, &[T]>> {
         if !V::reads::<T>() {
             panic!("data type not readable via this query");
         }
@@ -518,7 +516,7 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
     ///
     /// This method performs runtime borrow checking. It will panic if
     /// any other code is concurrently accessing the data slice.
-    pub fn components_mut<T: Component>(&self) -> Option<RefMapMut<'a, Exclusive<'a>, &mut [T]>> {
+    pub fn components_mut<T: Component>(&self) -> Option<RefMapMut<'a, &mut [T]>> {
         if !V::writes::<T>() {
             panic!("data type not writable via this query");
         }

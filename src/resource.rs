@@ -1,4 +1,4 @@
-use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
+use crate::borrow::{AtomicRefCell, Ref, RefMut};
 use crate::query::{Read, Write};
 use std::{
     any::TypeId,
@@ -116,7 +116,7 @@ unsafe impl<T: Resource> Sync for PreparedWrite<T> {}
 
 /// Ergonomic wrapper type which contains a `Ref` type.
 pub struct Fetch<'a, T: 'a + Resource> {
-    inner: Ref<'a, Shared<'a>, Box<dyn Resource>>,
+    inner: Ref<'a, Box<dyn Resource>>,
     _marker: PhantomData<T>,
 }
 impl<'a, T: Resource> Deref for Fetch<'a, T> {
@@ -141,7 +141,7 @@ impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for Fetch<'a, T> {
 
 /// Ergonomic wrapper type which contains a `RefMut` type.
 pub struct FetchMut<'a, T: Resource> {
-    inner: RefMut<'a, Exclusive<'a>, Box<dyn Resource>>,
+    inner: RefMut<'a, Box<dyn Resource>>,
     _marker: PhantomData<T>,
 }
 impl<'a, T: 'a + Resource> Deref for FetchMut<'a, T> {

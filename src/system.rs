@@ -1,4 +1,4 @@
-use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
+use crate::borrow::{AtomicRefCell, Ref, RefMut};
 use crate::command::CommandBuffer;
 use crate::cons::{ConsAppend, ConsFlatten};
 use crate::entity::Entity;
@@ -697,7 +697,7 @@ impl SubWorld {
     ///
     /// This function may panic if the component was not declared as read by this system.
     #[inline]
-    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
+    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<T>> {
         self.validate_reads::<T>(entity);
         unsafe { (*self.world).get_component::<T>(entity) }
     }
@@ -719,7 +719,7 @@ impl SubWorld {
     pub unsafe fn get_component_mut_unchecked<T: Component>(
         &self,
         entity: Entity,
-    ) -> Option<RefMut<Exclusive, T>> {
+    ) -> Option<RefMut<T>> {
         self.validate_writes::<T>(entity);
         (*self.world).get_component_mut_unchecked::<T>(entity)
     }
@@ -733,10 +733,7 @@ impl SubWorld {
     ///
     /// This function may panic if the component was not declared as written by this system.
     #[inline]
-    pub fn get_component_mut<T: Component>(
-        &mut self,
-        entity: Entity,
-    ) -> Option<RefMut<Exclusive, T>> {
+    pub fn get_component_mut<T: Component>(&mut self, entity: Entity) -> Option<RefMut<T>> {
         // safe because the &mut self ensures exclusivity
         unsafe { self.get_component_mut_unchecked(entity) }
     }
@@ -851,9 +848,7 @@ where
 
     fn accesses_archetypes(&self) -> &ArchetypeAccess { &self.archetypes }
 
-    fn command_buffer_mut(&self) -> RefMut<Exclusive, CommandBuffer> {
-        self.command_buffer.get_mut()
-    }
+    fn command_buffer_mut(&self) -> RefMut<CommandBuffer> { self.command_buffer.get_mut() }
 
     fn run(&self, world: &World) {
         let span = span!(Level::INFO, "System", system = %self.name);
