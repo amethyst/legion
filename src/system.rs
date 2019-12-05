@@ -13,7 +13,6 @@ use crate::storage::{Component, ComponentTypeId, TagTypeId};
 use crate::world::World;
 use bit_set::BitSet;
 use derivative::Derivative;
-use shrinkwraprs::Shrinkwrap;
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -64,7 +63,21 @@ where
     query: *mut Query<V, F>,
 }
 
+// # Safety
+// `PreparedQuery` does not auto-implement `Send` because it contains a `*mut Query`.
+// It is safe to implement `Send` because the constructor requires `&mut Query`, which
+// prevents multiple instances of `PreparedQuery` from sharing internal state.
 unsafe impl<V, F> Send for PreparedQuery<V, F>
+where
+    V: for<'v> View<'v>,
+    F: EntityFilter,
+{
+}
+
+// # Safety
+// `PreparedQuery` does not auto-implement `Sync` because it contains a `*mut Query`.
+// It is safe to implement `Sync` because no internal mutation occurs behind a safe `&self`.
+unsafe impl<V, F> Sync for PreparedQuery<V, F>
 where
     V: for<'v> View<'v>,
     F: EntityFilter,
@@ -748,7 +761,10 @@ pub struct System<R, Q, F>
 where
     R: ResourceSet,
     Q: QuerySet,
-    F: SystemDisposable<Resources = R, Queries = Q>,
+    F: SystemFn<
+        Resources = <R as ResourceSet>::PreparedResources,
+        Queries = <Q as QuerySet>::PreparedQueries,
+    >,
 {
     name: SystemId,
     resources: R,
@@ -768,7 +784,10 @@ impl<R, Q, F> Runnable for System<R, Q, F>
 where
     R: ResourceSet,
     Q: QuerySet,
-    F: SystemDisposable<Resources = R, Queries = Q>,
+    F: SystemFn<
+        Resources = <R as ResourceSet>::PreparedResources,
+        Queries = <Q as QuerySet>::PreparedQueries,
+    >,
 {
     fn name(&self) -> &SystemId { &self.name }
 
@@ -812,60 +831,40 @@ where
         info!("Running");
         use std::ops::DerefMut;
         let mut borrow = self.run_fn.get_mut();
-        SystemDisposable::run(
-            borrow.deref_mut(),
+        borrow.deref_mut().run(
             &mut self.command_buffer.get_mut(),
             &mut world_shim,
             &mut resources,
             &mut prepared_queries,
         );
     }
-
-    fn dispose(self: Box<Self>, world: &mut World) {
-        SystemDisposable::dispose(self.run_fn.into_inner(), world);
-    }
 }
 
 /// Supertrait used for defining systems. All wrapper objects for systems implement this trait.
 ///
 /// This trait will generally not be used by users.
-pub trait SystemDisposable {
-    type Resources: ResourceSet;
-    type Queries: QuerySet;
+pub trait SystemFn {
+    type Resources;
+    type Queries;
 
     fn run(
         &mut self,
         commands: &mut CommandBuffer,
         world: &mut PreparedWorld,
-        resources: &mut <Self::Resources as ResourceSet>::PreparedResources,
-        queries: &mut <Self::Queries as QuerySet>::PreparedQueries,
+        resources: &mut Self::Resources,
+        queries: &mut Self::Queries,
     );
-
-    fn dispose(self, world: &mut World);
 }
 
-// Wrapper type for storing disposable systems
-struct SystemDisposableFnMut<
-    R: ResourceSet,
-    Q: QuerySet,
-    F: FnMut(
-            &mut CommandBuffer,
-            &mut PreparedWorld,
-            &mut <R as ResourceSet>::PreparedResources,
-            &mut <Q as QuerySet>::PreparedQueries,
-        ) + 'static,
+struct SystemFnWrapper<
+    R,
+    Q,
+    F: FnMut(&mut CommandBuffer, &mut PreparedWorld, &mut R, &mut Q) + 'static,
 >(F, PhantomData<(R, Q)>);
 
-impl<R, Q, F> SystemDisposable for SystemDisposableFnMut<R, Q, F>
+impl<F, R, Q> SystemFn for SystemFnWrapper<R, Q, F>
 where
-    R: ResourceSet,
-    Q: QuerySet,
-    F: FnMut(
-            &mut CommandBuffer,
-            &mut PreparedWorld,
-            &mut <R as ResourceSet>::PreparedResources,
-            &mut <Q as QuerySet>::PreparedQueries,
-        ) + 'static,
+    F: FnMut(&mut CommandBuffer, &mut PreparedWorld, &mut R, &mut Q) + 'static,
 {
     type Resources = R;
     type Queries = Q;
@@ -874,64 +873,11 @@ where
         &mut self,
         commands: &mut CommandBuffer,
         world: &mut PreparedWorld,
-        resources: &mut <R as ResourceSet>::PreparedResources,
-        queries: &mut <Q as QuerySet>::PreparedQueries,
+        resources: &mut Self::Resources,
+        queries: &mut Self::Queries,
     ) {
-        (self.0)(commands, world, resources, queries)
+        (self.0)(commands, world, resources, queries);
     }
-
-    fn dispose(self, _: &mut World) {}
-}
-
-// Wrapper type for state storage to be saved
-#[derive(Shrinkwrap)]
-#[shrinkwrap(mutable)]
-struct StateWrapper<T>(pub T);
-// This is safe because systems are never called from 2 threads simultaneously.
-unsafe impl<T: Send> Sync for StateWrapper<T> {}
-
-// Wrapper type for storing disposable systems
-struct SystemDisposableState<
-    S,
-    R: ResourceSet,
-    Q: QuerySet,
-    F: FnMut(
-            &mut S,
-            &mut CommandBuffer,
-            &mut PreparedWorld,
-            &mut <R as ResourceSet>::PreparedResources,
-            &mut <Q as QuerySet>::PreparedQueries,
-        ) + 'static,
-    D: FnOnce(S, &mut World) + 'static,
->(F, D, StateWrapper<S>, PhantomData<(R, Q)>);
-
-impl<S, R, Q, F, D> SystemDisposable for SystemDisposableState<S, R, Q, F, D>
-where
-    R: ResourceSet,
-    Q: QuerySet,
-    F: FnMut(
-            &mut S,
-            &mut CommandBuffer,
-            &mut PreparedWorld,
-            &mut <R as ResourceSet>::PreparedResources,
-            &mut <Q as QuerySet>::PreparedQueries,
-        ) + 'static,
-    D: FnOnce(S, &mut World) + 'static,
-{
-    type Resources = R;
-    type Queries = Q;
-
-    fn run(
-        &mut self,
-        commands: &mut CommandBuffer,
-        world: &mut PreparedWorld,
-        resources: &mut <R as ResourceSet>::PreparedResources,
-        queries: &mut <Q as QuerySet>::PreparedQueries,
-    ) {
-        (self.0)(&mut self.2, commands, world, resources, queries)
-    }
-
-    fn dispose(self, world: &mut World) { (self.1)((self.2).0, world) }
 }
 
 // This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
@@ -1113,20 +1059,30 @@ where
         self
     }
 
-    fn build_system_disposable<F>(self, disposable: F) -> Box<dyn Schedulable>
+    /// Builds a standard legion `System`. A system is considered a closure for all purposes. This
+    /// closure is `FnMut`, allowing for capture of variables for tracking state for this system.
+    /// Instead of the classic OOP architecture of a system, this lets you still maintain state
+    /// across execution of the systems while leveraging the type semantics of closures for better
+    /// ergonomics.
+    pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
     where
         <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
-        F: SystemDisposable<
-                Resources = <R as ConsFlatten>::Output,
-                Queries = <Q as ConsFlatten>::Output,
-            > + Send
+        <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources: Send + Sync,
+        <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries: Send + Sync,
+        F: FnMut(
+                &mut CommandBuffer,
+                &mut PreparedWorld,
+                &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
+                &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
+            ) + Send
             + Sync
             + 'static,
     {
+        let run_fn = SystemFnWrapper(run_fn, PhantomData);
         Box::new(System {
             name: self.name,
-            run_fn: AtomicRefCell::new(disposable),
+            run_fn: AtomicRefCell::new(run_fn),
             resources: self.resources.flatten(),
             queries: AtomicRefCell::new(self.queries.flatten()),
             archetypes: if self.access_all_archetypes {
@@ -1141,60 +1097,6 @@ where
             },
             command_buffer: AtomicRefCell::new(CommandBuffer::default()),
         })
-    }
-
-    /// Builds a system which is considered `disposable`, which also means it carries an independent
-    /// state object. This type of system construction allows for systems which may need to
-    /// dispose of resources at the end of the process, which you cannot do from only `FnMut` capture
-    /// variables.
-    pub fn build_disposable<F, D, S>(
-        self,
-        initial_state: S,
-        run_fn: F,
-        dispose_fn: D,
-    ) -> Box<dyn Schedulable>
-    where
-        S: Send + Sync + 'static,
-        <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
-        <Q as ConsFlatten>::Output: QuerySet,
-        F: FnMut(
-                &mut S,
-                &mut CommandBuffer,
-                &mut PreparedWorld,
-                &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
-                &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
-            ) + Send
-            + Sync
-            + 'static,
-        D: FnOnce(S, &mut World) + Send + Sync + 'static,
-    {
-        self.build_system_disposable(SystemDisposableState(
-            run_fn,
-            dispose_fn,
-            StateWrapper(initial_state),
-            Default::default(),
-        ))
-    }
-
-    /// Builds a standard legion `System`. A system is considered a closure for all purposes. This
-    /// closure is `FnMut`, allowing for capture of variables for tracking state for this system.
-    /// Instead of the classic OOP architecture of a system, this lets you still maintain state
-    /// across execution of the systems while leveraging the type semantics of closures for better
-    /// ergonomics.
-    pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
-    where
-        <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
-        <Q as ConsFlatten>::Output: QuerySet,
-        F: FnMut(
-                &mut CommandBuffer,
-                &mut PreparedWorld,
-                &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
-                &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
-            ) + Send
-            + Sync
-            + 'static,
-    {
-        self.build_system_disposable(SystemDisposableFnMut(run_fn, Default::default()))
     }
 
     /// Builds a system which is not `Schedulable`, as it is not thread safe (!Send and !Sync),
@@ -1212,62 +1114,10 @@ where
                 &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
             ) + 'static,
     {
-        let disposable = SystemDisposableFnMut(run_fn, Default::default());
+        let run_fn = SystemFnWrapper(run_fn, PhantomData);
         Box::new(System {
             name: self.name,
-            run_fn: AtomicRefCell::new(disposable),
-            resources: self.resources.flatten(),
-            queries: AtomicRefCell::new(self.queries.flatten()),
-            archetypes: if self.access_all_archetypes {
-                ArchetypeAccess::All
-            } else {
-                ArchetypeAccess::Some(BitSet::default())
-            },
-            access: SystemAccess {
-                resources: self.resource_access,
-                components: self.component_access,
-                tags: Access::default(),
-            },
-            command_buffer: AtomicRefCell::new(CommandBuffer::default()),
-        })
-    }
-
-    /// Builds a system which is considered `disposable`, which also means it carries an independent
-    /// state object. This type of system construction allows for systems which may need to
-    /// dispose of resources at the end of the process, which you cannot do from only `FnMut` capture
-    /// variables.
-    ///
-    /// This variant of the function is like the `build_thread_local` function, allowing for constructing
-    /// a thread local system which is !Send and !Sync.
-    pub fn build_thread_local_disposable<S, F, D>(
-        self,
-        initial_state: S,
-        run_fn: F,
-        dispose_fn: D,
-    ) -> Box<dyn Runnable>
-    where
-        S: 'static,
-        <R as ConsFlatten>::Output: ResourceSet + Send + Sync,
-        <Q as ConsFlatten>::Output: QuerySet,
-        F: FnMut(
-                &mut S,
-                &mut CommandBuffer,
-                &mut PreparedWorld,
-                &mut <<R as ConsFlatten>::Output as ResourceSet>::PreparedResources,
-                &mut <<Q as ConsFlatten>::Output as QuerySet>::PreparedQueries,
-            ) + 'static,
-        D: FnOnce(S, &mut World) + 'static,
-    {
-        let disposable = SystemDisposableState(
-            run_fn,
-            dispose_fn,
-            StateWrapper(initial_state),
-            Default::default(),
-        );
-
-        Box::new(System {
-            name: self.name,
-            run_fn: AtomicRefCell::new(disposable),
+            run_fn: AtomicRefCell::new(run_fn),
             resources: self.resources.flatten(),
             queries: AtomicRefCell::new(self.queries.flatten()),
             archetypes: if self.access_all_archetypes {
@@ -1403,7 +1253,7 @@ mod tests {
 
         let systems = vec![system_one, system_two, system_three, system_four];
 
-        let mut executor = StageExecutor::new(systems);
+        let mut executor = Executor::new(systems);
         executor.execute(&mut world);
 
         assert_eq!(*(runs.lock().unwrap()), order);
@@ -1533,7 +1383,7 @@ mod tests {
         );
 
         let systems = vec![system1, system2, system3];
-        let mut executor = StageExecutor::new(systems);
+        let mut executor = Executor::new(systems);
         pool.install(|| {
             for _ in 0..1000 {
                 executor.execute(&mut world);
@@ -1601,7 +1451,7 @@ mod tests {
         );
 
         let systems = vec![system1, system2, system3];
-        let mut executor = StageExecutor::new(systems);
+        let mut executor = Executor::new(systems);
         pool.install(|| {
             for _ in 0..1000 {
                 executor.execute(&mut world);
@@ -1734,7 +1584,7 @@ mod tests {
         );
 
         let systems = vec![system1, system2, system3, system4, system5];
-        let mut executor = StageExecutor::new(systems);
+        let mut executor = Executor::new(systems);
         pool.install(|| {
             for _ in 0..1000 {
                 executor.execute(&mut world);

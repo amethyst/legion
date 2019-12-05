@@ -5,23 +5,6 @@ struct Pos(f32, f32, f32);
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Vel(f32, f32, f32);
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Stages {
-    Update,
-    Draw,
-}
-
-impl Stage for Stages {}
-
-impl std::fmt::Display for Stages {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Stages::Update => write!(f, "update"),
-            Stages::Draw => write!(f, "draw"),
-        }
-    }
-}
-
 fn main() {
     let _ = tracing_subscriber::fmt::try_init();
 
@@ -59,8 +42,6 @@ fn main() {
             }
         });
 
-    let mut scheduler = SystemScheduler::new();
-    scheduler.add_system(Stages::Update, update_positions);
-
-    scheduler.execute(&mut world);
+    let mut schedule = Schedule::builder().add_system(update_positions).build();
+    schedule.execute(&mut world);
 }
