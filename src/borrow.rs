@@ -25,9 +25,7 @@ pub struct AtomicRefCell<T> {
 }
 
 impl<T: Default> Default for AtomicRefCell<T> {
-    fn default() -> Self {
-        Self::new(T::default())
-    }
+    fn default() -> Self { Self::new(T::default()) }
 }
 
 impl<T: std::fmt::Debug> std::fmt::Debug for AtomicRefCell<T> {
@@ -54,14 +52,10 @@ impl<T> AtomicRefCell<T> {
     /// Runtime borrow checking is only conducted in builds with `debug_assertions` enabled. Release
     /// builds assume proper resource access and will cause undefined behavior with improper use.
     #[inline(always)]
-    pub fn get(&self) -> Ref<T> {
-        self.try_get().unwrap()
-    }
+    pub fn get(&self) -> Ref<T> { self.try_get().unwrap() }
 
     /// Unwrap the value from the RefCell and kill it, returning the value.
-    pub fn into_inner(self) -> T {
-        self.value.into_inner()
-    }
+    pub fn into_inner(self) -> T { self.value.into_inner() }
 
     /// Retrieve an immutable `Ref` wrapped reference of `&T`. This is the safe version of `get`
     /// providing an error result on failure.
@@ -124,9 +118,7 @@ impl<T> AtomicRefCell<T> {
     /// Runtime borrow checking is only conducted in builds with `debug_assertions` enabled. Release
     /// builds assume proper resource access and will cause undefined behavior with improper use.
     #[inline(always)]
-    pub fn get_mut(&self) -> RefMut<T> {
-        self.try_get_mut().unwrap()
-    }
+    pub fn get_mut(&self) -> RefMut<T> { self.try_get_mut().unwrap() }
 
     /// Retrieve a mutable `RefMut` wrapped reference of `&mut T`. This is the safe version of
     /// `get_mut` providing an error result on failure.
@@ -191,9 +183,7 @@ pub trait UnsafeClone {
 }
 
 impl<A: UnsafeClone, B: UnsafeClone> UnsafeClone for (A, B) {
-    unsafe fn clone(&self) -> Self {
-        (self.0.clone(), self.1.clone())
-    }
+    unsafe fn clone(&self) -> Self { (self.0.clone(), self.1.clone()) }
 }
 
 #[derive(Debug)]
@@ -206,21 +196,15 @@ pub struct Shared<'a> {
 
 impl<'a> Shared<'a> {
     #[cfg(debug_assertions)]
-    fn new(state: &'a AtomicIsize) -> Self {
-        Self { state }
-    }
+    fn new(state: &'a AtomicIsize) -> Self { Self { state } }
     #[cfg(not(debug_assertions))]
     #[inline(always)]
-    fn new(_: &'a AtomicIsize) -> Self {
-        Self { state: PhantomData }
-    }
+    fn new(_: &'a AtomicIsize) -> Self { Self { state: PhantomData } }
 }
 
 #[cfg(debug_assertions)]
 impl<'a> Drop for Shared<'a> {
-    fn drop(&mut self) {
-        self.state.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-    }
+    fn drop(&mut self) { self.state.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); }
 }
 
 impl<'a> Clone for Shared<'a> {
@@ -233,9 +217,7 @@ impl<'a> Clone for Shared<'a> {
 }
 
 impl<'a> UnsafeClone for Shared<'a> {
-    unsafe fn clone(&self) -> Self {
-        Clone::clone(&self)
-    }
+    unsafe fn clone(&self) -> Self { Clone::clone(&self) }
 }
 
 #[derive(Debug)]
@@ -248,21 +230,15 @@ pub struct Exclusive<'a> {
 
 impl<'a> Exclusive<'a> {
     #[cfg(debug_assertions)]
-    fn new(state: &'a AtomicIsize) -> Self {
-        Self { state }
-    }
+    fn new(state: &'a AtomicIsize) -> Self { Self { state } }
     #[cfg(not(debug_assertions))]
     #[inline(always)]
-    fn new(_: &'a AtomicIsize) -> Self {
-        Self { state: PhantomData }
-    }
+    fn new(_: &'a AtomicIsize) -> Self { Self { state: PhantomData } }
 }
 
 #[cfg(debug_assertions)]
 impl<'a> Drop for Exclusive<'a> {
-    fn drop(&mut self) {
-        self.state.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    }
+    fn drop(&mut self) { self.state.fetch_add(1, std::sync::atomic::Ordering::SeqCst); }
 }
 
 impl<'a> UnsafeClone for Exclusive<'a> {
@@ -284,16 +260,12 @@ pub struct Ref<'a, T: 'a> {
 
 impl<'a, T: 'a> Clone for Ref<'a, T> {
     #[inline(always)]
-    fn clone(&self) -> Self {
-        Ref::new(Clone::clone(&self.borrow), self.value)
-    }
+    fn clone(&self) -> Self { Ref::new(Clone::clone(&self.borrow), self.value) }
 }
 
 impl<'a, T: 'a> Ref<'a, T> {
     #[inline(always)]
-    pub fn new(borrow: Shared<'a>, value: &'a T) -> Self {
-        Self { borrow, value }
-    }
+    pub fn new(borrow: Shared<'a>, value: &'a T) -> Self { Self { borrow, value } }
 
     #[inline(always)]
     pub fn map_into<K: 'a, F: FnMut(&'a T) -> K>(self, mut f: F) -> RefMap<'a, K> {
@@ -311,41 +283,31 @@ impl<'a, T: 'a> Ref<'a, T> {
     ///
     /// Ensure that you still follow all safety guidelines of this mapped ref.
     #[inline(always)]
-    pub unsafe fn deconstruct(self) -> (Shared<'a>, &'a T) {
-        (self.borrow, self.value)
-    }
+    pub unsafe fn deconstruct(self) -> (Shared<'a>, &'a T) { (self.borrow, self.value) }
 }
 
 impl<'a, T: 'a> Deref for Ref<'a, T> {
     type Target = T;
 
     #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        self.value
-    }
+    fn deref(&self) -> &Self::Target { self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for Ref<'a, T> {
     #[inline(always)]
-    fn as_ref(&self) -> &T {
-        self.value
-    }
+    fn as_ref(&self) -> &T { self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for Ref<'a, T> {
     #[inline(always)]
-    fn borrow(&self) -> &T {
-        self.value
-    }
+    fn borrow(&self) -> &T { self.value }
 }
 
 impl<'a, T> PartialEq for Ref<'a, T>
 where
     T: 'a + PartialEq,
 {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
-    }
+    fn eq(&self, other: &Self) -> bool { self.value == other.value }
 }
 impl<'a, T> Eq for Ref<'a, T> where T: 'a + Eq {}
 
@@ -361,18 +323,14 @@ impl<'a, T> Ord for Ref<'a, T>
 where
     T: 'a + Ord,
 {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.value.cmp(&other.value)
-    }
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.value.cmp(&other.value) }
 }
 
 impl<'a, T> Hash for Ref<'a, T>
 where
     T: 'a + Hash,
 {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.value.hash(state);
-    }
+    fn hash<H: Hasher>(&self, state: &mut H) { self.value.hash(state); }
 }
 
 #[derive(Debug)]
@@ -385,9 +343,7 @@ pub struct RefMut<'a, T: 'a> {
 
 impl<'a, T: 'a> RefMut<'a, T> {
     #[inline(always)]
-    pub fn new(borrow: Exclusive<'a>, value: &'a mut T) -> Self {
-        Self { borrow, value }
-    }
+    pub fn new(borrow: Exclusive<'a>, value: &'a mut T) -> Self { Self { borrow, value } }
 
     #[inline(always)]
     pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapMut<'a, K> {
@@ -400,9 +356,7 @@ impl<'a, T: 'a> RefMut<'a, T> {
     ///
     /// Ensure that you still follow all safety guidelines of this mapped ref.
     #[inline(always)]
-    pub unsafe fn deconstruct(self) -> (Exclusive<'a>, &'a mut T) {
-        (self.borrow, self.value)
-    }
+    pub unsafe fn deconstruct(self) -> (Exclusive<'a>, &'a mut T) { (self.borrow, self.value) }
 
     #[inline(always)]
     pub fn split<First, Rest, F: Fn(&'a mut T) -> (&'a mut First, &'a mut Rest)>(
@@ -421,39 +375,29 @@ impl<'a, T: 'a> Deref for RefMut<'a, T> {
     type Target = T;
 
     #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        self.value
-    }
+    fn deref(&self) -> &Self::Target { self.value }
 }
 
 impl<'a, T: 'a> DerefMut for RefMut<'a, T> {
     #[inline(always)]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.value
-    }
+    fn deref_mut(&mut self) -> &mut Self::Target { self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for RefMut<'a, T> {
     #[inline(always)]
-    fn as_ref(&self) -> &T {
-        self.value
-    }
+    fn as_ref(&self) -> &T { self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for RefMut<'a, T> {
     #[inline(always)]
-    fn borrow(&self) -> &T {
-        self.value
-    }
+    fn borrow(&self) -> &T { self.value }
 }
 
 impl<'a, T> PartialEq for RefMut<'a, T>
 where
     T: 'a + PartialEq,
 {
-    fn eq(&self, other: &Self) -> bool {
-        self.value == other.value
-    }
+    fn eq(&self, other: &Self) -> bool { self.value == other.value }
 }
 impl<'a, T> Eq for RefMut<'a, T> where T: 'a + Eq {}
 
@@ -469,18 +413,14 @@ impl<'a, T> Ord for RefMut<'a, T>
 where
     T: 'a + Ord,
 {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.value.cmp(&other.value)
-    }
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.value.cmp(&other.value) }
 }
 
 impl<'a, T> Hash for RefMut<'a, T>
 where
     T: 'a + Hash,
 {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.value.hash(state);
-    }
+    fn hash<H: Hasher>(&self, state: &mut H) { self.value.hash(state); }
 }
 
 #[derive(Debug)]
@@ -493,9 +433,7 @@ pub struct RefMap<'a, T: 'a> {
 
 impl<'a, T: 'a> RefMap<'a, T> {
     #[inline(always)]
-    pub fn new(borrow: Shared<'a>, value: T) -> Self {
-        Self { borrow, value }
-    }
+    pub fn new(borrow: Shared<'a>, value: T) -> Self { Self { borrow, value } }
 
     #[inline(always)]
     pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMap<'a, K> {
@@ -508,32 +446,24 @@ impl<'a, T: 'a> RefMap<'a, T> {
     ///
     /// Ensure that you still follow all safety guidelines of this  mapped ref.
     #[inline(always)]
-    pub unsafe fn deconstruct(self) -> (Shared<'a>, T) {
-        (self.borrow, self.value)
-    }
+    pub unsafe fn deconstruct(self) -> (Shared<'a>, T) { (self.borrow, self.value) }
 }
 
 impl<'a, T: 'a> Deref for RefMap<'a, T> {
     type Target = T;
 
     #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
+    fn deref(&self) -> &Self::Target { &self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for RefMap<'a, T> {
     #[inline(always)]
-    fn as_ref(&self) -> &T {
-        &self.value
-    }
+    fn as_ref(&self) -> &T { &self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for RefMap<'a, T> {
     #[inline(always)]
-    fn borrow(&self) -> &T {
-        &self.value
-    }
+    fn borrow(&self) -> &T { &self.value }
 }
 
 #[derive(Debug)]
@@ -546,9 +476,7 @@ pub struct RefMapMut<'a, T: 'a> {
 
 impl<'a, T: 'a> RefMapMut<'a, T> {
     #[inline(always)]
-    pub fn new(borrow: Exclusive<'a>, value: T) -> Self {
-        Self { borrow, value }
-    }
+    pub fn new(borrow: Exclusive<'a>, value: T) -> Self { Self { borrow, value } }
 
     #[inline(always)]
     pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapMut<'a, K> {
@@ -564,39 +492,29 @@ impl<'a, T: 'a> RefMapMut<'a, T> {
     ///
     /// Ensure that you still follow all safety guidelines of this mutable mapped ref.
     #[inline(always)]
-    pub unsafe fn deconstruct(self) -> (Exclusive<'a>, T) {
-        (self.borrow, self.value)
-    }
+    pub unsafe fn deconstruct(self) -> (Exclusive<'a>, T) { (self.borrow, self.value) }
 }
 
 impl<'a, T: 'a> Deref for RefMapMut<'a, T> {
     type Target = T;
 
     #[inline(always)]
-    fn deref(&self) -> &Self::Target {
-        &self.value
-    }
+    fn deref(&self) -> &Self::Target { &self.value }
 }
 
 impl<'a, T: 'a> DerefMut for RefMapMut<'a, T> {
     #[inline(always)]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.value
-    }
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.value }
 }
 
 impl<'a, T: 'a> AsRef<T> for RefMapMut<'a, T> {
     #[inline(always)]
-    fn as_ref(&self) -> &T {
-        &self.value
-    }
+    fn as_ref(&self) -> &T { &self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for RefMapMut<'a, T> {
     #[inline(always)]
-    fn borrow(&self) -> &T {
-        &self.value
-    }
+    fn borrow(&self) -> &T { &self.value }
 }
 
 #[derive(Debug)]
@@ -609,9 +527,7 @@ pub struct RefIter<'a, T: 'a, I: Iterator<Item = &'a T>> {
 
 impl<'a, T: 'a, I: Iterator<Item = &'a T>> RefIter<'a, T, I> {
     #[inline(always)]
-    pub fn new(borrow: Shared<'a>, iter: I) -> Self {
-        Self { borrow, iter }
-    }
+    pub fn new(borrow: Shared<'a>, iter: I) -> Self { Self { borrow, iter } }
 }
 
 impl<'a, T: 'a, I: Iterator<Item = &'a T>> Iterator for RefIter<'a, T, I> {
@@ -626,9 +542,7 @@ impl<'a, T: 'a, I: Iterator<Item = &'a T>> Iterator for RefIter<'a, T, I> {
         }
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.size_hint()
-    }
+    fn size_hint(&self) -> (usize, Option<usize>) { self.iter.size_hint() }
 }
 
 impl<'a, T: 'a, I: Iterator<Item = &'a T> + ExactSizeIterator> ExactSizeIterator
@@ -704,9 +618,7 @@ pub struct RefIterMut<'a, T: 'a, I: Iterator<Item = &'a mut T>> {
 
 impl<'a, T: 'a, I: Iterator<Item = &'a mut T>> RefIterMut<'a, T, I> {
     #[inline(always)]
-    pub fn new(borrow: Exclusive<'a>, iter: I) -> Self {
-        Self { borrow, iter }
-    }
+    pub fn new(borrow: Exclusive<'a>, iter: I) -> Self { Self { borrow, iter } }
 }
 
 impl<'a, T: 'a, I: Iterator<Item = &'a mut T>> Iterator for RefIterMut<'a, T, I> {
@@ -721,9 +633,7 @@ impl<'a, T: 'a, I: Iterator<Item = &'a mut T>> Iterator for RefIterMut<'a, T, I>
         }
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.size_hint()
-    }
+    fn size_hint(&self) -> (usize, Option<usize>) { self.iter.size_hint() }
 }
 
 impl<'a, T: 'a, I: Iterator<Item = &'a mut T> + ExactSizeIterator> ExactSizeIterator
