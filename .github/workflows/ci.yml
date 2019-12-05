@@ -37,6 +37,8 @@ jobs:
     strategy:
       matrix:
         features:
+          - --all-features --release
+          - --no-default-features --release
           - --all-features
           - --no-default-features
           - --no-default-features --features events
@@ -63,7 +65,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: ${{ matrix.features }} 
+          args: ${{ matrix.features }}
 
   fmt:
     name: Rustfmt
