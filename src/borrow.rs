@@ -7,6 +7,9 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::atomic::AtomicIsize;
 
+#[cfg(not(debug_assertions))]
+use std::marker::PhantomData;
+
 /// A `RefCell` implementation which is thread safe. This type performs all the standard runtime
 /// borrow checking which would be familiar from using `RefCell`.
 ///
@@ -23,6 +26,12 @@ pub struct AtomicRefCell<T> {
 
 impl<T: Default> Default for AtomicRefCell<T> {
     fn default() -> Self { Self::new(T::default()) }
+}
+
+impl<T: std::fmt::Debug> std::fmt::Debug for AtomicRefCell<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({:?}) {:?}", self.borrow_state, self.value)
+    }
 }
 
 impl<T> AtomicRefCell<T> {
