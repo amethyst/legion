@@ -7,6 +7,9 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 use std::sync::atomic::AtomicIsize;
 
+#[cfg(not(debug_assertions))]
+use std::marker::PhantomData;
+
 /// A `RefCell` implementation which is thread safe. This type performs all the standard runtime
 /// borrow checking which would be familiar from using `RefCell`.
 ///
