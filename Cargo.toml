@@ -34,7 +34,6 @@ paste = "0.1"
 tracing = "0.1"
 metrics = { version = "0.12", optional = true }
 shrinkwraprs = "0.2"
-petgraph = "0.4"
 
 [dev-dependencies]
 criterion = "0.3"
