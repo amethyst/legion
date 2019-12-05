@@ -167,6 +167,10 @@ unsafe impl<T: Sync> Sync for AtomicRefCell<T> {}
 
 /// Type used for allowing unsafe cloning of internal types
 pub trait UnsafeClone {
+    /// Clone this type unsafely
+    ///
+    /// # Safety
+    /// Types implementing this trait perform clones under an unsafe context.
     unsafe fn clone(&self) -> Self;
 }
 
@@ -265,6 +269,11 @@ impl<'a, State: 'a + Clone, T: 'a> Ref<'a, State, T> {
         Ref::new(self.borrow.clone(), f(&self.value))
     }
 
+    /// Deconstructs this mapped borrow to its underlying borrow state and value.
+    ///
+    /// # Safety
+    ///
+    /// Ensure that you still follow all safety guidelines of this mapped ref.
     #[inline(always)]
     pub unsafe fn deconstruct(self) -> (State, &'a T) { (self.borrow, self.value) }
 }
@@ -333,6 +342,11 @@ impl<'a, State: 'a + UnsafeClone, T: 'a> RefMut<'a, State, T> {
         RefMapMut::new(self.borrow, f(&mut self.value))
     }
 
+    /// Deconstructs this mapped borrow to its underlying borrow state and value.
+    ///
+    /// # Safety
+    ///
+    /// Ensure that you still follow all safety guidelines of this mapped ref.
     #[inline(always)]
     pub unsafe fn deconstruct(self) -> (State, &'a mut T) { (self.borrow, self.value) }
 
@@ -425,6 +439,11 @@ impl<'a, State: 'a + Clone, T: 'a> RefMap<'a, State, T> {
         RefMap::new(self.borrow, f(&mut self.value))
     }
 
+    /// Deconstructs this mapped borrow to its underlying borrow state and value.
+    ///
+    /// # Safety
+    ///
+    /// Ensure that you still follow all safety guidelines of this  mapped ref.
     #[inline(always)]
     pub unsafe fn deconstruct(self) -> (State, T) { (self.borrow, self.value) }
 }
@@ -474,6 +493,11 @@ impl<'a, State: 'a + UnsafeClone, T: 'a> RefMapMut<'a, State, T> {
         }
     }
 
+    /// Deconstructs this mapped borrow to its underlying borrow state and value.
+    ///
+    /// # Safety
+    ///
+    /// Ensure that you still follow all safety guidelines of this mutable mapped ref.
     #[inline(always)]
     pub unsafe fn deconstruct(self) -> (State, T) { (self.borrow, self.value) }
 }

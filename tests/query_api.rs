@@ -499,3 +499,89 @@ fn query_on_changed_self_changes() {
 
     assert_eq!(components.len(), count);
 }
+
+#[test]
+fn query_try_with_changed_filter() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Sum(f32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct A(f32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct B(f32);
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    let sum_entity = world.insert((), Some((Sum(0.),)))[0];
+    let a_entity = world.insert((), Some((Sum(0.), A(1.))))[0];
+    let b_entity = world.insert((), Some((Sum(0.), B(2.))))[0];
+    let a_b_entity = world.insert((), Some((Sum(0.), A(1.), B(2.))))[0];
+
+    let mut query =
+        <(Write<Sum>, TryRead<A>, TryRead<B>)>::query().filter(changed::<A>() | changed::<B>());
+
+    let mut count = 0;
+    for (mut sum, a, b) in query.iter(&mut world) {
+        sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
+        count += 1;
+    }
+    assert_eq!(3, count);
+    assert_eq!(
+        world.get_component::<Sum>(sum_entity).map(|x| *x),
+        Some(Sum(0.))
+    );
+    assert_eq!(
+        world.get_component::<Sum>(a_entity).map(|x| *x),
+        Some(Sum(1.))
+    );
+    assert_eq!(
+        world.get_component::<Sum>(b_entity).map(|x| *x),
+        Some(Sum(2.))
+    );
+    assert_eq!(
+        world.get_component::<Sum>(a_b_entity).map(|x| *x),
+        Some(Sum(3.))
+    );
+
+    count = 0;
+    for (mut sum, a, b) in query.iter(&mut world) {
+        sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
+        count += 1;
+    }
+    assert_eq!(0, count);
+
+    *world.get_component_mut::<B>(a_b_entity).unwrap() = B(3.0);
+    count = 0;
+    for (mut sum, a, b) in query.iter(&mut world) {
+        sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
+        count += 1;
+    }
+    assert_eq!(1, count);
+    assert_eq!(
+        world.get_component::<Sum>(a_b_entity).map(|x| *x),
+        Some(Sum(4.))
+    );
+}
+
+#[test]
+fn query_iter_chunks_tag() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    world.insert((Static, Model(0)), vec![()]);
+    world.insert((Static, Model(1)), vec![()]);
+    world.insert((Static, Model(2)), vec![()]);
+
+    let mut query = <(Tagged<Static>, Tagged<Model>)>::query();
+
+    for chunk in query.iter_chunks_immutable(&world) {
+        let model = chunk.tag::<Model>().cloned();
+        for entity in chunk.entities() {
+            assert_eq!(world.get_tag::<Model>(*entity), model.as_ref());
+        }
+    }
+}
