@@ -374,7 +374,7 @@ mod tests {
 
         command.write(&mut world);
 
-        let mut query = Read::<Pos>::query();
+        let query = Read::<Pos>::query();
 
         let mut count = 0;
         for _ in query.iter_entities(&mut world) {

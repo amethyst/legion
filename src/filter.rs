@@ -158,18 +158,18 @@ pub struct ChunkFilterData<'a> {
 pub trait ActiveFilter {}
 
 /// A type which combines both an archetype and a chunk filter.
-pub trait EntityFilter: Send {
-    type ArchetypeFilter: for<'a> Filter<ArchetypeFilterData<'a>>;
-    type ChunksetFilter: for<'a> Filter<ChunksetFilterData<'a>>;
-    type ChunkFilter: for<'a> Filter<ChunkFilterData<'a>>;
+pub trait EntityFilter: Send + Clone {
+    type ArchetypeFilter: for<'a> Filter<ArchetypeFilterData<'a>> + Clone;
+    type ChunksetFilter: for<'a> Filter<ChunksetFilterData<'a>> + Clone;
+    type ChunkFilter: for<'a> Filter<ChunkFilterData<'a>> + Clone;
 
     /// Gets mutable references to both inner filters.
     fn filters(
-        &mut self,
+        &self,
     ) -> (
-        &mut Self::ArchetypeFilter,
-        &mut Self::ChunksetFilter,
-        &mut Self::ChunkFilter,
+        &Self::ArchetypeFilter,
+        &Self::ChunksetFilter,
+        &Self::ChunkFilter,
     );
 
     /// Converts self into both inner filters.
@@ -183,19 +183,19 @@ pub trait EntityFilter: Send {
 
     /// Gets an iterator over all matching archetype indexes.
     fn iter_archetype_indexes<'a, 'b>(
-        &'a mut self,
+        &'a self,
         storage: &'b Storage,
     ) -> FilterArchIter<'b, 'a, Self::ArchetypeFilter>;
 
     /// Gets an iterator over all matching chunkset indexes.
     fn iter_chunkset_indexes<'a, 'b>(
-        &'a mut self,
+        &'a self,
         archetype: &'b ArchetypeData,
     ) -> FilterChunkIter<'b, 'a, Self::ChunksetFilter>;
 
     /// Gets an iterator over all matching archetypes and chunksets.
     fn iter<'a, 'b>(
-        &'a mut self,
+        &'a self,
         storage: &'b Storage,
     ) -> FilterEntityIter<'b, 'a, Self::ArchetypeFilter, Self::ChunksetFilter>;
 }
@@ -226,26 +226,22 @@ where
 
 impl<A, S, C> EntityFilter for EntityFilterTuple<A, S, C>
 where
-    A: for<'a> Filter<ArchetypeFilterData<'a>>,
-    S: for<'a> Filter<ChunksetFilterData<'a>>,
-    C: for<'a> Filter<ChunkFilterData<'a>>,
+    A: for<'a> Filter<ArchetypeFilterData<'a>> + Clone,
+    S: for<'a> Filter<ChunksetFilterData<'a>> + Clone,
+    C: for<'a> Filter<ChunkFilterData<'a>> + Clone,
 {
     type ArchetypeFilter = A;
     type ChunksetFilter = S;
     type ChunkFilter = C;
 
     fn filters(
-        &mut self,
+        &self,
     ) -> (
-        &mut Self::ArchetypeFilter,
-        &mut Self::ChunksetFilter,
-        &mut Self::ChunkFilter,
+        &Self::ArchetypeFilter,
+        &Self::ChunksetFilter,
+        &Self::ChunkFilter,
     ) {
-        (
-            &mut self.arch_filter,
-            &mut self.chunkset_filter,
-            &mut self.chunk_filter,
-        )
+        (&self.arch_filter, &self.chunkset_filter, &self.chunk_filter)
     }
 
     fn into_filters(
@@ -258,10 +254,7 @@ where
         (self.arch_filter, self.chunkset_filter, self.chunk_filter)
     }
 
-    fn iter_archetype_indexes<'a, 'b>(
-        &'a mut self,
-        storage: &'b Storage,
-    ) -> FilterArchIter<'b, 'a, A> {
+    fn iter_archetype_indexes<'a, 'b>(&'a self, storage: &'b Storage) -> FilterArchIter<'b, 'a, A> {
         let data = ArchetypeFilterData {
             component_types: storage.component_types(),
             tag_types: storage.tag_types(),
@@ -270,12 +263,12 @@ where
         let iter = self.arch_filter.collect(data);
         FilterArchIter {
             archetypes: iter.enumerate(),
-            filter: &mut self.arch_filter,
+            filter: &self.arch_filter,
         }
     }
 
     fn iter_chunkset_indexes<'a, 'b>(
-        &'a mut self,
+        &'a self,
         archetype: &'b ArchetypeData,
     ) -> FilterChunkIter<'b, 'a, S> {
         let data = ChunksetFilterData {
@@ -285,11 +278,11 @@ where
         let iter = self.chunkset_filter.collect(data);
         FilterChunkIter {
             chunks: iter.enumerate(),
-            filter: &mut self.chunkset_filter,
+            filter: &self.chunkset_filter,
         }
     }
 
-    fn iter<'a, 'b>(&'a mut self, storage: &'b Storage) -> FilterEntityIter<'b, 'a, A, S> {
+    fn iter<'a, 'b>(&'a self, storage: &'b Storage) -> FilterEntityIter<'b, 'a, A, S> {
         let data = ArchetypeFilterData {
             component_types: storage.component_types(),
             tag_types: storage.tag_types(),
@@ -298,8 +291,8 @@ where
         let iter = self.arch_filter.collect(data).enumerate();
         FilterEntityIter {
             storage,
-            arch_filter: &mut self.arch_filter,
-            chunk_filter: &mut self.chunkset_filter,
+            arch_filter: &self.arch_filter,
+            chunk_filter: &self.chunkset_filter,
             archetypes: iter,
             chunks: None,
         }
@@ -364,7 +357,7 @@ where
 
 /// An iterator which yields the indexes of archetypes that match a filter.
 pub struct FilterArchIter<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> {
-    filter: &'b mut F,
+    filter: &'b F,
     archetypes: Enumerate<F::Iter>,
 }
 
@@ -384,7 +377,7 @@ impl<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> Iterator for FilterArchIter<'a,
 
 /// An iterator which yields the index of chuinks that match a filter.
 pub struct FilterChunkIter<'a, 'b, F: Filter<ChunksetFilterData<'a>>> {
-    filter: &'b mut F,
+    filter: &'b F,
     chunks: Enumerate<F::Iter>,
 }
 
@@ -410,8 +403,8 @@ pub struct FilterEntityIter<
     Chunk: Filter<ChunksetFilterData<'a>>,
 > {
     storage: &'a Storage,
-    arch_filter: &'b mut Arch,
-    chunk_filter: &'b mut Chunk,
+    arch_filter: &'b Arch,
+    chunk_filter: &'b Chunk,
     archetypes: Enumerate<Arch::Iter>,
     chunks: Option<(ArchetypeId, Enumerate<Chunk::Iter>)>,
 }
@@ -827,7 +820,7 @@ impl_or_filter!(A => a, B => b, C => c, D => d, E => e);
 impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
 
 /// A filter qhich requires that all chunks contain entity data components of type `T`.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ComponentFilter<T>(PhantomData<T>);
 
 impl<T: Component> ComponentFilter<T> {
@@ -835,6 +828,11 @@ impl<T: Component> ComponentFilter<T> {
 }
 
 impl<T> ActiveFilter for ComponentFilter<T> {}
+
+impl<T> Copy for ComponentFilter<T> {}
+impl<T> Clone for ComponentFilter<T> {
+    fn clone(&self) -> Self { *self }
+}
 
 impl<'a, T: Component> Filter<ArchetypeFilterData<'a>> for ComponentFilter<T> {
     type Iter = SliceVecIter<'a, ComponentTypeId>;
@@ -894,7 +892,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for ComponentFilter<T> {
 }
 
 /// A filter which requires that all chunks contain shared tag data of type `T`.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TagFilter<T>(PhantomData<T>);
 
 impl<T: Tag> TagFilter<T> {
@@ -902,6 +900,11 @@ impl<T: Tag> TagFilter<T> {
 }
 
 impl<T> ActiveFilter for TagFilter<T> {}
+
+impl<T> Copy for TagFilter<T> {}
+impl<T> Clone for TagFilter<T> {
+    fn clone(&self) -> Self { *self }
+}
 
 impl<'a, T: Tag> Filter<ArchetypeFilterData<'a>> for TagFilter<T> {
     type Iter = SliceVecIter<'a, TagTypeId>;
@@ -959,7 +962,7 @@ impl<'a, T> std::ops::BitOr<Passthrough> for TagFilter<T> {
 }
 
 /// A filter which requires that all chunks contain a specific tag value.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct TagValueFilter<'a, T> {
     value: &'a T,
 }
@@ -969,6 +972,11 @@ impl<'a, T: Tag> TagValueFilter<'a, T> {
 }
 
 impl<'a, T> ActiveFilter for TagValueFilter<'a, T> {}
+
+impl<'a, T> Copy for TagValueFilter<'a, T> {}
+impl<'a, T> Clone for TagValueFilter<'a, T> {
+    fn clone(&self) -> Self { *self }
+}
 
 impl<'a, 'b, T: Tag> Filter<ChunksetFilterData<'a>> for TagValueFilter<'b, T> {
     type Iter = Iter<'a, T>;
@@ -1052,6 +1060,15 @@ impl<T: Component> ComponentChangedFilter<T> {
 }
 
 impl<T: Component> ActiveFilter for ComponentChangedFilter<T> {}
+
+impl<T: Component> Clone for ComponentChangedFilter<T> {
+    fn clone(&self) -> Self {
+        Self {
+            last_read_version: AtomicU64::new(self.last_read_version.load(Ordering::Relaxed)),
+            phantom: PhantomData,
+        }
+    }
+}
 
 impl<'a, T: Component> Filter<ChunkFilterData<'a>> for ComponentChangedFilter<T> {
     type Iter = Iter<'a, ComponentStorage>;

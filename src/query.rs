@@ -114,6 +114,10 @@ impl<T: DefaultFilter + for<'a> View<'a>> IntoQuery for T {
 pub struct Read<T: Component>(PhantomData<T>);
 
 impl<T: Component> ReadOnly for Read<T> {}
+impl<T: Component> Copy for Read<T> {}
+impl<T: Component> Clone for Read<T> {
+    fn clone(&self) -> Self { *self }
+}
 
 impl<'a, T: Component> DefaultFilter for Read<T> {
     type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough, Passthrough>;
@@ -160,6 +164,13 @@ impl<T: Component> ViewElement for Read<T> {
 #[derivative(Default(bound = ""))]
 pub struct TryRead<T: Component>(PhantomData<T>);
 
+impl<T: Component> ReadOnly for TryRead<T> {}
+
+impl<T: Component> Copy for TryRead<T> {}
+impl<T: Component> Clone for TryRead<T> {
+    fn clone(&self) -> Self { *self }
+}
+
 impl<'a, T: Component> DefaultFilter for TryRead<T> {
     type Filter = EntityFilterTuple<Passthrough, Passthrough, Passthrough>;
 
@@ -200,6 +211,11 @@ impl<T: Component> ViewElement for TryRead<T> {
 #[derive(Derivative, Debug)]
 #[derivative(Default(bound = ""))]
 pub struct Write<T: Component>(PhantomData<T>);
+
+impl<T: Component> Copy for Write<T> {}
+impl<T: Component> Clone for Write<T> {
+    fn clone(&self) -> Self { *self }
+}
 
 impl<'a, T: Component> DefaultFilter for Write<T> {
     type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough, Passthrough>;
@@ -252,6 +268,11 @@ impl<T: Component> ViewElement for Write<T> {
 #[derivative(Default(bound = ""))]
 pub struct TryWrite<T: Component>(PhantomData<T>);
 
+impl<T: Component> Copy for TryWrite<T> {}
+impl<T: Component> Clone for TryWrite<T> {
+    fn clone(&self) -> Self { *self }
+}
+
 impl<'a, T: Component> DefaultFilter for TryWrite<T> {
     type Filter = EntityFilterTuple<Passthrough, Passthrough, Passthrough>;
 
@@ -297,6 +318,11 @@ impl<T: Component> ViewElement for TryWrite<T> {
 pub struct Tagged<T: Tag>(PhantomData<T>);
 
 impl<T: Tag> ReadOnly for Tagged<T> {}
+
+impl<T: Tag> Copy for Tagged<T> {}
+impl<T: Tag> Clone for Tagged<T> {
+    fn clone(&self) -> Self { *self }
+}
 
 impl<'a, T: Tag> DefaultFilter for Tagged<T> {
     type Filter = EntityFilterTuple<TagFilter<T>, Passthrough, Passthrough>;
@@ -864,7 +890,7 @@ where
     ///
     /// This function may panic if other code is concurrently accessing the same components.
     pub unsafe fn iter_chunks_unchecked<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
         let (arch_filter, chunkset_filter, chunk_filter) = self.filter.filters();
@@ -889,7 +915,7 @@ where
 
     /// Gets an iterator which iterates through all chunks that match the query.
     pub fn iter_chunks_immutable<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
     where
@@ -901,7 +927,7 @@ where
 
     /// Gets an iterator which iterates through all chunks that match the query.
     pub fn iter_chunks<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data mut World,
     ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
         // safe because the &mut World ensures exclusivity
@@ -919,7 +945,7 @@ where
     ///
     /// This function may panic if other code is concurrently accessing the same components.
     pub unsafe fn iter_entities_unchecked<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data World,
     ) -> ChunkEntityIter<
         'data,
@@ -935,7 +961,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     pub fn iter_entities_immutable<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data World,
     ) -> ChunkEntityIter<
         'data,
@@ -951,7 +977,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     pub fn iter_entities<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data mut World,
     ) -> ChunkEntityIter<
         'data,
@@ -973,7 +999,7 @@ where
     ///
     /// This function may panic if other code is concurrently accessing the same components.
     pub unsafe fn iter_unchecked<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data World,
     ) -> ChunkDataIter<
         'data,
@@ -989,7 +1015,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query.
     pub fn iter_immutable<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data World,
     ) -> ChunkDataIter<
         'data,
@@ -1005,7 +1031,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query.
     pub fn iter<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data mut World,
     ) -> ChunkDataIter<
         'data,
@@ -1026,18 +1052,15 @@ where
     /// # Panics
     ///
     /// This function may panic if other code is concurrently accessing the same components.
-    pub unsafe fn for_each_entities_unchecked<'a, 'data, T>(
-        &'a mut self,
-        world: &'data World,
-        mut f: T,
-    ) where
+    pub unsafe fn for_each_entities_unchecked<'a, 'data, T>(&'a self, world: &'data World, mut f: T)
+    where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
     {
         self.iter_entities_unchecked(world).for_each(&mut f);
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each_entities_immutable<'a, 'data, T>(&'a mut self, world: &'data World, f: T)
+    pub fn for_each_entities_immutable<'a, 'data, T>(&'a self, world: &'data World, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
         V: ReadOnly,
@@ -1047,7 +1070,7 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each_entities<'a, 'data, T>(&'a mut self, world: &'data mut World, f: T)
+    pub fn for_each_entities<'a, 'data, T>(&'a self, world: &'data mut World, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
     {
@@ -1065,7 +1088,7 @@ where
     /// # Panics
     ///
     /// This function may panic if other code is concurrently accessing the same components.
-    pub unsafe fn for_each_unchecked<'a, 'data, T>(&'a mut self, world: &'data World, mut f: T)
+    pub unsafe fn for_each_unchecked<'a, 'data, T>(&'a self, world: &'data World, mut f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
@@ -1073,7 +1096,7 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each_immutable<'a, 'data, T>(&'a mut self, world: &'data World, f: T)
+    pub fn for_each_immutable<'a, 'data, T>(&'a self, world: &'data World, f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
         V: ReadOnly,
@@ -1083,7 +1106,7 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each<'a, 'data, T>(&'a mut self, world: &'data mut World, f: T)
+    pub fn for_each<'a, 'data, T>(&'a self, world: &'data mut World, f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
@@ -1103,7 +1126,7 @@ where
     ///
     /// This function may panic if other code is concurrently accessing the same components.
     pub unsafe fn par_iter_chunks_unchecked<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data World,
     ) -> ChunkViewParIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
     where
@@ -1132,7 +1155,7 @@ where
     #[cfg(feature = "par-iter")]
     /// Gets an iterator which iterates through all chunks that match the query in parallel.
     pub fn par_iter_chunks_immutable<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data World,
     ) -> ChunkViewParIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
     where
@@ -1148,7 +1171,7 @@ where
     #[cfg(feature = "par-iter")]
     /// Gets an iterator which iterates through all chunks that match the query in parallel.
     pub fn par_iter_chunks<'a, 'data>(
-        &'a mut self,
+        &'a self,
         world: &'data mut World,
     ) -> ChunkViewParIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
     where
@@ -1171,7 +1194,7 @@ where
     ///
     /// This function may panic if other code is concurrently accessing the same components.
     #[cfg(feature = "par-iter")]
-    pub unsafe fn par_entities_for_each_unchecked<'a, T>(&'a mut self, world: &'a World, f: T)
+    pub unsafe fn par_entities_for_each_unchecked<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1187,7 +1210,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_entities_for_each_immutable<'a, T>(&'a mut self, world: &'a World, f: T)
+    pub fn par_entities_for_each_immutable<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1201,7 +1224,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_entities_for_each<'a, T>(&'a mut self, world: &'a mut World, f: T)
+    pub fn par_entities_for_each<'a, T>(&'a self, world: &'a mut World, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1223,7 +1246,7 @@ where
     ///
     /// This function may panic if other code is concurrently accessing the same components.
     #[cfg(feature = "par-iter")]
-    pub unsafe fn par_for_each_unchecked<'a, T>(&'a mut self, world: &'a World, f: T)
+    pub unsafe fn par_for_each_unchecked<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1239,7 +1262,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each_immutable<'a, T>(&'a mut self, world: &'a World, f: T)
+    pub fn par_for_each_immutable<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1253,7 +1276,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each<'a, T>(&'a mut self, world: &'a mut World, f: T)
+    pub fn par_for_each<'a, T>(&'a self, world: &'a mut World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1275,7 +1298,7 @@ where
     ///
     /// This function may panic if other code is concurrently accessing the same components.
     #[cfg(feature = "par-iter")]
-    pub unsafe fn par_for_each_chunk_unchecked<'a, T>(&'a mut self, world: &'a World, f: T)
+    pub unsafe fn par_for_each_chunk_unchecked<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1290,7 +1313,7 @@ where
 
     /// Iterates through all chunks that match the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each_chunk_immutable<'a, T>(&'a mut self, world: &'a World, f: T)
+    pub fn par_for_each_chunk_immutable<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1304,7 +1327,7 @@ where
 
     /// Iterates through all chunks that match the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each_chunk<'a, T>(&'a mut self, world: &'a mut World, f: T)
+    pub fn par_for_each_chunk<'a, T>(&'a self, world: &'a mut World, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,

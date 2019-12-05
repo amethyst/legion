@@ -372,11 +372,7 @@ impl Builder {
     }
 
     /// Finalizes the builder into a `Schedule`.
-    pub fn build(self) -> Schedule {
-        Schedule {
-            steps: self.flush().steps,
-        }
-    }
+    pub fn build(self) -> Schedule { self.into() }
 }
 
 impl Default for Builder {
@@ -447,7 +443,11 @@ impl Schedule {
 }
 
 impl From<Builder> for Schedule {
-    fn from(builder: Builder) -> Self { builder.build() }
+    fn from(builder: Builder) -> Self {
+        Self {
+            steps: builder.flush().steps,
+        }
+    }
 }
 
 impl From<Vec<Step>> for Schedule {

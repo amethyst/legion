@@ -24,7 +24,7 @@ fn main() {
     );
 
     // update positions
-    let mut query = <(Write<Pos>, Read<Vel>)>::query();
+    let query = <(Write<Pos>, Read<Vel>)>::query();
     for (mut pos, vel) in query.iter(&mut world) {
         pos.0 += vel.0;
         pos.1 += vel.1;
