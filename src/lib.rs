@@ -231,6 +231,7 @@
 pub mod borrow;
 pub mod command;
 pub mod entity;
+pub mod event;
 pub mod filter;
 pub mod iterator;
 pub mod query;
@@ -246,12 +247,10 @@ mod zip;
 
 pub use bit_set;
 
-#[cfg(feature = "events")]
-pub mod event;
-
 pub mod prelude {
     pub use crate::command::CommandBuffer;
     pub use crate::entity::Entity;
+    pub use crate::event::Event;
     pub use crate::filter::filter_fns::*;
     pub use crate::query::{IntoQuery, Query, Read, Tagged, TryRead, TryWrite, Write};
     pub use crate::resource::{ResourceSet, Resources};

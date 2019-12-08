@@ -4,8 +4,10 @@ use crate::entity::BlockAllocator;
 use crate::entity::Entity;
 use crate::entity::EntityAllocator;
 use crate::entity::EntityLocation;
+use crate::event::{Channel, EntityEvent, Event, WorldCreatedEvent};
 use crate::filter::ArchetypeFilterData;
 use crate::filter::ChunksetFilterData;
+use crate::filter::EntityFilter;
 use crate::filter::Filter;
 use crate::iterator::SliceVecIter;
 use crate::resource::Resources;
@@ -37,9 +39,6 @@ use tracing::{info, span, trace, Level};
 
 #[cfg(feature = "events")]
 use rayon::prelude::*;
-
-#[cfg(feature = "events")]
-use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
 
 /// The `Universe` is a factory for creating `World`s.
 ///
@@ -143,6 +142,14 @@ impl World {
 
     #[cfg(feature = "events")]
     pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> { &mut self.channel }
+
+    pub fn subscribe<T: EntityFilter + Sync + 'static>(
+        &mut self,
+        sender: crossbeam::channel::Sender<Event>,
+        filter: T,
+    ) {
+        self.storage_mut().subscribe(sender, filter);
+    }
 
     pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
 
@@ -337,7 +344,7 @@ impl World {
             match result {
                 Ok(arch) => arch,
                 Err(desc) => {
-                    let (index, _) = self.storage_mut().alloc_archetype(desc);
+                    let (index, _) = unsafe { &mut *self.storage.get() }.alloc_archetype(desc);
                     index
                 }
             }
@@ -721,7 +728,7 @@ impl World {
         tags.tailor_archetype(&mut description);
         components.tailor_archetype(&mut description);
 
-        let (index, _) = self.storage_mut().alloc_archetype(description);
+        let (index, _) = unsafe { &mut *self.storage.get() }.alloc_archetype(description);
         index
     }
 

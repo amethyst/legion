@@ -1,7 +1,13 @@
 use crate::borrow::{AtomicRefCell, Ref, RefMap, RefMapMut, RefMut};
 use crate::entity::Entity;
 use crate::entity::EntityLocation;
+use crate::event::EventFilterWrapper;
+use crate::event::Subscriber;
+use crate::event::{Event, Subscribers};
 use crate::filter::ArchetypeFilterData;
+use crate::filter::ChunkFilterData;
+use crate::filter::ChunksetFilterData;
+use crate::filter::EntityFilter;
 use crate::filter::Filter;
 use crate::iterator::FissileZip;
 use crate::iterator::SliceVecIter;
@@ -24,6 +30,7 @@ use std::slice::Iter;
 use std::slice::IterMut;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use tracing::trace;
 
 static VERSION_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -164,6 +171,7 @@ pub struct Storage {
     component_types: ComponentTypes,
     tag_types: TagTypes,
     archetypes: Vec<ArchetypeData>,
+    subscribers: Subscribers,
 }
 
 impl Storage {
@@ -174,6 +182,20 @@ impl Storage {
             component_types: ComponentTypes::default(),
             tag_types: TagTypes::default(),
             archetypes: Vec::default(),
+            subscribers: Subscribers::default(),
+        }
+    }
+
+    pub(crate) fn subscribe<T: EntityFilter + Sync + 'static>(
+        &mut self,
+        sender: crossbeam::channel::Sender<Event>,
+        filter: T,
+    ) {
+        let subscriber = Subscriber::new(Arc::new(EventFilterWrapper(filter.clone())), sender);
+        self.subscribers.push(subscriber.clone());
+
+        for i in filter.iter_archetype_indexes(self).collect::<Vec<_>>() {
+            self.archetypes_mut()[i].subscribe(subscriber.clone());
         }
     }
 
@@ -181,28 +203,35 @@ impl Storage {
     ///
     /// Returns the index of the newly created archetype and an exclusive reference to the
     /// achetype's data.
-    pub fn alloc_archetype(&mut self, desc: ArchetypeDescription) -> (usize, &mut ArchetypeData) {
+    pub(crate) fn alloc_archetype(
+        &mut self,
+        desc: ArchetypeDescription,
+    ) -> (usize, &mut ArchetypeData) {
         let id = ArchetypeId(self.world_id, self.archetypes.len());
-        self.component_types
-            .0
-            .push(desc.components.iter().map(|(type_id, _)| *type_id));
-        self.tag_types
-            .0
-            .push(desc.tags.iter().map(|(type_id, _)| *type_id));
-        self.archetypes.push(ArchetypeData::new(id, desc));
+        let archetype = ArchetypeData::new(id, desc);
+
+        self.push(archetype);
 
         let index = self.archetypes.len() - 1;
-        (index, unsafe {
-            self.archetypes_mut().get_unchecked_mut(index)
-        })
+        let archetype = &mut self.archetypes[index];
+        (index, archetype)
     }
 
-    pub(crate) fn push(&mut self, archetype: ArchetypeData) {
+    pub(crate) fn push(&mut self, mut archetype: ArchetypeData) {
         let desc = archetype.description();
         self.component_types
             .0
             .push(desc.components.iter().map(|(t, _)| *t));
         self.tag_types.0.push(desc.tags.iter().map(|(t, _)| *t));
+
+        let index = self.archetypes.len();
+        let archetype_data = ArchetypeFilterData {
+            component_types: &self.component_types,
+            tag_types: &self.tag_types,
+        };
+
+        archetype.set_subscribers(self.subscribers.matches_archetype(archetype_data, index));
+
         self.archetypes.push(archetype);
     }
 
@@ -503,6 +532,7 @@ pub struct ArchetypeData {
     tags: Tags,
     component_layout: ComponentStorageLayout,
     chunk_sets: Vec<Chunkset>,
+    subscribers: Subscribers,
 }
 
 impl ArchetypeData {
@@ -558,6 +588,34 @@ impl ArchetypeData {
                 data_layout: component_data_offsets,
             },
             chunk_sets: Vec::new(),
+            subscribers: Subscribers::default(),
+        }
+    }
+
+    pub(crate) fn subscribe(&mut self, subscriber: Subscriber) {
+        self.subscribers.push(subscriber.clone());
+
+        for i in 0..self.chunk_sets.len() {
+            let filter = ChunksetFilterData {
+                archetype_data: self,
+            };
+
+            if subscriber.filter.matches_chunkset(filter, i) {
+                self.chunk_sets[i].subscribe(subscriber.clone());
+            }
+        }
+    }
+
+    pub(crate) fn set_subscribers(&mut self, subscribers: Subscribers) {
+        self.subscribers = subscribers;
+
+        for i in 0..self.chunk_sets.len() {
+            let filter = ChunksetFilterData {
+                archetype_data: self,
+            };
+
+            let subscribers = self.subscribers.matches_chunkset(filter, i);
+            self.chunk_sets[i].set_subscribers(subscribers);
         }
     }
 
@@ -565,14 +623,16 @@ impl ArchetypeData {
     pub fn id(&self) -> ArchetypeId { self.id }
 
     pub(crate) fn merge(&mut self, mut other: ArchetypeData) {
+        let other_tags = &other.tags;
         for (i, mut set) in other.chunk_sets.drain(..).enumerate() {
+            // search for a matching chunk set
             let mut set_match = None;
             for index in 0..self.chunk_sets.len() {
                 let mut matches = true;
                 for (type_id, tags) in self.tags.0.iter() {
                     unsafe {
                         let (a_ptr, size, _) = tags.data_raw();
-                        let (b_ptr, _, _) = other.tags.get(*type_id).unwrap().data_raw();
+                        let (b_ptr, _, _) = other_tags.get(*type_id).unwrap().data_raw();
 
                         if !tags.element().equals(
                             a_ptr.as_ptr().add(index * size),
@@ -591,23 +651,47 @@ impl ArchetypeData {
             }
 
             if let Some(chunk_set) = set_match {
+                // if we found a match, move the chunks into the set
                 let target = &mut self.chunk_sets[chunk_set];
                 for chunk in set.drain(..) {
                     target.push(chunk);
                 }
             } else {
-                self.chunk_sets.push(set);
+                // if we did not find a match, clone the tags and move the set
+                self.push(set, |self_tags| {
+                    for (type_id, other_tags) in other_tags.0.iter() {
+                        unsafe {
+                            let (src, _, _) = other_tags.data_raw();
+                            let dst = self_tags.get_mut(*type_id).unwrap().alloc_ptr();
+                            other_tags.element().clone(src.as_ptr(), dst);
+                        }
+                    }
+                });
             }
         }
+
+        self.tags.validate(self.chunk_sets.len());
+    }
+
+    fn push<F: FnMut(&mut Tags)>(&mut self, set: Chunkset, mut initialize: F) {
+        initialize(&mut self.tags);
+        self.chunk_sets.push(set);
+
+        let index = self.chunk_sets.len() - 1;
+        let filter = ChunksetFilterData {
+            archetype_data: self,
+        };
+        let subscribers = self.subscribers.matches_chunkset(filter, index);
+
+        self.chunk_sets[index].set_subscribers(subscribers);
+        self.tags.validate(self.chunk_sets.len());
     }
 
     /// Allocates a new chunk set. Returns the index of the new set.
     ///
     /// `initialize` is expected to push the new chunkset's tag values onto the tags collection.
-    pub(crate) fn alloc_chunk_set<F: FnMut(&mut Tags)>(&mut self, mut initialize: F) -> usize {
-        self.chunk_sets.push(Chunkset::default());
-        initialize(&mut self.tags);
-        self.tags.validate(self.chunk_sets.len());
+    pub(crate) fn alloc_chunk_set<F: FnMut(&mut Tags)>(&mut self, initialize: F) -> usize {
+        self.push(Chunkset::default(), initialize);
         self.chunk_sets.len() - 1
     }
 
@@ -731,6 +815,7 @@ impl ComponentStorageLayout {
             component_layout: self.alloc_layout,
             component_info: UnsafeCell::new(Components::new(storage_info)),
             component_data: None,
+            subscribers: Subscribers::default(),
         }
     }
 }
@@ -739,6 +824,7 @@ impl ComponentStorageLayout {
 #[derive(Default)]
 pub struct Chunkset {
     chunks: Vec<ComponentStorage>,
+    subscribers: Subscribers,
 }
 
 impl Deref for Chunkset {
@@ -752,8 +838,51 @@ impl DerefMut for Chunkset {
 }
 
 impl Chunkset {
+    pub(crate) fn new() -> Self {
+        Self {
+            chunks: Vec::new(),
+            subscribers: Subscribers::default(),
+        }
+    }
+
     /// Pushes a new chunk into the set.
-    pub fn push(&mut self, chunk: ComponentStorage) { self.chunks.push(chunk); }
+    pub fn push(&mut self, chunk: ComponentStorage) {
+        self.chunks.push(chunk);
+
+        let index = self.chunks.len() - 1;
+        let filter = ChunkFilterData {
+            chunks: &self.chunks,
+        };
+        let subscribers = self.subscribers.matches_chunk(filter, index);
+        self.chunks[index].set_subscribers(subscribers);
+    }
+
+    pub(crate) fn subscribe(&mut self, subscriber: Subscriber) {
+        self.subscribers.push(subscriber.clone());
+
+        for i in 0..self.chunks.len() {
+            let filter = ChunkFilterData {
+                chunks: &self.chunks,
+            };
+
+            if subscriber.filter.matches_chunk(filter, i) {
+                self.chunks[i].subscribe(subscriber.clone());
+            }
+        }
+    }
+
+    pub(crate) fn set_subscribers(&mut self, subscribers: Subscribers) {
+        self.subscribers = subscribers;
+
+        for i in 0..self.chunks.len() {
+            let filter = ChunkFilterData {
+                chunks: &self.chunks,
+            };
+
+            let subscribers = self.subscribers.matches_chunk(filter, i);
+            self.chunks[i].set_subscribers(subscribers);
+        }
+    }
 
     pub(crate) fn drain<R: RangeBounds<usize>>(
         &mut self,
@@ -799,7 +928,7 @@ impl Chunkset {
     /// `on_moved` is called when an entity is moved, with the entity's ID, new chunk index,
     /// new component index.
     ///
-    /// Returns whether or not the chunkset has been full defragmented.
+    /// Returns whether or not the chunkset has been fully defragmented.
     fn defrag<F: FnMut(Entity, usize, usize)>(
         &mut self,
         budget: &mut usize,
@@ -919,6 +1048,7 @@ pub struct ComponentStorage {
     component_offsets: HashMap<ComponentTypeId, usize>,
     component_info: UnsafeCell<Components>,
     component_data: Option<NonNull<u8>>,
+    subscribers: Subscribers,
 }
 
 pub struct StorageWriter<'a> {
@@ -953,6 +1083,14 @@ impl ComponentStorage {
 
     /// Determines if the internal memory for this chunk has been allocated.
     pub fn is_allocated(&self) -> bool { self.component_data.is_some() }
+
+    pub(crate) fn subscribe(&mut self, subscriber: Subscriber) {
+        self.subscribers.push(subscriber);
+    }
+
+    pub(crate) fn set_subscribers(&mut self, subscribers: Subscribers) {
+        self.subscribers = subscribers;
+    }
 
     /// Gets a slice reference containing the IDs of all entities stored in the chunk.
     pub fn entities(&self) -> &[Entity] { self.entities.as_slice() }
@@ -1384,6 +1522,27 @@ impl TagStorage {
 
     /// Determines if the vector is empty.
     pub fn is_empty(&self) -> bool { self.len() < 1 }
+
+    /// Allocates uninitialized memory for a new element.
+    ///
+    /// # Safety
+    ///
+    /// A valid element must be written into the returned address before the
+    /// tag storage is next accessed.
+    pub unsafe fn alloc_ptr(&mut self) -> *mut u8 {
+        if self.len == self.capacity {
+            self.grow();
+        }
+
+        let ptr = if self.element.size > 0 {
+            self.ptr.as_ptr().add(self.len * self.element.size)
+        } else {
+            self.element.align as *mut u8
+        };
+
+        self.len += 1;
+        ptr
+    }
 
     /// Pushes a new tag onto the end of the vector.
     ///
