@@ -123,7 +123,8 @@ impl World {
     /// # Examples
     ///
     /// ```
-    /// # # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # use legion::prelude::*;
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
     /// # struct Position(f32);
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
     /// # struct Model;
@@ -133,7 +134,7 @@ impl World {
     /// world.subscribe(sender, component::<Position>() | tag::<Model>());
     ///
     /// for event in receiver.try_iter() {
-    ///     println!(":?", event);
+    ///     println!("{:?}", event);
     /// }
     /// ```
     pub fn subscribe<T: EntityFilter + Sync + 'static>(
