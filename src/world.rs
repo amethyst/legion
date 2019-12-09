@@ -634,23 +634,33 @@ impl World {
         self.entity_allocator.merge(world.entity_allocator);
 
         for archetype in unsafe { &mut *world.storage.get() }.drain(..) {
-            // use the description as an archetype filter
-            let mut desc = archetype.description().clone();
-            let archetype_data = ArchetypeFilterData {
-                component_types: self.storage().component_types(),
-                tag_types: self.storage().tag_types(),
+            let target_archetype = {
+                // use the description as an archetype filter
+                let mut desc = archetype.description().clone();
+                let archetype_data = ArchetypeFilterData {
+                    component_types: self.storage().component_types(),
+                    tag_types: self.storage().tag_types(),
+                };
+                let matches = desc.matches(archetype_data).matching_indices().next();
+                if let Some(arch_index) = matches {
+                    // similar archetype already exists, merge
+                    self.storage_mut()
+                        .archetypes_mut()
+                        .get_mut(arch_index)
+                        .unwrap()
+                        .merge(archetype);
+                    arch_index
+                } else {
+                    // archetype does not already exist, append
+                    self.storage_mut().push(archetype);
+                    self.storage_mut().archetypes().len() - 1
+                }
             };
-            let matches = desc.matches(archetype_data).matching_indices().next();
-            if let Some(arch_index) = matches {
-                // similar archetype already exists, merge
-                self.storage_mut()
-                    .archetypes_mut()
-                    .get_mut(arch_index)
-                    .unwrap()
-                    .merge(archetype);
-            } else {
-                // archetype does not already exist, append
-                self.storage_mut().push(archetype);
+
+            // update entity locations
+            let archetype = &unsafe { &*self.storage.get() }.archetypes()[target_archetype];
+            for (entity, location) in archetype.enumerate_entities(target_archetype) {
+                self.entity_allocator.set_location(entity.index(), location);
             }
         }
     }
@@ -1583,5 +1593,33 @@ mod tests {
                 translation: vec![0., 1., 2.],
             },
         );
+    }
+
+    #[test]
+    fn merge() {
+        let universe = Universe::new();
+        let mut a = universe.create_world();
+        let mut b = universe.create_world();
+
+        let entity_a = a.insert(
+            (),
+            vec![
+                (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+                (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+            ],
+        )[0];
+
+        let entity_b = b.insert(
+            (),
+            vec![
+                (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
+                (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
+            ],
+        )[0];
+
+        b.merge(a);
+
+        assert_eq!(*b.get_component::<Pos>(entity_b).unwrap(), Pos(7., 8., 9.));
+        assert_eq!(*b.get_component::<Pos>(entity_a).unwrap(), Pos(1., 2., 3.));
     }
 }
