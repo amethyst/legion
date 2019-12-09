@@ -7,6 +7,7 @@ use crate::storage::ChunkId;
 use crossbeam::channel::{Sender, TrySendError};
 use std::sync::Arc;
 
+/// Events emitted by a world to subscribers. See `World.subscribe(Sender, EntityFilter)`.
 #[derive(Debug, Clone)]
 pub enum Event {
     /// A new archetype has been created.

@@ -116,6 +116,26 @@ impl World {
         }
     }
 
+    /// Subscribes to event notifications.
+    ///
+    /// A filter determines which events are of interest. Use `any()` to listen to all events.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Position(f32);
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Model;
+    /// # let universe = Universe::new();
+    /// # let mut world = universe.create_world();
+    /// let (sender, receiver) = crossbeam::channel::unbounded();
+    /// world.subscribe(sender, component::<Position>() | tag::<Model>());
+    ///
+    /// for event in receiver.try_iter() {
+    ///     println!(":?", event);
+    /// }
+    /// ```
     pub fn subscribe<T: EntityFilter + Sync + 'static>(
         &mut self,
         sender: crossbeam::channel::Sender<Event>,
