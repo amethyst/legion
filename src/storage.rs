@@ -230,7 +230,19 @@ impl Storage {
             tag_types: &self.tag_types,
         };
 
-        archetype.set_subscribers(self.subscribers.matches_archetype(archetype_data, index));
+        let id = archetype.id();
+
+        trace!(
+            world = id.world().index(),
+            archetype = id.index(),
+            components = ?desc.component_names,
+            tags = ?desc.tag_names,
+            "Created Archetype"
+        );
+
+        let mut subscribers = self.subscribers.matches_archetype(archetype_data, index);
+        subscribers.send(Event::ArchetypeCreated(id));
+        archetype.set_subscribers(subscribers);
 
         self.archetypes.push(archetype);
     }
@@ -569,15 +581,6 @@ impl ArchetypeData {
             std::alloc::Layout::from_size_align(data_capacity, COMPONENT_STORAGE_ALIGNMENT)
                 .expect("invalid component data size/alignment");
 
-        trace!(
-            world = id.world().index(),
-            archetype = id.index(),
-            chunk_entity_capacity = entity_capacity,
-            components = ?desc.component_names,
-            tags = ?desc.tag_names,
-            "Created archetype"
-        );
-
         ArchetypeData {
             desc,
             id,
@@ -847,13 +850,15 @@ impl Chunkset {
 
     /// Pushes a new chunk into the set.
     pub fn push(&mut self, chunk: ComponentStorage) {
+        let id = chunk.id();
         self.chunks.push(chunk);
 
         let index = self.chunks.len() - 1;
         let filter = ChunkFilterData {
             chunks: &self.chunks,
         };
-        let subscribers = self.subscribers.matches_chunk(filter, index);
+        let mut subscribers = self.subscribers.matches_chunk(filter, index);
+        subscribers.send(Event::ChunkCreated(id));
         self.chunks[index].set_subscribers(subscribers);
     }
 
@@ -1052,6 +1057,7 @@ pub struct ComponentStorage {
 }
 
 pub struct StorageWriter<'a> {
+    initial_count: usize,
     storage: &'a mut ComponentStorage,
 }
 
@@ -1062,7 +1068,14 @@ impl<'a> StorageWriter<'a> {
 }
 
 impl<'a> Drop for StorageWriter<'a> {
-    fn drop(&mut self) { self.storage.update_count_gauge(); }
+    fn drop(&mut self) {
+        self.storage.update_count_gauge();
+        for entity in self.storage.entities.iter().skip(self.initial_count) {
+            self.storage
+                .subscribers
+                .send(Event::EntityInserted(*entity, self.storage.id()));
+        }
+    }
 }
 
 impl ComponentStorage {
@@ -1104,11 +1117,13 @@ impl ComponentStorage {
     ///
     /// Returns the ID of the entity which was swapped into the removed entity's position.
     pub fn swap_remove(&mut self, index: usize, drop: bool) -> Option<Entity> {
-        self.entities.swap_remove(index);
+        let removed = self.entities.swap_remove(index);
         for (_, component) in unsafe { &mut *self.component_info.get() }.iter_mut() {
             component.writer().swap_remove(index, drop);
         }
 
+        self.subscribers
+            .send(Event::EntityRemoved(removed, self.id()));
         self.update_count_gauge();
 
         if self.entities.len() > index {
@@ -1157,10 +1172,15 @@ impl ComponentStorage {
             }
         }
 
+        // remove the entity from this chunk
+        let removed = self.swap_remove(index, false);
+
+        target
+            .subscribers
+            .send(Event::EntityInserted(entity, target.id()));
         target.update_count_gauge();
 
-        // remove the entity from this chunk
-        self.swap_remove(index, false)
+        removed
     }
 
     /// Gets mutable references to the internal data of the chunk.
@@ -1168,7 +1188,10 @@ impl ComponentStorage {
         if !self.is_allocated() {
             self.allocate();
         }
-        StorageWriter { storage: self }
+        StorageWriter {
+            initial_count: self.entities.len(),
+            storage: self,
+        }
     }
 
     fn free(&mut self) {

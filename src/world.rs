@@ -4,7 +4,7 @@ use crate::entity::BlockAllocator;
 use crate::entity::Entity;
 use crate::entity::EntityAllocator;
 use crate::entity::EntityLocation;
-use crate::event::{Channel, EntityEvent, Event, WorldCreatedEvent};
+use crate::event::Event;
 use crate::filter::ArchetypeFilterData;
 use crate::filter::ChunksetFilterData;
 use crate::filter::EntityFilter;
@@ -37,9 +37,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{info, span, trace, Level};
 
-#[cfg(feature = "events")]
-use rayon::prelude::*;
-
 /// The `Universe` is a factory for creating `World`s.
 ///
 /// Entities inserted into worlds created within the same universe are guarenteed to have
@@ -48,8 +45,6 @@ use rayon::prelude::*;
 pub struct Universe {
     allocator: Arc<Mutex<BlockAllocator>>,
     world_count: AtomicUsize,
-    #[cfg(feature = "events")]
-    channel: Channel<WorldCreatedEvent>,
 }
 
 impl Universe {
@@ -66,26 +61,13 @@ impl Universe {
             World::new_in_universe(WorldId(id), EntityAllocator::new(self.allocator.clone()));
 
         info!(world = world.id().0, "Created world");
-
-        #[cfg(feature = "events")]
-        {
-            self.channel
-                .write(WorldCreatedEvent(WorldId(id)))
-                .expect("Failed to write to WorldCreatedEvent channel.");
-        }
-
         world
     }
-
-    #[cfg(feature = "events")]
-    pub fn channel(&mut self) -> &mut Channel<WorldCreatedEvent> { &mut self.channel }
 }
 
 impl Default for Universe {
     fn default() -> Self {
         Self {
-            #[cfg(feature = "events")]
-            channel: Channel::default(),
             world_count: AtomicUsize::from(0),
             allocator: Arc::new(Mutex::new(BlockAllocator::new())),
         }
@@ -105,10 +87,6 @@ pub struct World {
     storage: UnsafeCell<Storage>,
     pub(crate) entity_allocator: EntityAllocator,
     defrag_progress: usize,
-
-    #[cfg(feature = "events")]
-    channel: Channel<EntityEvent>,
-
     pub resources: Resources,
 }
 
@@ -134,14 +112,9 @@ impl World {
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: allocator,
             defrag_progress: 0,
-            #[cfg(feature = "events")]
-            channel: Channel::default(),
             resources: Resources::default(),
         }
     }
-
-    #[cfg(feature = "events")]
-    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> { &mut self.channel }
 
     pub fn subscribe<T: EntityFilter + Sync + 'static>(
         &mut self,
@@ -232,15 +205,6 @@ impl World {
 
         trace!(count = entities.len(), "Inserted entities");
 
-        #[cfg(all(feature = "events"))]
-        {
-            entities.par_iter().for_each(|e| {
-                self.channel
-                    .write(EntityEvent::Created(*e))
-                    .expect("Failed to write to WorldCreatedEvent channel.");
-            });
-        }
-
         entities
     }
 
@@ -257,13 +221,6 @@ impl World {
     ///
     /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
-        #[cfg(feature = "events")]
-        {
-            self.channel
-                .write(EntityEvent::Deleted(entity))
-                .expect("Failed to write to EntityEvent::Deleted channel.");
-        }
-
         if let Some(location) = self.entity_allocator.delete_entity(entity) {
             // find entity's chunk
             let chunk = self

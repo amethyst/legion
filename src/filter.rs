@@ -26,6 +26,8 @@ pub mod filter_fns {
         EntityFilterTuple::new(Passthrough, Passthrough, Passthrough)
     }
 
+    pub fn any() -> EntityFilterTuple<Any, Any, Any> { EntityFilterTuple::new(Any, Any, Any) }
+
     /// Creates an entity data filter which includes chunks that contain
     /// entity data components of type `T`.
     pub fn component<T: Component>(
@@ -505,6 +507,75 @@ impl<'a, Rhs> std::ops::BitOr<Rhs> for Passthrough {
 
     #[inline]
     fn bitor(self, rhs: Rhs) -> Self::Output { rhs }
+}
+
+#[derive(Debug, Clone)]
+pub struct Any;
+
+impl ActiveFilter for Any {}
+
+impl<'a> Filter<ArchetypeFilterData<'a>> for Any {
+    type Iter = Take<Repeat<()>>;
+
+    #[inline]
+    fn collect(&self, arch: ArchetypeFilterData<'a>) -> Self::Iter {
+        std::iter::repeat(()).take(arch.component_types.len())
+    }
+
+    #[inline]
+    fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { Some(true) }
+}
+
+impl<'a> Filter<ChunksetFilterData<'a>> for Any {
+    type Iter = Take<Repeat<()>>;
+
+    #[inline]
+    fn collect(&self, sets: ChunksetFilterData<'a>) -> Self::Iter {
+        std::iter::repeat(()).take(sets.archetype_data.len())
+    }
+
+    #[inline]
+    fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { Some(true) }
+}
+
+impl<'a> Filter<ChunkFilterData<'a>> for Any {
+    type Iter = Take<Repeat<()>>;
+
+    #[inline]
+    fn collect(&self, chunk: ChunkFilterData<'a>) -> Self::Iter {
+        std::iter::repeat(()).take(chunk.chunks.len())
+    }
+
+    #[inline]
+    fn is_match(&self, _: &<Self::Iter as Iterator>::Item) -> Option<bool> { Some(true) }
+}
+
+impl<Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for Any {
+    type Output = Rhs;
+
+    #[inline]
+    fn bitand(self, rhs: Rhs) -> Self::Output { rhs }
+}
+
+impl std::ops::BitAnd<Passthrough> for Any {
+    type Output = Self;
+
+    #[inline]
+    fn bitand(self, _: Passthrough) -> Self::Output { self }
+}
+
+impl<Rhs: ActiveFilter> std::ops::BitOr<Rhs> for Any {
+    type Output = Self;
+
+    #[inline]
+    fn bitor(self, _: Rhs) -> Self::Output { self }
+}
+
+impl std::ops::BitOr<Passthrough> for Any {
+    type Output = Self;
+
+    #[inline]
+    fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
 
 /// A filter which negates `F`.
