@@ -9,10 +9,10 @@ use bit_set::BitSet;
 use tracing::{span, trace, Level};
 
 #[cfg(feature = "par-schedule")]
-use std::{
-    collections::{HashMap, HashSet},
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+#[cfg(feature = "par-schedule")]
+use fxhash::{FxHashMap, FxHashSet};
 
 #[cfg(feature = "par-schedule")]
 use rayon::prelude::*;
@@ -102,9 +102,21 @@ impl Executor {
             let mut dynamic_dependants: Vec<Vec<_>> =
                 repeat(Vec::with_capacity(64)).take(systems.len()).collect();
 
-            let mut resource_last_mutated = HashMap::<ResourceTypeId, usize>::with_capacity(64);
-            let mut resource_last_read = HashMap::<ResourceTypeId, usize>::with_capacity(64);
-            let mut component_mutated = HashMap::<ComponentTypeId, Vec<usize>>::with_capacity(64);
+            let mut resource_last_mutated =
+                FxHashMap::<ResourceTypeId, usize>::with_capacity_and_hasher(
+                    64,
+                    Default::default(),
+                );
+            let mut resource_last_read =
+                FxHashMap::<ResourceTypeId, usize>::with_capacity_and_hasher(
+                    64,
+                    Default::default(),
+                );
+            let mut component_mutated =
+                FxHashMap::<ComponentTypeId, Vec<usize>>::with_capacity_and_hasher(
+                    64,
+                    Default::default(),
+                );
 
             for (i, system) in systems.iter().enumerate() {
                 let span = span!(
@@ -119,7 +131,7 @@ impl Executor {
                 let (write_res, write_comp) = system.writes();
 
                 // find resource access dependencies
-                let mut dependencies = HashSet::with_capacity(64);
+                let mut dependencies = FxHashSet::with_capacity_and_hasher(64, Default::default());
                 for res in read_res {
                     trace!(resource = ?res, "Read resource");
                     if let Some(n) = resource_last_mutated.get(res) {
@@ -151,7 +163,7 @@ impl Executor {
                 }
 
                 // find component access dependencies
-                let mut comp_dependencies = HashSet::new();
+                let mut comp_dependencies = FxHashSet::default();
                 for comp in read_comp {
                     if let Some(ns) = component_mutated.get(comp) {
                         for n in ns {
