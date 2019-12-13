@@ -14,11 +14,11 @@ use crate::iterator::SliceVecIter;
 use crate::world::TagSet;
 use crate::world::WorldId;
 use derivative::Derivative;
+use fxhash::FxHashMap;
 use smallvec::Drain;
 use smallvec::SmallVec;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::mem::size_of;
@@ -1081,7 +1081,7 @@ pub struct ComponentStorage {
     capacity: usize,
     entities: Vec<Entity>,
     component_layout: std::alloc::Layout,
-    component_offsets: HashMap<ComponentTypeId, usize>,
+    component_offsets: FxHashMap<ComponentTypeId, usize>,
     component_info: UnsafeCell<Components>,
     component_data: Option<NonNull<u8>>,
     subscribers: Subscribers,

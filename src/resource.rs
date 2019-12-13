@@ -1,13 +1,12 @@
 use crate::borrow::{AtomicRefCell, Ref, RefMut};
 use crate::query::{Read, Write};
+use downcast_rs::{impl_downcast, Downcast};
+use fxhash::FxHashMap;
 use std::{
     any::TypeId,
-    collections::HashMap,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
-
-use downcast_rs::{impl_downcast, Downcast};
 
 #[cfg(not(feature = "ffi"))]
 /// A type ID identifying a component type.
@@ -176,11 +175,11 @@ impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for FetchMut<'a, T>
     }
 }
 
-/// Resources container. This container stores its underlying resources in a `HashMap` keyed on
+/// Resources container. This container stores its underlying resources in a `FxHashMap` keyed on
 /// `ResourceTypeId`. This means that the ID's used in this storage will not persist between recompiles.
 #[derive(Default)]
 pub struct Resources {
-    storage: HashMap<ResourceTypeId, AtomicRefCell<Box<dyn Resource>>>,
+    storage: FxHashMap<ResourceTypeId, AtomicRefCell<Box<dyn Resource>>>,
 }
 
 impl Resources {
