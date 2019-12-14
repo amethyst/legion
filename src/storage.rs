@@ -188,7 +188,7 @@ impl Storage {
 
     pub(crate) fn subscribe<T: EntityFilter + Sync + 'static>(
         &mut self,
-        sender: crossbeam::channel::Sender<Event>,
+        sender: crossbeam_channel::Sender<Event>,
         filter: T,
     ) {
         let subscriber = Subscriber::new(Arc::new(EventFilterWrapper(filter.clone())), sender);

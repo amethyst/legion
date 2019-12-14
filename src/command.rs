@@ -11,7 +11,7 @@ use derivative::Derivative;
 use std::{marker::PhantomData, sync::Arc};
 
 #[cfg(feature = "par-schedule")]
-use crossbeam::queue::SegQueue;
+use crossbeam_queue::SegQueue;
 
 #[cfg(not(feature = "par-schedule"))]
 use crate::borrow::{AtomicRefCell, RefMut};

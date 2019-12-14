@@ -130,7 +130,7 @@ impl World {
     /// # struct Model;
     /// # let universe = Universe::new();
     /// # let mut world = universe.create_world();
-    /// let (sender, receiver) = crossbeam::channel::unbounded();
+    /// let (sender, receiver) = crossbeam_channel::unbounded();
     /// world.subscribe(sender, component::<Position>() | tag::<Model>());
     ///
     /// for event in receiver.try_iter() {
@@ -139,7 +139,7 @@ impl World {
     /// ```
     pub fn subscribe<T: EntityFilter + Sync + 'static>(
         &mut self,
-        sender: crossbeam::channel::Sender<Event>,
+        sender: crossbeam_channel::Sender<Event>,
         filter: T,
     ) {
         self.storage_mut().subscribe(sender, filter);

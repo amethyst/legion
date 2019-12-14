@@ -4,7 +4,7 @@ use crate::filter::{
 };
 use crate::storage::ArchetypeId;
 use crate::storage::ChunkId;
-use crossbeam::channel::{Sender, TrySendError};
+use crossbeam_channel::{Sender, TrySendError};
 use std::sync::Arc;
 
 /// Events emitted by a world to subscribers. See `World.subscribe(Sender, EntityFilter)`.
