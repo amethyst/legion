@@ -33,7 +33,6 @@ bit-set = "0.5"
 paste = "0.1"
 tracing = "0.1"
 metrics = { version = "0.12", optional = true }
-shrinkwraprs = "0.2"
 fxhash = "0.2"
 
 [dev-dependencies]
