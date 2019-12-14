@@ -1,6 +1,6 @@
 [package]
 name = "legion"
-version = "0.1.1"
+version = "0.2.1"
 description = "High performance entity component system (ECS) library"
 authors = ["Thomas Gillen <thomas.gillen@googlemail.com>"]
 repository = "https://github.com/TomGillen/legion"
@@ -16,28 +16,26 @@ travis-ci = { repository = "TomGillen/legion", branch = "master" }
 [features]
 default = ["par-iter", "par-schedule", "events", "ffi"]
 par-iter = ["rayon"]
-par-schedule = ["rayon", "crossbeam"]
+par-schedule = ["rayon"]
 log = ["tracing/log", "tracing/log-always"]
 ffi = []
-events = ["rayon", "crossbeam"]
 serde-1 = ["serde"]
+events = ["rayon"]
 
 [dependencies]
 parking_lot = "0.9"
 downcast-rs = "1.0"
 itertools = "0.8"
 rayon = { version = "1.2", optional = true }
-crossbeam = { version = "0.7", optional = true }
+crossbeam = { version = "0.7" }
 derivative = "1"
 smallvec = "0.6"
 bit-set = "0.5"
 paste = "0.1"
 tracing = "0.1"
 metrics = { version = "0.12", optional = true }
-shrinkwraprs = "0.2"
-petgraph = "0.4"
 serde = { version = "1", optional = true }
-
+fxhash = "0.2"
 
 [dev-dependencies]
 criterion = "0.3"

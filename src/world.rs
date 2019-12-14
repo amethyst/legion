@@ -1,13 +1,13 @@
-use crate::borrow::Exclusive;
 use crate::borrow::Ref;
 use crate::borrow::RefMut;
-use crate::borrow::Shared;
 use crate::entity::BlockAllocator;
 use crate::entity::Entity;
 use crate::entity::EntityAllocator;
 use crate::entity::EntityLocation;
+use crate::event::Event;
 use crate::filter::ArchetypeFilterData;
 use crate::filter::ChunksetFilterData;
+use crate::filter::EntityFilter;
 use crate::filter::Filter;
 use crate::iterator::SliceVecIter;
 use crate::resource::Resources;
@@ -37,12 +37,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{info, span, trace, Level};
 
-#[cfg(feature = "events")]
-use rayon::prelude::*;
-
-#[cfg(feature = "events")]
-use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
-
 /// The `Universe` is a factory for creating `World`s.
 ///
 /// Entities inserted into worlds created within the same universe are guarenteed to have
@@ -51,8 +45,6 @@ use crate::event::{Channel, EntityEvent, WorldCreatedEvent};
 pub struct Universe {
     allocator: Arc<Mutex<BlockAllocator>>,
     world_count: AtomicUsize,
-    #[cfg(feature = "events")]
-    channel: Channel<WorldCreatedEvent>,
 }
 
 impl Universe {
@@ -69,26 +61,13 @@ impl Universe {
             World::new_in_universe(WorldId(id), EntityAllocator::new(self.allocator.clone()));
 
         info!(world = world.id().0, "Created world");
-
-        #[cfg(feature = "events")]
-        {
-            self.channel
-                .write(WorldCreatedEvent(WorldId(id)))
-                .expect("Failed to write to WorldCreatedEvent channel.");
-        }
-
         world
     }
-
-    #[cfg(feature = "events")]
-    pub fn channel(&mut self) -> &mut Channel<WorldCreatedEvent> { &mut self.channel }
 }
 
 impl Default for Universe {
     fn default() -> Self {
         Self {
-            #[cfg(feature = "events")]
-            channel: Channel::default(),
             world_count: AtomicUsize::from(0),
             allocator: Arc::new(Mutex::new(BlockAllocator::new())),
         }
@@ -108,10 +87,6 @@ pub struct World {
     storage: UnsafeCell<Storage>,
     pub(crate) entity_allocator: EntityAllocator,
     defrag_progress: usize,
-
-    #[cfg(feature = "events")]
-    channel: Channel<EntityEvent>,
-
     pub resources: Resources,
 }
 
@@ -137,14 +112,38 @@ impl World {
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: allocator,
             defrag_progress: 0,
-            #[cfg(feature = "events")]
-            channel: Channel::default(),
             resources: Resources::default(),
         }
     }
 
-    #[cfg(feature = "events")]
-    pub fn entity_channel(&mut self) -> &mut Channel<EntityEvent> { &mut self.channel }
+    /// Subscribes to event notifications.
+    ///
+    /// A filter determines which events are of interest. Use `any()` to listen to all events.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use legion::prelude::*;
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Position(f32);
+    /// # #[derive(Copy, Clone, Debug, PartialEq)]
+    /// # struct Model;
+    /// # let universe = Universe::new();
+    /// # let mut world = universe.create_world();
+    /// let (sender, receiver) = crossbeam::channel::unbounded();
+    /// world.subscribe(sender, component::<Position>() | tag::<Model>());
+    ///
+    /// for event in receiver.try_iter() {
+    ///     println!("{:?}", event);
+    /// }
+    /// ```
+    pub fn subscribe<T: EntityFilter + Sync + 'static>(
+        &mut self,
+        sender: crossbeam::channel::Sender<Event>,
+        filter: T,
+    ) {
+        self.storage_mut().subscribe(sender, filter);
+    }
 
     pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
 
@@ -227,15 +226,6 @@ impl World {
 
         trace!(count = entities.len(), "Inserted entities");
 
-        #[cfg(all(feature = "events"))]
-        {
-            entities.par_iter().for_each(|e| {
-                self.channel
-                    .write(EntityEvent::Created(*e))
-                    .expect("Failed to write to WorldCreatedEvent channel.");
-            });
-        }
-
         entities
     }
 
@@ -252,13 +242,6 @@ impl World {
     ///
     /// Returns `true` if the entity was deleted; else `false`.
     pub fn delete(&mut self, entity: Entity) -> bool {
-        #[cfg(feature = "events")]
-        {
-            self.channel
-                .write(EntityEvent::Deleted(entity))
-                .expect("Failed to write to EntityEvent::Deleted channel.");
-        }
-
         if let Some(location) = self.entity_allocator.delete_entity(entity) {
             // find entity's chunk
             let chunk = self
@@ -339,7 +322,7 @@ impl World {
             match result {
                 Ok(arch) => arch,
                 Err(desc) => {
-                    let (index, _) = self.storage_mut().alloc_archetype(desc);
+                    let (index, _) = unsafe { &mut *self.storage.get() }.alloc_archetype(desc);
                     index
                 }
             }
@@ -537,7 +520,7 @@ impl World {
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
-    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<Shared, T>> {
+    pub fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<T>> {
         if !self.is_alive(entity) {
             return None;
         }
@@ -574,7 +557,7 @@ impl World {
     pub unsafe fn get_component_mut_unchecked<T: Component>(
         &self,
         entity: Entity,
-    ) -> Option<RefMut<Exclusive, T>> {
+    ) -> Option<RefMut<T>> {
         if !self.is_alive(entity) {
             return None;
         }
@@ -598,10 +581,7 @@ impl World {
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
     /// Otherwise `None` is returned.
-    pub fn get_component_mut<T: Component>(
-        &mut self,
-        entity: Entity,
-    ) -> Option<RefMut<Exclusive, T>> {
+    pub fn get_component_mut<T: Component>(&mut self, entity: Entity) -> Option<RefMut<T>> {
         // safe because the &mut self ensures exclusivity
         unsafe { self.get_component_mut_unchecked(entity) }
     }
@@ -675,23 +655,33 @@ impl World {
         self.entity_allocator.merge(world.entity_allocator);
 
         for archetype in unsafe { &mut *world.storage.get() }.drain(..) {
-            // use the description as an archetype filter
-            let mut desc = archetype.description().clone();
-            let archetype_data = ArchetypeFilterData {
-                component_types: self.storage().component_types(),
-                tag_types: self.storage().tag_types(),
+            let target_archetype = {
+                // use the description as an archetype filter
+                let mut desc = archetype.description().clone();
+                let archetype_data = ArchetypeFilterData {
+                    component_types: self.storage().component_types(),
+                    tag_types: self.storage().tag_types(),
+                };
+                let matches = desc.matches(archetype_data).matching_indices().next();
+                if let Some(arch_index) = matches {
+                    // similar archetype already exists, merge
+                    self.storage_mut()
+                        .archetypes_mut()
+                        .get_mut(arch_index)
+                        .unwrap()
+                        .merge(archetype);
+                    arch_index
+                } else {
+                    // archetype does not already exist, append
+                    self.storage_mut().push(archetype);
+                    self.storage_mut().archetypes().len() - 1
+                }
             };
-            let matches = desc.matches(archetype_data).matching_indices().next();
-            if let Some(arch_index) = matches {
-                // similar archetype already exists, merge
-                self.storage_mut()
-                    .archetypes_mut()
-                    .get_mut(arch_index)
-                    .unwrap()
-                    .merge(archetype);
-            } else {
-                // archetype does not already exist, append
-                self.storage_mut().push(archetype);
+
+            // update entity locations
+            let archetype = &unsafe { &*self.storage.get() }.archetypes()[target_archetype];
+            for (entity, location) in archetype.enumerate_entities(target_archetype) {
+                self.entity_allocator.set_location(entity.index(), location);
             }
         }
     }
@@ -726,7 +716,7 @@ impl World {
         tags.tailor_archetype(&mut description);
         components.tailor_archetype(&mut description);
 
-        let (index, _) = self.storage_mut().alloc_archetype(description);
+        let (index, _) = unsafe { &mut *self.storage.get() }.alloc_archetype(description);
         index
     }
 
@@ -1624,5 +1614,33 @@ mod tests {
                 translation: vec![0., 1., 2.],
             },
         );
+    }
+
+    #[test]
+    fn merge() {
+        let universe = Universe::new();
+        let mut a = universe.create_world();
+        let mut b = universe.create_world();
+
+        let entity_a = a.insert(
+            (),
+            vec![
+                (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+                (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+            ],
+        )[0];
+
+        let entity_b = b.insert(
+            (),
+            vec![
+                (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
+                (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
+            ],
+        )[0];
+
+        b.merge(a);
+
+        assert_eq!(*b.get_component::<Pos>(entity_b).unwrap(), Pos(7., 8., 9.));
+        assert_eq!(*b.get_component::<Pos>(entity_a).unwrap(), Pos(1., 2., 3.));
     }
 }

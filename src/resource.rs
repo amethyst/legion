@@ -1,13 +1,12 @@
-use crate::borrow::{AtomicRefCell, Exclusive, Ref, RefMut, Shared};
+use crate::borrow::{AtomicRefCell, Ref, RefMut};
 use crate::query::{Read, Write};
+use downcast_rs::{impl_downcast, Downcast};
+use fxhash::FxHashMap;
 use std::{
     any::TypeId,
-    collections::HashMap,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
-
-use downcast_rs::{impl_downcast, Downcast};
 
 #[cfg(not(feature = "ffi"))]
 /// A type ID identifying a component type.
@@ -116,7 +115,7 @@ unsafe impl<T: Resource> Sync for PreparedWrite<T> {}
 
 /// Ergonomic wrapper type which contains a `Ref` type.
 pub struct Fetch<'a, T: 'a + Resource> {
-    inner: Ref<'a, Shared<'a>, Box<dyn Resource>>,
+    inner: Ref<'a, Box<dyn Resource>>,
     _marker: PhantomData<T>,
 }
 impl<'a, T: Resource> Deref for Fetch<'a, T> {
@@ -141,7 +140,7 @@ impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for Fetch<'a, T> {
 
 /// Ergonomic wrapper type which contains a `RefMut` type.
 pub struct FetchMut<'a, T: Resource> {
-    inner: RefMut<'a, Exclusive<'a>, Box<dyn Resource>>,
+    inner: RefMut<'a, Box<dyn Resource>>,
     _marker: PhantomData<T>,
 }
 impl<'a, T: 'a + Resource> Deref for FetchMut<'a, T> {
@@ -176,11 +175,11 @@ impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for FetchMut<'a, T>
     }
 }
 
-/// Resources container. This container stores its underlying resources in a `HashMap` keyed on
+/// Resources container. This container stores its underlying resources in a `FxHashMap` keyed on
 /// `ResourceTypeId`. This means that the ID's used in this storage will not persist between recompiles.
 #[derive(Default)]
 pub struct Resources {
-    storage: HashMap<ResourceTypeId, AtomicRefCell<Box<dyn Resource>>>,
+    storage: FxHashMap<ResourceTypeId, AtomicRefCell<Box<dyn Resource>>>,
 }
 
 impl Resources {

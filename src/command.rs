@@ -14,7 +14,7 @@ use std::{marker::PhantomData, sync::Arc};
 use crossbeam::queue::SegQueue;
 
 #[cfg(not(feature = "par-schedule"))]
-use crate::borrow::{AtomicRefCell, Exclusive, RefMut};
+use crate::borrow::{AtomicRefCell, RefMut};
 
 pub trait WorldWritable {
     fn write(self: Arc<Self>, world: &mut World);
@@ -212,7 +212,7 @@ pub enum CommandError {
 impl CommandBuffer {
     #[cfg(not(feature = "par-schedule"))]
     #[inline]
-    fn get_commands(&self) -> RefMut<'_, Exclusive, Vec<EntityCommand>> { self.commands.get_mut() }
+    fn get_commands(&self) -> RefMut<Vec<EntityCommand>> { self.commands.get_mut() }
 
     #[cfg(feature = "par-schedule")]
     #[inline]
@@ -374,7 +374,7 @@ mod tests {
 
         command.write(&mut world);
 
-        let mut query = Read::<Pos>::query();
+        let query = Read::<Pos>::query();
 
         let mut count = 0;
         for _ in query.iter_entities(&mut world) {
