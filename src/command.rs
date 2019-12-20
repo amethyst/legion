@@ -263,7 +263,7 @@ impl CommandBuffer {
     pub fn resize(&mut self, world: &mut World) {
         let entity_count = world.command_buffer_size();
         if self.free_list.len() < entity_count {
-            (entity_count - self.free_list.len()..entity_count)
+            (self.free_list.len()..entity_count)
                 .for_each(|_| self.free_list.push(world.entity_allocator.create_entity()));
         } else if self.free_list.len() > entity_count {
             // Free the entities

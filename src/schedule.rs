@@ -226,7 +226,6 @@ impl Executor {
 
     /// Executes all systems and then flushes their command buffers.
     pub fn execute(&mut self, world: &mut World) {
-        self.resize_command_buffers(world);
         self.run_systems(world);
         self.flush_command_buffers(world);
     }
@@ -236,6 +235,7 @@ impl Executor {
     /// Only enabled with par-schedule is disabled
     #[cfg(not(feature = "par-schedule"))]
     pub fn run_systems(&mut self, world: &mut World) {
+        self.resize_command_buffers(world);
         self.systems.iter_mut().for_each(|system| {
             system.run(world);
         });
@@ -249,6 +249,8 @@ impl Executor {
     /// Call from within `rayon::ThreadPool::install()` to execute within a specific thread pool.
     #[cfg(feature = "par-schedule")]
     pub fn run_systems(&mut self, world: &mut World) {
+        self.resize_command_buffers(world);
+
         rayon::join(
             || {},
             || {
