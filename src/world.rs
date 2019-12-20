@@ -956,7 +956,7 @@ mod tuple_impls {
         ( @COMPONENT_SOURCE $( $ty: ident => $id: ident ),* ) => {
             impl<UWU, $( $ty ),*> ComponentLayout for ComponentTupleSet<($( $ty, )*), UWU>
             where
-                UWU: Iterator<Item = ($( $ty, )*)>,
+                UWU: ExactSizeIterator + Iterator<Item = ($( $ty, )*)>,
                 $( $ty: Component ),*
             {
                 type Filter = ComponentTupleFilter<($( $ty, )*)>;
@@ -975,7 +975,7 @@ mod tuple_impls {
 
             impl<UWU, $( $ty ),*> ComponentSource for ComponentTupleSet<($( $ty, )*), UWU>
             where
-                UWU: Iterator<Item = ($( $ty, )*)>,
+                UWU: ExactSizeIterator + Iterator<Item = ($( $ty, )*)>,
                 $( $ty: Component ),*
             {
                 fn is_empty(&mut self) -> bool {
@@ -983,10 +983,7 @@ mod tuple_impls {
                 }
 
                 fn len(&self) -> usize {
-                    #[allow(dead_code, non_camel_case_types)]
-                    enum Idents { $($ty,)* __CountIdentsLast }
-                    const COUNT: usize = Idents::__CountIdentsLast as usize;
-                    COUNT
+                    self.iter.len()
                 }
 
                 fn write_entities(&mut self, provided_entities: &[Entity], chunk: &mut ComponentStorage) -> usize {
