@@ -188,16 +188,24 @@ impl World {
     /// ];
     /// world.insert(tags, data);
     /// ```
-    pub fn insert<T, C>(&mut self, mut tags: T, components: C) -> &[Entity]
+    #[inline]
+    pub fn insert<T, C>(&mut self, tags: T, components: C) -> &[Entity]
     where
         T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         C: IntoComponentSource,
+    {
+        self.insert_impl(tags, components.into())
+    }
+
+    pub(crate) fn insert_impl<T, C>(&mut self, mut tags: T, mut components: C) -> &[Entity]
+    where
+        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+        C: ComponentSource,
     {
         let span = span!(Level::TRACE, "Inserting entities", world = self.id().0);
         let _guard = span.enter();
 
         // find or create archetype
-        let mut components = components.into();
         let archetype_index = self.find_or_create_archetype(&mut tags, &mut components);
 
         // find or create chunk set
@@ -241,12 +249,15 @@ impl World {
         entities
     }
 
-    pub(crate) fn insert_buffered<T, C>(&mut self, entities: &[Entity], mut tags: T, components: C)
-    where
+    pub(crate) fn insert_buffered<T, C>(
+        &mut self,
+        entities: &[Entity],
+        mut tags: T,
+        mut components: C,
+    ) where
         T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-        C: IntoComponentSource,
+        C: ComponentSource,
     {
-        let mut components = components.into();
         let archetype_index = self.find_or_create_archetype(&mut tags, &mut components);
 
         // find or create chunk set
@@ -858,6 +869,9 @@ pub trait ComponentSource: ComponentLayout {
     /// Determines if this component source has any more entity data to write.
     fn is_empty(&mut self) -> bool;
 
+    /// Retreives the nubmer of entities in this component source.
+    fn len(&self) -> usize;
+
     /// Writes as many components as possible into a chunk.
     fn write(&mut self, allocator: &mut EntityAllocator, chunk: &mut ComponentStorage) -> usize;
 
@@ -966,6 +980,13 @@ mod tuple_impls {
             {
                 fn is_empty(&mut self) -> bool {
                     self.iter.peek().is_none()
+                }
+
+                fn len(&self) -> usize {
+                    #[allow(dead_code, non_camel_case_types)]
+                    enum Idents { $($ty,)* __CountIdentsLast }
+                    const COUNT: usize = Idents::__CountIdentsLast as usize;
+                    COUNT
                 }
 
                 fn write_entities(&mut self, provided_entities: &[Entity], chunk: &mut ComponentStorage) -> usize {
@@ -1422,7 +1443,7 @@ mod tests {
         ];
 
         let entities = world.insert((), vec![(), ()]).to_vec();
-        world.insert_buffered(&entities, (), components.clone());
+        world.insert_buffered(&entities, (), IntoComponentSource::into(components.clone()));
 
         for (i, e) in entities.iter().enumerate() {
             world.add_component(*e, Scale(2., 2., 2.));

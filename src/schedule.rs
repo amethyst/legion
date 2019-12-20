@@ -524,8 +524,9 @@ mod tests {
         #[derive(Clone, Copy, Debug, PartialEq)]
         struct TestComp(f32, f32, f32);
 
-        let system_one = SystemBuilder::new("one")
-            .build(move |cmd, _, _, _| cmd.insert((), vec![(TestComp(0., 0., 0.),)]));
+        let system_one = SystemBuilder::new("one").build(move |cmd, _, _, _| {
+            cmd.insert((), vec![(TestComp(0., 0., 0.),)]).unwrap();
+        });
         let system_two = SystemBuilder::new("two")
             .with_query(Write::<TestComp>::query())
             .build(move |_, world, _, query| assert_eq!(0, query.iter(world).count()));

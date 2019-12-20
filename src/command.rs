@@ -54,15 +54,17 @@ struct InsertCommand<T, C> {
     tags: T,
     #[derivative(Debug = "ignore")]
     components: C,
+
+    entities: Vec<Entity>,
 }
 impl<T, C> WorldWritable for InsertCommand<T, C>
 where
     T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-    C: IntoComponentSource,
+    C: ComponentSource,
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        world.insert(consumed.tags, consumed.components);
+        world.insert_buffered(&consumed.entities, consumed.tags, consumed.components);
     }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
@@ -196,7 +198,7 @@ where
         }
     }
 
-    fn insert(self, world: &mut World)
+    fn build(self, buffer: &mut CommandBuffer)
     where
         <TS as ConsFlatten>::Output: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         ComponentTupleSet<
@@ -204,10 +206,16 @@ where
             std::iter::Once<<CS as ConsFlatten>::Output>,
         >: ComponentSource,
     {
-        world.insert(
-            self.tags.flatten(),
-            std::iter::once(self.components.flatten()),
-        );
+        buffer
+            .commands
+            .get_mut()
+            .push(EntityCommand::WriteWorld(Arc::new(InsertCommand {
+                write_components: Vec::default(),
+                write_tags: Vec::default(),
+                tags: self.tags.flatten(),
+                components: IntoComponentSource::into(std::iter::once(self.components.flatten())),
+                entities: vec![self.entity],
+            })));
     }
 }
 
@@ -270,7 +278,11 @@ impl CommandBuffer {
         tracing::trace!("Draining command buffer");
 
         let empty = Vec::from_iter((0..self.used_list.len()).map(|_| ()));
-        world.insert_buffered(self.used_list.as_slice(), (), empty);
+        world.insert_buffered(
+            self.used_list.as_slice(),
+            (),
+            IntoComponentSource::into(empty),
+        );
         self.used_list.clear();
 
         while let Some(command) = self.commands.get_mut().pop() {
@@ -321,11 +333,22 @@ impl CommandBuffer {
             .push(EntityCommand::WriteWorld(Arc::new(writer)));
     }
 
-    pub fn insert<T, C>(&self, tags: T, components: C)
+    pub fn insert<T, C>(&mut self, tags: T, components: C) -> Result<Vec<Entity>, CommandError>
     where
         T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         C: 'static + IntoComponentSource,
     {
+        let components = components.into();
+
+        if components.len() > self.free_list.len() {
+            return Err(CommandError::EntityBlockFull);
+        }
+
+        let mut entities = Vec::with_capacity(components.len());
+        for _ in 0..components.len() {
+            entities.push(self.free_list.pop().ok_or(CommandError::EntityBlockFull)?);
+        }
+
         self.commands
             .get_mut()
             .push(EntityCommand::WriteWorld(Arc::new(InsertCommand {
@@ -333,7 +356,10 @@ impl CommandBuffer {
                 write_tags: Vec::default(),
                 tags,
                 components,
+                entities: entities.clone(),
             })));
+
+        Ok(entities)
     }
 
     pub fn delete(&self, entity: Entity) {
@@ -431,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn simple_write_test() {
+    fn simple_write_test() -> Result<(), CommandError> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
@@ -444,8 +470,8 @@ mod tests {
         let components_len = components.len();
 
         //world.entity_allocator.get_block()
-        let mut command = CommandBuffer::default();
-        command.insert((), components);
+        let mut command = CommandBuffer::from_world(&mut world);
+        let _ = command.insert((), components)?;
 
         // Assert writing checks
         // TODO:
@@ -464,5 +490,7 @@ mod tests {
         }
 
         assert_eq!(components_len, count);
+
+        Ok(())
     }
 }
