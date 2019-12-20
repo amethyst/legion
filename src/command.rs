@@ -259,6 +259,7 @@ impl CommandBuffer {
         }
     }
 
+    #[allow(clippy::comparison_chain)]
     pub fn resize(&mut self, world: &mut World) {
         let entity_count = world.command_buffer_size();
         if self.free_list.len() < entity_count {
