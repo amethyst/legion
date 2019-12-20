@@ -226,6 +226,7 @@ impl Executor {
 
     /// Executes all systems and then flushes their command buffers.
     pub fn execute(&mut self, world: &mut World) {
+        self.resize_command_buffers(world);
         self.run_systems(world);
         self.flush_command_buffers(world);
     }
@@ -303,6 +304,13 @@ impl Executor {
                 }
             },
         );
+    }
+
+    /// Resizes all command buffers where appropriate to the world
+    pub fn resize_command_buffers(&mut self, world: &mut World) {
+        self.systems.iter().for_each(|system| {
+            system.command_buffer_mut().resize(world);
+        });
     }
 
     /// Flushes the recorded command buffers for all systems.

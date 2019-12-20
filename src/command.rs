@@ -1,22 +1,47 @@
 use crate::{
+    borrow::AtomicRefCell,
     cons::{ConsAppend, ConsFlatten},
-    entity::{Entity, EntityBlock},
+    entity::Entity,
     filter::{ChunksetFilterData, Filter},
     storage::{Component, ComponentTypeId, Tag, TagTypeId},
     world::{ComponentSource, ComponentTupleSet, IntoComponentSource, TagLayout, TagSet, World},
 };
-use bit_set::BitSet;
-
 use derivative::Derivative;
-use std::{marker::PhantomData, sync::Arc};
-
-use crate::borrow::{AtomicRefCell, RefMut};
+use smallvec::SmallVec;
+use std::{iter::FromIterator, marker::PhantomData, sync::Arc};
 
 pub trait WorldWritable {
     fn write(self: Arc<Self>, world: &mut World);
 
     fn write_components(&self) -> Vec<ComponentTypeId>;
     fn write_tags(&self) -> Vec<TagTypeId>;
+}
+
+#[derive(Derivative)]
+#[derivative(Debug(bound = ""))]
+struct InsertBufferedCommand<T, C> {
+    write_components: Vec<ComponentTypeId>,
+    write_tags: Vec<TagTypeId>,
+
+    entities: SmallVec<[Entity; 64]>,
+
+    #[derivative(Debug = "ignore")]
+    tags: T,
+    #[derivative(Debug = "ignore")]
+    components: C,
+}
+impl<T, C> WorldWritable for InsertBufferedCommand<T, C>
+where
+    T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+    C: IntoComponentSource,
+{
+    fn write(self: Arc<Self>, world: &mut World) {
+        let consumed = Arc::try_unwrap(self).unwrap();
+        world.insert(consumed.tags, consumed.components);
+    }
+
+    fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
+    fn write_tags(&self) -> Vec<TagTypeId> { self.write_tags.clone() }
 }
 
 #[derive(Derivative)]
@@ -179,37 +204,76 @@ where
             std::iter::Once<<CS as ConsFlatten>::Output>,
         >: ComponentSource,
     {
-        world.insert_buffered(
-            self.entity,
+        world.insert(
             self.tags.flatten(),
             std::iter::once(self.components.flatten()),
         );
     }
 }
 
+#[derive(Debug)]
+pub enum CommandError {
+    EntityBlockFull,
+}
+impl std::fmt::Display for CommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "CommandError") }
+}
+
+impl std::error::Error for CommandError {
+    fn description(&self) -> &str { "CommandError" }
+
+    fn cause(&self) -> Option<&dyn std::error::Error> { None }
+}
+
 #[derive(Default)]
 pub struct CommandBuffer {
-    commands: AtomicRefCell<Vec<EntityCommand>>,
-    block: Option<EntityBlock>,
-    used_entities: BitSet,
+    commands: AtomicRefCell<SmallVec<[EntityCommand; 128]>>,
+    pub(crate) free_list: SmallVec<[Entity; 64]>,
+    pub(crate) used_list: SmallVec<[Entity; 64]>,
 }
 // This is safe because only 1 system in 1 execution is only ever accessing a command buffer
 // and we garuntee the write operations of a command buffer occur in a safe manner
 unsafe impl Send for CommandBuffer {}
 unsafe impl Sync for CommandBuffer {}
 
-pub enum CommandError {
-    EntityBlockFull,
-}
-
 impl CommandBuffer {
-    #[inline]
-    fn get_commands(&self) -> RefMut<Vec<EntityCommand>> { self.commands.get_mut() }
+    pub fn from_world(world: &mut World) -> Self {
+        // Pull  free entities from the world.
 
-    pub fn write(&self, world: &mut World) {
+        let free_list = SmallVec::from_iter(
+            (0..world.command_buffer_size()).map(|_| world.entity_allocator.create_entity()),
+        );
+
+        Self {
+            free_list,
+            commands: Default::default(),
+            used_list: Default::default(),
+        }
+    }
+
+    pub fn resize(&mut self, world: &mut World) {
+        let entity_count = world.command_buffer_size();
+        if self.free_list.len() < entity_count {
+            (entity_count - self.free_list.len()..entity_count)
+                .for_each(|_| self.free_list.push(world.entity_allocator.create_entity()));
+        } else if self.free_list.len() > entity_count {
+            // Free the entities
+            (self.free_list.len() - entity_count..entity_count).for_each(|_| {
+                world
+                    .entity_allocator
+                    .delete_entity(self.free_list.pop().unwrap());
+            });
+        }
+    }
+
+    pub fn write(&mut self, world: &mut World) {
         tracing::trace!("Draining command buffer");
 
-        while let Some(command) = self.get_commands().pop() {
+        let empty = Vec::from_iter((0..self.used_list.len()).map(|_| ()));
+        world.insert_buffered(self.used_list.as_slice(), (), empty);
+        self.used_list.clear();
+
+        while let Some(command) = self.commands.get_mut().pop() {
             match command {
                 EntityCommand::WriteWorld(ptr) => ptr.write(world),
                 EntityCommand::ExecMutWorld(closure) => closure(world),
@@ -217,6 +281,9 @@ impl CommandBuffer {
             }
         }
 
+        // Refill our entity buffer from the world
+        (0..world.command_buffer_size() - self.free_list.len())
+            .for_each(|_| self.free_list.push(world.entity_allocator.create_entity()));
     }
 
     pub fn build_entity(&mut self) -> Result<EntityBuilder<(), ()>, CommandError> {
@@ -230,14 +297,8 @@ impl CommandBuffer {
     }
 
     pub fn create_entity(&mut self) -> Result<Entity, CommandError> {
-        let entity = self
-            .block
-            .as_mut()
-            .expect("CommandBuffer::create_entity called when EntityBlock not assigned.")
-            .allocate()
-            .ok_or(CommandError::EntityBlockFull)?;
-
-        self.used_entities.insert(entity.index() as usize);
+        let entity = self.free_list.pop().ok_or(CommandError::EntityBlockFull)?;
+        self.used_list.push(entity);
 
         Ok(entity)
     }
@@ -246,7 +307,8 @@ impl CommandBuffer {
     where
         F: 'static + Fn(&mut World),
     {
-        self.get_commands()
+        self.commands
+            .get_mut()
             .push(EntityCommand::ExecMutWorld(Arc::new(f)));
     }
 
@@ -254,7 +316,8 @@ impl CommandBuffer {
     where
         W: 'static + WorldWritable,
     {
-        self.get_commands()
+        self.commands
+            .get_mut()
             .push(EntityCommand::WriteWorld(Arc::new(writer)));
     }
 
@@ -263,7 +326,8 @@ impl CommandBuffer {
         T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         C: 'static + IntoComponentSource,
     {
-        self.get_commands()
+        self.commands
+            .get_mut()
             .push(EntityCommand::WriteWorld(Arc::new(InsertCommand {
                 write_components: Vec::default(),
                 write_tags: Vec::default(),
@@ -273,14 +337,16 @@ impl CommandBuffer {
     }
 
     pub fn delete(&self, entity: Entity) {
-        self.get_commands()
+        self.commands
+            .get_mut()
             .push(EntityCommand::WriteWorld(Arc::new(DeleteEntityCommand(
                 entity,
             ))));
     }
 
     pub fn add_component<C: Component>(&self, entity: Entity, component: C) {
-        self.get_commands()
+        self.commands
+            .get_mut()
             .push(EntityCommand::WriteWorld(Arc::new(AddComponentCommand {
                 entity,
                 component,
@@ -288,16 +354,19 @@ impl CommandBuffer {
     }
 
     pub fn remove_component<C: Component>(&self, entity: Entity) {
-        self.get_commands().push(EntityCommand::WriteWorld(Arc::new(
-            RemoveComponentCommand {
-                entity,
-                _marker: PhantomData::<C>::default(),
-            },
-        )));
+        self.commands
+            .get_mut()
+            .push(EntityCommand::WriteWorld(Arc::new(
+                RemoveComponentCommand {
+                    entity,
+                    _marker: PhantomData::<C>::default(),
+                },
+            )));
     }
 
     pub fn add_tag<T: Tag>(&self, entity: Entity, tag: T) {
-        self.get_commands()
+        self.commands
+            .get_mut()
             .push(EntityCommand::WriteWorld(Arc::new(AddTagCommand {
                 entity,
                 tag,
@@ -305,7 +374,8 @@ impl CommandBuffer {
     }
 
     pub fn remove_tag<T: Tag>(&self, entity: Entity) {
-        self.get_commands()
+        self.commands
+            .get_mut()
             .push(EntityCommand::WriteWorld(Arc::new(RemoveTagCommand {
                 entity,
                 _marker: PhantomData::<T>::default(),
@@ -315,6 +385,7 @@ impl CommandBuffer {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::prelude::*;
 
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -323,6 +394,41 @@ mod tests {
     struct Vel(f32, f32, f32);
     #[derive(Default)]
     struct TestResource(pub i32);
+
+    #[test]
+    fn create_entity_test() -> Result<(), CommandError> {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+
+        let components = vec![
+            (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Vel(0.4, 0.5, 0.6)),
+        ];
+        let components_len = components.len();
+
+        //world.entity_allocator.get_block()
+        let mut command = CommandBuffer::from_world(&mut world);
+        let entity1 = command.create_entity()?;
+        let entity2 = command.create_entity()?;
+
+        command.add_component(entity1, Pos(1., 2., 3.));
+        command.add_component(entity2, Pos(4., 5., 6.));
+
+        command.write(&mut world);
+
+        let query = Read::<Pos>::query();
+
+        let mut count = 0;
+        for _ in query.iter_entities(&mut world) {
+            count += 1;
+        }
+
+        assert_eq!(components_len, count);
+
+        Ok(())
+    }
 
     #[test]
     fn simple_write_test() {
@@ -338,7 +444,7 @@ mod tests {
         let components_len = components.len();
 
         //world.entity_allocator.get_block()
-        let command = CommandBuffer::default();
+        let mut command = CommandBuffer::default();
         command.insert((), components);
 
         // Assert writing checks

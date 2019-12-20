@@ -1395,7 +1395,7 @@ mod tests {
 
         let expected_copy = expected.clone();
         let mut system = SystemBuilder::<()>::new("TestSystem")
-            .with_query(<(Read::<Pos>, Read<Vel>)>::query())
+            .with_query(<(Read<Pos>, Read<Vel>)>::query())
             .build(move |_, world, _, query| {
                 let mut count = 0;
                 {
@@ -1428,7 +1428,9 @@ mod tests {
         #[derive(Default, Clone, Copy)]
         pub struct Balls(u32);
 
-        let components = (0..30000).map(|_|  (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3))).collect::<Vec<_>>();
+        let components = (0..30000)
+            .map(|_| (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)))
+            .collect::<Vec<_>>();
 
         let mut expected = HashMap::<Entity, (Pos, Vel)>::new();
 
@@ -1438,10 +1440,9 @@ mod tests {
             }
         }
 
-
         let expected_copy = expected.clone();
         let mut system = SystemBuilder::<()>::new("TestSystem")
-            .with_query(<(Read::<Pos>, Read<Vel>)>::query())
+            .with_query(<(Read<Pos>, Read<Vel>)>::query())
             .build(move |command_buffer, world, _, query| {
                 let mut count = 0;
                 {
@@ -1465,7 +1466,6 @@ mod tests {
         system.prepare(&world);
         system.run(&world);
     }
-
 
     #[test]
     #[cfg(feature = "par-schedule")]
@@ -1725,4 +1725,3 @@ mod tests {
         });
     }
 }
-

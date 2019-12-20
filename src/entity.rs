@@ -182,9 +182,6 @@ impl EntityAllocator {
         }
     }
 
-    pub(crate) fn get_block(&mut self) -> EntityBlock { self.allocator.lock().allocate() }
-    pub(crate) fn push_block(&mut self, block: EntityBlock) { self.blocks.push(block); }
-
     /// Determines if the given `Entity` is considered alive.
     pub fn is_alive(&self, entity: Entity) -> bool {
         self.blocks
