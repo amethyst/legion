@@ -40,8 +40,12 @@ where
         world.insert(consumed.tags, consumed.components);
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
-    fn write_tags(&self) -> Vec<TagTypeId> { self.write_tags.clone() }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        self.write_components.clone()
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        self.write_tags.clone()
+    }
 }
 
 #[derive(Derivative)]
@@ -67,18 +71,28 @@ where
         world.insert_buffered(&consumed.entities, consumed.tags, consumed.components);
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
-    fn write_tags(&self) -> Vec<TagTypeId> { self.write_tags.clone() }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        self.write_components.clone()
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        self.write_tags.clone()
+    }
 }
 
 #[derive(Derivative)]
 #[derivative(Debug(bound = ""))]
 struct DeleteEntityCommand(Entity);
 impl WorldWritable for DeleteEntityCommand {
-    fn write(self: Arc<Self>, world: &mut World) { world.delete(self.0); }
+    fn write(self: Arc<Self>, world: &mut World) {
+        world.delete(self.0);
+    }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-    fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        Vec::with_capacity(0)
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        Vec::with_capacity(0)
+    }
 }
 
 #[derive(Derivative)]
@@ -97,8 +111,12 @@ where
         world.add_tag(consumed.entity, consumed.tag)
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-    fn write_tags(&self) -> Vec<TagTypeId> { vec![TagTypeId::of::<T>()] }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        Vec::with_capacity(0)
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        vec![TagTypeId::of::<T>()]
+    }
 }
 
 #[derive(Derivative)]
@@ -111,10 +129,16 @@ impl<T> WorldWritable for RemoveTagCommand<T>
 where
     T: Tag,
 {
-    fn write(self: Arc<Self>, world: &mut World) { world.remove_tag::<T>(self.entity) }
+    fn write(self: Arc<Self>, world: &mut World) {
+        world.remove_tag::<T>(self.entity)
+    }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-    fn write_tags(&self) -> Vec<TagTypeId> { vec![TagTypeId::of::<T>()] }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        Vec::with_capacity(0)
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        vec![TagTypeId::of::<T>()]
+    }
 }
 
 #[derive(Derivative)]
@@ -134,8 +158,12 @@ where
         world.add_component::<C>(consumed.entity, consumed.component)
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }
-    fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        vec![ComponentTypeId::of::<C>()]
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        Vec::with_capacity(0)
+    }
 }
 
 #[derive(Derivative)]
@@ -148,10 +176,16 @@ impl<C> WorldWritable for RemoveComponentCommand<C>
 where
     C: Component,
 {
-    fn write(self: Arc<Self>, world: &mut World) { world.remove_component::<C>(self.entity) }
+    fn write(self: Arc<Self>, world: &mut World) {
+        world.remove_component::<C>(self.entity)
+    }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }
-    fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        vec![ComponentTypeId::of::<C>()]
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        Vec::with_capacity(0)
+    }
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -224,13 +258,19 @@ pub enum CommandError {
     EntityBlockFull,
 }
 impl std::fmt::Display for CommandError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "CommandError") }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CommandError")
+    }
 }
 
 impl std::error::Error for CommandError {
-    fn description(&self) -> &str { "CommandError" }
+    fn description(&self) -> &str {
+        "CommandError"
+    }
 
-    fn cause(&self) -> Option<&dyn std::error::Error> { None }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        None
+    }
 }
 
 #[derive(Default)]
@@ -245,6 +285,19 @@ unsafe impl Send for CommandBuffer {}
 unsafe impl Sync for CommandBuffer {}
 
 impl CommandBuffer {
+    pub fn from_world_with_capacity(world: &mut World, capacity: usize) -> Self {
+        // Pull  free entities from the world.
+
+        let free_list =
+            SmallVec::from_iter((0..capacity).map(|_| world.entity_allocator.create_entity()));
+
+        Self {
+            free_list,
+            commands: Default::default(),
+            used_list: Default::default(),
+        }
+    }
+
     pub fn from_world(world: &mut World) -> Self {
         // Pull  free entities from the world.
 
