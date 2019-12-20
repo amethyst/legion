@@ -216,7 +216,6 @@ impl CommandBuffer {
                 EntityCommand::ExecWorld(closure) => closure(world),
             }
         }
-
     }
 
     pub fn build_entity(&mut self) -> Result<EntityBuilder<(), ()>, CommandError> {
