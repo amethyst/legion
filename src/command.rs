@@ -23,21 +23,21 @@ struct InsertBufferedCommand<T, C> {
     write_components: Vec<ComponentTypeId>,
     write_tags: Vec<TagTypeId>,
 
-    entities: SmallVec<[Entity; 64]>,
-
     #[derivative(Debug = "ignore")]
     tags: T,
     #[derivative(Debug = "ignore")]
     components: C,
+
+    entities: Vec<Entity>,
 }
 impl<T, C> WorldWritable for InsertBufferedCommand<T, C>
-where
-    T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-    C: IntoComponentSource,
+    where
+        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+        C: ComponentSource,
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        world.insert(consumed.tags, consumed.components);
+        world.insert_buffered(&consumed.entities, consumed.tags, consumed.components);
     }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
@@ -55,16 +55,15 @@ struct InsertCommand<T, C> {
     #[derivative(Debug = "ignore")]
     components: C,
 
-    entities: Vec<Entity>,
 }
 impl<T, C> WorldWritable for InsertCommand<T, C>
 where
     T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-    C: ComponentSource,
+    C: IntoComponentSource,
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        world.insert_buffered(&consumed.entities, consumed.tags, consumed.components);
+        world.insert(consumed.tags, consumed.components);
     }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
@@ -209,7 +208,7 @@ where
         buffer
             .commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(InsertCommand {
+            .push(EntityCommand::WriteWorld(Arc::new(InsertBufferedCommand {
                 write_components: Vec::default(),
                 write_tags: Vec::default(),
                 tags: self.tags.flatten(),
@@ -347,6 +346,21 @@ impl CommandBuffer {
             .push(EntityCommand::WriteWorld(Arc::new(writer)));
     }
 
+    pub fn insert_unbuffered<T, C>(&mut self, tags: T, components: C)
+        where
+            T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+            C: 'static + IntoComponentSource,
+    {
+        self.commands
+            .get_mut()
+            .push(EntityCommand::WriteWorld(Arc::new(InsertCommand {
+                write_components: Vec::default(),
+                write_tags: Vec::default(),
+                tags,
+                components,
+            })));
+    }
+
     pub fn insert<T, C>(&mut self, tags: T, components: C) -> Result<Vec<Entity>, CommandError>
     where
         T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
@@ -364,7 +378,7 @@ impl CommandBuffer {
 
         self.commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(InsertCommand {
+            .push(EntityCommand::WriteWorld(Arc::new(InsertBufferedCommand {
                 write_components: Vec::default(),
                 write_tags: Vec::default(),
                 tags,
