@@ -226,8 +226,6 @@ impl std::fmt::Display for CommandError {
 }
 
 impl std::error::Error for CommandError {
-    fn description(&self) -> &str { "CommandError" }
-
     fn cause(&self) -> Option<&dyn std::error::Error> { None }
 }
 
