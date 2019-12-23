@@ -31,9 +31,9 @@ struct InsertBufferedCommand<T, C> {
     entities: Vec<Entity>,
 }
 impl<T, C> WorldWritable for InsertBufferedCommand<T, C>
-    where
-        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-        C: ComponentSource,
+where
+    T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+    C: ComponentSource,
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
@@ -54,7 +54,6 @@ struct InsertCommand<T, C> {
     tags: T,
     #[derivative(Debug = "ignore")]
     components: C,
-
 }
 impl<T, C> WorldWritable for InsertCommand<T, C>
 where
@@ -347,9 +346,9 @@ impl CommandBuffer {
     }
 
     pub fn insert_unbuffered<T, C>(&mut self, tags: T, components: C)
-        where
-            T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-            C: 'static + IntoComponentSource,
+    where
+        T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+        C: 'static + IntoComponentSource,
     {
         self.commands
             .get_mut()
