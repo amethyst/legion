@@ -428,9 +428,17 @@ macro_rules! impl_view_tuple {
                 $( $ty::writes::<Data>() )||*
             }
 
-            fn read_types() -> Vec<ComponentTypeId> { vec![$( ComponentTypeId::of::<$ty>()),*] }
+            fn read_types() -> Vec<ComponentTypeId> {
+                let mut vec = vec![];
+                $( vec.extend($ty::read_types()); )*
+                vec
+            }
 
-            fn write_types() -> Vec<ComponentTypeId> { vec![$( ComponentTypeId::of::<$ty>()),*] }
+            fn write_types() -> Vec<ComponentTypeId> {
+                let mut vec = vec![];
+                $( vec.extend($ty::write_types()); )*
+                vec
+            }
         }
     };
 }
