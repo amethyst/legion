@@ -1033,7 +1033,7 @@ where
 
     /// Flag this resource type as being written by this system.
     ///
-    /// This will inform the dispatcher to not allow any parralel access to this resource while
+    /// This will inform the dispatcher to not allow any parallel access to this resource while
     /// this system is running.
     pub fn write_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<Write<T>>>::Output>
     where
@@ -1055,7 +1055,7 @@ where
 
     /// This performs a soft resource block on the component for writing. The dispatcher will
     /// generally handle dispatching read and writes on components based on archetype, allowing
-    /// for more granular access and more parralelization of systems.
+    /// for more granular access and more parallelization of systems.
     ///
     /// Using this method will mark the entire component as read by this system, blocking writing
     /// systems from accessing any archetypes which contain this component for the duration of its
@@ -1075,7 +1075,7 @@ where
 
     /// This performs a exclusive resource block on the component for writing. The dispatcher will
     /// generally handle dispatching read and writes on components based on archetype, allowing
-    /// for more granular access and more parralelization of systems.
+    /// for more granular access and more parallelization of systems.
     ///
     /// Using this method will mark the entire component as written by this system, blocking other
     /// systems from accessing any archetypes which contain this component for the duration of its
