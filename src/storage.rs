@@ -971,12 +971,13 @@ impl Chunkset {
         mut on_moved: F,
     ) -> bool {
         let slice = self.occupied_mut();
-        let mut first = 0;
-        let mut last = slice.len() - 1;
 
         if slice.is_empty() {
             return true;
         }
+
+        let mut first = 0;
+        let mut last = slice.len() - 1;
 
         trace!("Defragmenting chunkset");
 
