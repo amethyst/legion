@@ -10,10 +10,6 @@ use bit_set::BitSet;
 use derivative::Derivative;
 use std::{marker::PhantomData, sync::Arc};
 
-#[cfg(feature = "par-schedule")]
-use crossbeam_queue::SegQueue;
-
-#[cfg(not(feature = "par-schedule"))]
 use crate::borrow::{AtomicRefCell, RefMut};
 
 pub trait WorldWritable {
@@ -193,9 +189,6 @@ where
 
 #[derive(Default)]
 pub struct CommandBuffer {
-    #[cfg(feature = "par-schedule")]
-    commands: SegQueue<EntityCommand>,
-    #[cfg(not(feature = "par-schedule"))]
     commands: AtomicRefCell<Vec<EntityCommand>>,
     block: Option<EntityBlock>,
     used_entities: BitSet,
@@ -210,35 +203,17 @@ pub enum CommandError {
 }
 
 impl CommandBuffer {
-    #[cfg(not(feature = "par-schedule"))]
     #[inline]
     fn get_commands(&self) -> RefMut<Vec<EntityCommand>> { self.commands.get_mut() }
 
-    #[cfg(feature = "par-schedule")]
-    #[inline]
-    fn get_commands(&self) -> &SegQueue<EntityCommand> { &self.commands }
-
     pub fn write(&self, world: &mut World) {
         tracing::trace!("Draining command buffer");
-        #[cfg(feature = "par-schedule")]
-        {
-            while let Ok(command) = self.get_commands().pop() {
-                match command {
-                    EntityCommand::WriteWorld(ptr) => ptr.write(world),
-                    EntityCommand::ExecMutWorld(closure) => closure(world),
-                    EntityCommand::ExecWorld(closure) => closure(world),
-                }
-            }
-        }
 
-        #[cfg(not(feature = "par-schedule"))]
-        {
-            while let Some(command) = self.get_commands().pop() {
-                match command {
-                    EntityCommand::WriteWorld(ptr) => ptr.write(world),
-                    EntityCommand::ExecMutWorld(closure) => closure(world),
-                    EntityCommand::ExecWorld(closure) => closure(world),
-                }
+        while let Some(command) = self.get_commands().pop() {
+            match command {
+                EntityCommand::WriteWorld(ptr) => ptr.write(world),
+                EntityCommand::ExecMutWorld(closure) => closure(world),
+                EntityCommand::ExecWorld(closure) => closure(world),
             }
         }
     }
