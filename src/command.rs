@@ -129,7 +129,9 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        world.add_component::<C>(consumed.entity, consumed.component)
+        world
+            .add_component::<C>(consumed.entity, consumed.component)
+            .unwrap();
     }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }

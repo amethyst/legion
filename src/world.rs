@@ -49,9 +49,7 @@ pub struct Universe {
 
 impl Universe {
     /// Creates a new `Universe`.
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Creates a new `World` within this `Universe`.
     ///
@@ -80,9 +78,7 @@ impl Default for Universe {
 pub struct WorldId(usize);
 
 impl WorldId {
-    pub fn index(self) -> usize {
-        self.0
-    }
+    pub fn index(self) -> usize { self.0 }
 }
 
 /// Contains queryable collections of data associated with `Entity`s.
@@ -125,9 +121,7 @@ impl World {
     }
 
     #[inline]
-    pub fn command_buffer_size(&self) -> usize {
-        self.command_buffer_size
-    }
+    pub fn command_buffer_size(&self) -> usize { self.command_buffer_size }
 
     #[inline]
     pub fn set_command_buffer_size(&mut self, command_buffer_size: usize) {
@@ -163,18 +157,12 @@ impl World {
         self.storage_mut().subscribe(sender, filter);
     }
 
-    pub(crate) fn storage(&self) -> &Storage {
-        unsafe { &*self.storage.get() }
-    }
+    pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
 
-    pub(crate) fn storage_mut(&mut self) -> &mut Storage {
-        unsafe { &mut *self.storage.get() }
-    }
+    pub(crate) fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
 
     /// Gets the unique ID of this world within its universe.
-    pub fn id(&self) -> WorldId {
-        self.id
-    }
+    pub fn id(&self) -> WorldId { self.id }
 
     /// Inserts new entities into the world.
     ///
@@ -689,9 +677,7 @@ impl World {
     }
 
     /// Determines if the given `Entity` is alive within this `World`.
-    pub fn is_alive(&self, entity: Entity) -> bool {
-        self.entity_allocator.is_alive(entity)
-    }
+    pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
     /// Iteratively defragments the world's internal memory.
     ///
@@ -859,9 +845,7 @@ impl World {
 }
 
 impl Default for World {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 /// Describes the types of a set of components attached to an entity.
@@ -1238,9 +1222,7 @@ struct DynamicComponentLayout<'a> {
 impl<'a> ComponentLayout for DynamicComponentLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter {
-        self
-    }
+    fn get_filter(&mut self) -> &mut Self::Filter { self }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy components from existing archetype into new
@@ -1298,9 +1280,7 @@ unsafe impl<'a> Sync for DynamicTagLayout<'a> {}
 impl<'a> TagLayout for DynamicTagLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter {
-        self
-    }
+    fn get_filter(&mut self) -> &mut Self::Filter { self }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy tags from existing archetype into new
@@ -1324,9 +1304,7 @@ impl<'a> TagLayout for DynamicTagLayout<'a> {
 impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
     type Iter = SliceVecIter<'b, TagTypeId>;
 
-    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter {
-        source.tag_types.iter()
-    }
+    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter { source.tag_types.iter() }
 
     fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(
