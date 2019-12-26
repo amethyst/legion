@@ -836,7 +836,7 @@ where
 /// }
 /// ```
 ///
-/// The lower level `iter_chunks` function allows access to each underlying chunk of entity data.
+/// The lower level `iter_chunks_mut` function allows access to each underlying chunk of entity data.
 /// This allows you to run code for each tag value, or to retrieve a contiguous data slice.
 ///
 /// ```rust
@@ -851,14 +851,14 @@ where
 /// # let mut world = universe.create_world();
 /// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
-/// for chunk in query.iter_chunks(&mut world) {
+/// for chunk in query.iter_chunks_mut(&mut world) {
 ///     let model = chunk.tag::<Model>();
 ///     let positions = chunk.components_mut::<Position>();
 ///     let velocities = chunk.components::<Velocity>();
 /// }
 /// ```
 ///
-/// The `ChunkView` yielded from `iter_chunks` allows access to all shared data in the chunk (queried for or not),
+/// The `ChunkView` yielded from `iter_chunks_mut` allows access to all shared data in the chunk (queried for or not),
 /// but entity data slices can only be accessed if they were requested in the query's view. Attempting to access
 /// other data types, or attempting to write to components that were only requested via a `Read` will panic.
 #[derive(Derivative)]
@@ -920,7 +920,7 @@ where
     }
 
     /// Gets an iterator which iterates through all chunks that match the query.
-    pub fn iter_chunks_immutable<'a, 'data>(
+    pub fn iter_chunks<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
@@ -932,7 +932,7 @@ where
     }
 
     /// Gets an iterator which iterates through all chunks that match the query.
-    pub fn iter_chunks<'a, 'data>(
+    pub fn iter_chunks_mut<'a, 'data>(
         &'a self,
         world: &'data mut World,
     ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {

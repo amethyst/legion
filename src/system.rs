@@ -160,7 +160,7 @@ where
 
     /// Gets an iterator which iterates through all chunks that match the query.
     #[inline]
-    pub fn iter_chunks_immutable<'a, 'b>(
+    pub fn iter_chunks<'a, 'b>(
         &'b self,
         world: &SubWorld,
     ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
@@ -173,7 +173,7 @@ where
 
     /// Gets an iterator which iterates through all chunks that match the query.
     #[inline]
-    pub fn iter_chunks<'a, 'b>(
+    pub fn iter_chunks_mut<'a, 'b>(
         &'b self,
         world: &mut SubWorld,
     ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {

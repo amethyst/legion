@@ -580,7 +580,7 @@ fn query_iter_chunks_tag() {
 
     let query = <(Tagged<Static>, Tagged<Model>)>::query();
 
-    for chunk in query.iter_chunks_immutable(&world) {
+    for chunk in query.iter_chunks(&world) {
         let model = chunk.tag::<Model>().cloned();
         for entity in chunk.entities() {
             assert_eq!(world.get_tag::<Model>(*entity), model.as_ref());
