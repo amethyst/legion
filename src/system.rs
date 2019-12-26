@@ -350,7 +350,7 @@ where
     /// Iterates through all entity data that matches the query.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn for_each_entities_immutable<'a, 'data, T>(&'a self, world: &SubWorld, f: T)
+    pub fn for_each_entities<'a, 'data, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
         V: ReadOnly,
@@ -362,7 +362,7 @@ where
     /// Iterates through all entity data that matches the query.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn for_each_entities<'a, 'data, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn for_each_entities_mut<'a, 'data, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
     {
@@ -397,7 +397,7 @@ where
     /// Iterates through all entities that matches the query in parallel by chunk.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_entities_for_each_immutable<'a, T>(&'a self, world: &SubWorld, f: T)
+    pub fn par_entities_for_each<'a, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -412,7 +412,7 @@ where
     /// Iterates through all entities that matches the query in parallel by chunk.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_entities_for_each<'a, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn par_entities_for_each_mut<'a, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -448,7 +448,7 @@ where
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each_immutable<'a, T>(&'a self, world: &SubWorld, f: T)
+    pub fn par_for_each<'a, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -463,7 +463,7 @@ where
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each<'a, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn par_for_each_mut<'a, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -501,7 +501,7 @@ where
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each_chunk_immutable<'a, T>(&'a self, world: &SubWorld, f: T)
+    pub fn par_for_each_chunk<'a, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -516,7 +516,7 @@ where
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each_chunk<'a, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn par_for_each_chunk_mut<'a, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,

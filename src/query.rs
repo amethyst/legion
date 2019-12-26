@@ -1138,7 +1138,7 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each_entities_immutable<'a, 'data, T>(&'a self, world: &'data World, f: T)
+    pub fn for_each_entities<'a, 'data, T>(&'a self, world: &'data World, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
         V: ReadOnly,
@@ -1148,7 +1148,7 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each_entities<'a, 'data, T>(&'a self, world: &'data mut World, f: T)
+    pub fn for_each_entities_mut<'a, 'data, T>(&'a self, world: &'data mut World, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
     {
@@ -1232,7 +1232,7 @@ where
 
     #[cfg(feature = "par-iter")]
     /// Gets an iterator which iterates through all chunks that match the query in parallel.
-    pub fn par_iter_chunks_immutable<'a, 'data>(
+    pub fn par_iter_chunks<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkViewParIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
@@ -1248,7 +1248,7 @@ where
 
     #[cfg(feature = "par-iter")]
     /// Gets an iterator which iterates through all chunks that match the query in parallel.
-    pub fn par_iter_chunks<'a, 'data>(
+    pub fn par_iter_chunks_mut<'a, 'data>(
         &'a self,
         world: &'data mut World,
     ) -> ChunkViewParIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
@@ -1288,7 +1288,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_entities_for_each_immutable<'a, T>(&'a self, world: &'a World, f: T)
+    pub fn par_entities_for_each<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1302,7 +1302,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_entities_for_each<'a, T>(&'a self, world: &'a mut World, f: T)
+    pub fn par_entities_for_each_mut<'a, T>(&'a self, world: &'a mut World, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1340,7 +1340,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each_immutable<'a, T>(&'a self, world: &'a World, f: T)
+    pub fn par_for_each<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1354,7 +1354,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each<'a, T>(&'a self, world: &'a mut World, f: T)
+    pub fn par_for_each_mut<'a, T>(&'a self, world: &'a mut World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1391,7 +1391,7 @@ where
 
     /// Iterates through all chunks that match the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each_chunk_immutable<'a, T>(&'a self, world: &'a World, f: T)
+    pub fn par_for_each_chunk<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1405,7 +1405,7 @@ where
 
     /// Iterates through all chunks that match the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each_chunk<'a, T>(&'a self, world: &'a mut World, f: T)
+    pub fn par_for_each_chunk_mut<'a, T>(&'a self, world: &'a mut World, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
