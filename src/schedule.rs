@@ -84,7 +84,9 @@ impl Executor {
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
     #[cfg(not(feature = "par-schedule"))]
-    pub fn new(systems: Vec<Box<dyn Schedulable>>) -> Self { Self { systems } }
+    pub fn new(systems: Vec<Box<dyn Schedulable>>) -> Self {
+        Self { systems }
+    }
 
     /// Constructs a new executor for all systems to be run in a single stage.
     ///
@@ -222,7 +224,9 @@ impl Executor {
     }
 
     /// Converts this executor into a vector of its component systems.
-    pub fn into_vec(self) -> Vec<Box<dyn Schedulable>> { self.systems }
+    pub fn into_vec(self) -> Vec<Box<dyn Schedulable>> {
+        self.systems
+    }
 
     /// Executes all systems and then flushes their command buffers.
     pub fn execute(&mut self, world: &mut World) {
@@ -235,7 +239,7 @@ impl Executor {
     /// Only enabled with par-schedule is disabled
     #[cfg(not(feature = "par-schedule"))]
     pub fn run_systems(&mut self, world: &mut World) {
-        self.systems.iter_mut().for_each(|system| {
+        self.systems.iter_mut().for_each_mut(|system| {
             system.run(world);
         });
     }
@@ -381,7 +385,9 @@ impl Builder {
     }
 
     /// Finalizes the builder into a `Schedule`.
-    pub fn build(self) -> Schedule { self.into() }
+    pub fn build(self) -> Schedule {
+        self.into()
+    }
 }
 
 impl Default for Builder {
@@ -428,7 +434,9 @@ pub struct Schedule {
 
 impl Schedule {
     /// Creates a new schedule builder.
-    pub fn builder() -> Builder { Builder::default() }
+    pub fn builder() -> Builder {
+        Builder::default()
+    }
 
     /// Executes all of the steps in the schedule.
     pub fn execute(&mut self, world: &mut World) {
@@ -448,7 +456,9 @@ impl Schedule {
     }
 
     /// Converts the schedule into a vector of steps.
-    pub fn into_vec(self) -> Vec<Step> { self.steps }
+    pub fn into_vec(self) -> Vec<Step> {
+        self.steps
+    }
 }
 
 impl From<Builder> for Schedule {
@@ -460,7 +470,9 @@ impl From<Builder> for Schedule {
 }
 
 impl From<Vec<Step>> for Schedule {
-    fn from(steps: Vec<Step>) -> Self { Self { steps } }
+    fn from(steps: Vec<Step>) -> Self {
+        Self { steps }
+    }
 }
 
 #[cfg(test)]

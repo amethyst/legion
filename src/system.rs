@@ -307,7 +307,7 @@ where
 
     /// Iterates through all entity data that matches the query.
     #[inline]
-    pub fn for_each_immutable<'a, 'data, T>(&'a self, world: &SubWorld, f: T)
+    pub fn for_each<'a, 'data, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
         V: ReadOnly,
@@ -318,7 +318,7 @@ where
 
     /// Iterates through all entity data that matches the query.
     #[inline]
-    pub fn for_each<'a, 'data, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn for_each_mut<'a, 'data, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
@@ -589,7 +589,9 @@ where
             bitset.insert(id);
         });
     }
-    unsafe fn prepare(&mut self) -> Self::Queries { SystemQuery::<AV, AF>::new(self) }
+    unsafe fn prepare(&mut self) -> Self::Queries {
+        SystemQuery::<AV, AF>::new(self)
+    }
 }
 
 impl_queryset_tuple!(A);
@@ -749,7 +751,9 @@ impl SubWorld {
 
     /// Determines if the given `Entity` is alive within this `World`.
     #[inline]
-    pub fn is_alive(&self, entity: Entity) -> bool { unsafe { (*self.world).is_alive(entity) } }
+    pub fn is_alive(&self, entity: Entity) -> bool {
+        unsafe { (*self.world).is_alive(entity) }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -828,7 +832,9 @@ where
         Queries = <Q as QuerySet>::Queries,
     >,
 {
-    fn name(&self) -> &SystemId { &self.name }
+    fn name(&self) -> &SystemId {
+        &self.name
+    }
 
     fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) {
         (&self.access.resources.reads, &self.access.components.reads)
@@ -846,9 +852,13 @@ where
         }
     }
 
-    fn accesses_archetypes(&self) -> &ArchetypeAccess { &self.archetypes }
+    fn accesses_archetypes(&self) -> &ArchetypeAccess {
+        &self.archetypes
+    }
 
-    fn command_buffer_mut(&self) -> RefMut<CommandBuffer> { self.command_buffer.get_mut() }
+    fn command_buffer_mut(&self) -> RefMut<CommandBuffer> {
+        self.command_buffer.get_mut()
+    }
 
     fn run(&self, world: &World) {
         let span = span!(Level::INFO, "System", system = %self.name);
