@@ -235,7 +235,7 @@ impl Executor {
     /// Only enabled with par-schedule is disabled
     #[cfg(not(feature = "par-schedule"))]
     pub fn run_systems(&mut self, world: &mut World) {
-        self.systems.iter_mut().for_each_mut(|system| {
+        self.systems.iter_mut().for_each(|system| {
             system.run(world);
         });
     }
