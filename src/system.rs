@@ -258,7 +258,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query.
     #[inline]
-    pub fn iter_immutable<'a, 'data>(
+    pub fn iter<'a, 'data>(
         &'a self,
         world: &SubWorld,
     ) -> ChunkDataIter<
@@ -275,7 +275,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query.
     #[inline]
-    pub fn iter<'a, 'data>(
+    pub fn iter_mut<'a, 'data>(
         &'a self,
         world: &mut SubWorld,
     ) -> ChunkDataIter<
@@ -1646,7 +1646,7 @@ mod tests {
         let system2 = SystemBuilder::<()>::new("TestSystem2")
             .with_query(<(Write<Comp1>, Read<Comp2>)>::query())
             .build(move |_, world, _, query| {
-                query.iter(world).for_each(|(mut one, two)| {
+                query.iter_mut(world).for_each(|(mut one, two)| {
                     one.0 = 456.;
                     one.1 = 456.;
                     one.2 = 456.;
@@ -1660,7 +1660,7 @@ mod tests {
         let system3 = SystemBuilder::<()>::new("TestSystem3")
             .with_query(<(Write<Comp1>, Write<Comp2>)>::query())
             .build(move |_, world, _, query| {
-                query.iter(world).for_each(|(mut one, two)| {
+                query.iter_mut(world).for_each(|(mut one, two)| {
                     assert_eq!(one.0, 456.);
                     assert_eq!(one.1, 456.);
                     assert_eq!(one.2, 456.);
@@ -1696,7 +1696,7 @@ mod tests {
         let system5 = SystemBuilder::<()>::new("TestSystem5")
             .with_query(<(Write<Comp1>, Write<Comp2>)>::query())
             .build(move |_, world, _, query| {
-                query.iter(world).for_each(|(mut one, mut two)| {
+                query.iter_mut(world).for_each(|(mut one, mut two)| {
                     assert_eq!(one.0, 789.);
                     assert_eq!(one.1, 789.);
                     assert_eq!(one.2, 789.);

@@ -900,7 +900,7 @@ where
 /// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
 /// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
-/// for (mut pos, vel, model) in query.iter(&mut world) {
+/// for (mut pos, vel, model) in query.iter_mut(&mut world) {
 ///     // `.iter` yields tuples of references to a single entity's data:
 ///     // pos: &mut Position
 ///     // vel: &Velocity
@@ -1092,7 +1092,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query.
-    pub fn iter_immutable<'a, 'data>(
+    pub fn iter<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkDataIter<
@@ -1108,7 +1108,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query.
-    pub fn iter<'a, 'data>(
+    pub fn iter_mut<'a, 'data>(
         &'a self,
         world: &'data mut World,
     ) -> ChunkDataIter<

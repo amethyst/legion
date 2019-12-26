@@ -84,7 +84,7 @@ fn query_try_write_entity_data() {
     let entity = world.insert((), Some((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))))[0];
 
     let query = TryWrite::<Rot>::query();
-    for mut x in query.iter(&mut world).filter_map(|x| x) {
+    for mut x in query.iter_mut(&mut world).filter_map(|x| x) {
         *x = Rot(9.0, 9.0, 9.0);
     }
     assert_eq!(
@@ -494,7 +494,7 @@ fn query_on_changed_self_changes() {
     assert_eq!(components.len(), count);
 
     count = 0;
-    for pos in query.iter(&mut world) {
+    for pos in query.iter_mut(&mut world) {
         assert_eq!(Pos(1., 1., 1.), *pos);
         count += 1;
     }
@@ -525,7 +525,7 @@ fn query_try_with_changed_filter() {
         <(Write<Sum>, TryRead<A>, TryRead<B>)>::query().filter(changed::<A>() | changed::<B>());
 
     let mut count = 0;
-    for (mut sum, a, b) in query.iter(&mut world) {
+    for (mut sum, a, b) in query.iter_mut(&mut world) {
         sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
         count += 1;
     }
@@ -548,7 +548,7 @@ fn query_try_with_changed_filter() {
     );
 
     count = 0;
-    for (mut sum, a, b) in query.iter(&mut world) {
+    for (mut sum, a, b) in query.iter_mut(&mut world) {
         sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
         count += 1;
     }
@@ -556,7 +556,7 @@ fn query_try_with_changed_filter() {
 
     *world.get_component_mut::<B>(a_b_entity).unwrap() = B(3.0);
     count = 0;
-    for (mut sum, a, b) in query.iter(&mut world) {
+    for (mut sum, a, b) in query.iter_mut(&mut world) {
         sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
         count += 1;
     }
