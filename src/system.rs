@@ -205,7 +205,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     #[inline]
-    pub fn iter_entities_immutable<'a, 'b>(
+    pub fn iter_entities<'a, 'b>(
         &'b self,
         world: &SubWorld,
     ) -> ChunkEntityIter<
@@ -222,7 +222,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     #[inline]
-    pub fn iter_entities<'a, 'b>(
+    pub fn iter_entities_mut<'a, 'b>(
         &'b self,
         world: &mut SubWorld,
     ) -> ChunkEntityIter<
@@ -943,7 +943,7 @@ where
 ///            .build(move |commands, world, resource, queries| {
 ///               let mut count = 0;
 ///                {
-///                    for (entity, pos) in queries.iter_entities(&mut *world) {
+///                    for (entity, pos) in queries.iter_entities_mut(&mut *world) {
 ///
 ///                    }
 ///                }
@@ -1324,7 +1324,7 @@ mod tests {
                 assert_eq!(resource.0, 123);
                 let mut count = 0;
                 {
-                    for (entity, pos) in queries.0.iter_entities_immutable(world) {
+                    for (entity, pos) in queries.0.iter_entities(world) {
                         assert_eq!(expected.get(&entity).unwrap().0, *pos);
                         count += 1;
                     }
@@ -1399,7 +1399,7 @@ mod tests {
             .build(move |_, world, _, query| {
                 let mut count = 0;
                 {
-                    for (entity, (pos, vel)) in query.iter_entities_immutable(world) {
+                    for (entity, (pos, vel)) in query.iter_entities(world) {
                         assert_eq!(expected_copy.get(&entity).unwrap().0, *pos);
                         assert_eq!(expected_copy.get(&entity).unwrap().1, *vel);
                         count += 1;
@@ -1446,7 +1446,7 @@ mod tests {
             .build(move |command_buffer, world, _, query| {
                 let mut count = 0;
                 {
-                    for (entity, (pos, vel)) in query.iter_entities_immutable(world) {
+                    for (entity, (pos, vel)) in query.iter_entities(world) {
                         assert_eq!(expected_copy.get(&entity).unwrap().0, *pos);
                         assert_eq!(expected_copy.get(&entity).unwrap().1, *vel);
                         count += 1;

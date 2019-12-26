@@ -485,7 +485,7 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
 
     /// Get an iterator of all data and entity IDs contained within the chunk.
     #[inline]
-    pub fn iter_entities(&mut self) -> ZipEntities<'a, V> {
+    pub fn iter_entities_mut(&mut self) -> ZipEntities<'a, V> {
         ZipEntities {
             entities: self.entities(),
             data: V::fetch(self.archetype, self.components, self.index),
@@ -732,7 +732,7 @@ where
                 }
             }
             match self.iter.next() {
-                Some(mut inner) => self.frontier = Some(inner.iter_entities()),
+                Some(mut inner) => self.frontier = Some(inner.iter_entities_mut()),
                 None => return None,
             }
         }
@@ -966,7 +966,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
-    pub fn iter_entities_immutable<'a, 'data>(
+    pub fn iter_entities<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkEntityIter<
@@ -982,7 +982,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
-    pub fn iter_entities<'a, 'data>(
+    pub fn iter_entities_mut<'a, 'data>(
         &'a self,
         world: &'data mut World,
     ) -> ChunkEntityIter<
@@ -1208,7 +1208,7 @@ where
         <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
     {
         self.par_for_each_chunk_unchecked(world, |mut chunk| {
-            for data in chunk.iter_entities() {
+            for data in chunk.iter_entities_mut() {
                 f(data);
             }
         });
