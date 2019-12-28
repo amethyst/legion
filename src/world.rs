@@ -393,7 +393,7 @@ impl World {
             .archetypes()
             .get(source_location.archetype())
             .unwrap();
-        let mut tags = source_archetype.tags().tag_set(source_location.chunk());
+        let mut tags = source_archetype.tags().tag_set(source_location.set());
         for type_id in remove_tags.iter() {
             tags.remove(*type_id);
         }
@@ -1446,7 +1446,7 @@ mod tests {
         let mut world = create();
 
         let entity = world.insert((), vec![()])[0];
-        world.add_component(entity, Pos(1., 2., 3.));
+        world.add_component(entity, Pos(1., 2., 3.)).unwrap();
 
         let components = vec![
             (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -1457,7 +1457,7 @@ mod tests {
         world.insert_buffered(&entities, (), IntoComponentSource::into(components.clone()));
 
         for (i, e) in entities.iter().enumerate() {
-            world.add_component(*e, Scale(2., 2., 2.));
+            world.add_component(*e, Scale(2., 2., 2.)).unwrap();
             assert_eq!(
                 components.get(i).unwrap().0,
                 *world.get_component(*e).unwrap()
@@ -1659,7 +1659,7 @@ mod tests {
         let entities = world.insert((Static,), components.clone()).to_vec();
 
         for (i, e) in entities.iter().enumerate() {
-            world.add_component(*e, Scale(2., 2., 2.));
+            world.add_component(*e, Scale(2., 2., 2.)).unwrap();
             assert_eq!(
                 components.get(i).unwrap().0,
                 *world.get_component(*e).unwrap()
@@ -1758,12 +1758,14 @@ mod tests {
         }
         let mut world = create();
         let entity = world.insert((5u32,), vec![(3u32,)])[0];
-        world.add_component::<Transform>(
-            entity,
-            Transform {
-                translation: vec![0., 1., 2.],
-            },
-        );
+        world
+            .add_component::<Transform>(
+                entity,
+                Transform {
+                    translation: vec![0., 1., 2.],
+                },
+            )
+            .unwrap();
     }
 
     #[test]

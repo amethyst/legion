@@ -37,6 +37,14 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
+
+        tracing::trace!(
+            "insert_buffered, ({}. {}), {:?}",
+            std::any::type_name::<T>(),
+            std::any::type_name::<C>(),
+            consumed.entities
+        );
+
         world.insert_buffered(&consumed.entities, consumed.tags, consumed.components);
     }
 
@@ -61,6 +69,11 @@ where
     C: IntoComponentSource,
 {
     fn write(self: Arc<Self>, world: &mut World) {
+        tracing::trace!(
+            "insert, ({}. {})",
+            std::any::type_name::<T>(),
+            std::any::type_name::<C>()
+        );
         let consumed = Arc::try_unwrap(self).unwrap();
         world.insert(consumed.tags, consumed.components);
     }
@@ -73,7 +86,10 @@ where
 #[derivative(Debug(bound = ""))]
 struct DeleteEntityCommand(Entity);
 impl WorldWritable for DeleteEntityCommand {
-    fn write(self: Arc<Self>, world: &mut World) { world.delete(self.0); }
+    fn write(self: Arc<Self>, world: &mut World) {
+        tracing::trace!("delete_entity, type = {}", self.0);
+        world.delete(self.0);
+    }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
     fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
@@ -92,6 +108,7 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
+        tracing::trace!("add_tag, type = {}", std::any::type_name::<T>());
         world.add_tag(consumed.entity, consumed.tag)
     }
 
@@ -109,7 +126,14 @@ impl<T> WorldWritable for RemoveTagCommand<T>
 where
     T: Tag,
 {
-    fn write(self: Arc<Self>, world: &mut World) { world.remove_tag::<T>(self.entity) }
+    fn write(self: Arc<Self>, world: &mut World) {
+        tracing::trace!(
+            "remove_tag, type = {}, entity = {:?}",
+            std::any::type_name::<T>(),
+            self.entity
+        );
+        world.remove_tag::<T>(self.entity)
+    }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
     fn write_tags(&self) -> Vec<TagTypeId> { vec![TagTypeId::of::<T>()] }
@@ -129,6 +153,11 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
+        tracing::trace!(
+            "add_component, type = {}, entity = {:?}",
+            std::any::type_name::<C>(),
+            consumed.entity
+        );
         world
             .add_component::<C>(consumed.entity, consumed.component)
             .unwrap();
@@ -148,7 +177,10 @@ impl<C> WorldWritable for RemoveComponentCommand<C>
 where
     C: Component,
 {
-    fn write(self: Arc<Self>, world: &mut World) { world.remove_component::<C>(self.entity) }
+    fn write(self: Arc<Self>, world: &mut World) {
+        tracing::trace!("remove_component, type = {}", std::any::type_name::<C>());
+        world.remove_component::<C>(self.entity)
+    }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }
     fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
@@ -433,6 +465,12 @@ impl CommandBuffer {
                 _marker: PhantomData::<T>::default(),
             })));
     }
+
+    #[inline]
+    pub fn len(&self) -> usize { self.commands.get().len() }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool { self.commands.get().len() == 0 }
 }
 
 #[cfg(test)]
