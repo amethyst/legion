@@ -751,7 +751,7 @@ impl ArchetypeData {
                     let free_chunk_index = self.get_free_chunk(self_set_index, entities_remaining);
                     let target_chunk_set = &mut self.chunk_sets[self_set_index];
                     let chunk = &mut target_chunk_set.chunks[free_chunk_index];
-                    let entities_to_write = std::cmp::min(entities_remaining, chunk.capacity());
+                    let entities_to_write = std::cmp::min(entities_remaining, chunk.capacity() - chunk.len());
                     let mut writer = chunk.writer();
                     let (dst_entities, dst_components) = writer.get();
                     let dst_components = unsafe { &mut *dst_components.get() };
@@ -776,7 +776,7 @@ impl ArchetypeData {
 
                             let comp_dst = self_comp_storage.reserve_raw(entities_to_write).as_ptr();
                             c.clone(&src_type.1, &dst_type_meta, comp_src, comp_dst, entities_to_write);
-                            println!("cloned {} entities for type {:?} to type {:?} from chunk {} to chunk {}", entities_to_write, src_type.0, dst_type, other_chunk_idx, free_chunk_index );
+                            println!("cloned {} entities for type {:?} to type {:?} from chunk {} to chunk {}, starting at src idx {} and writing to dst idx {}", entities_to_write, src_type.0, dst_type, other_chunk_idx, free_chunk_index, entity_start_idx, dst_entities.len() - entities_to_write);
                         }
                     }
                     entities_remaining -= entities_to_write;
