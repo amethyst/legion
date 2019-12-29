@@ -627,19 +627,19 @@ impl ArchetypeData {
 
     pub(crate) fn merge(&mut self, mut other: ArchetypeData) {
         let other_tags = &other.tags;
-        for (i, mut set) in other.chunk_sets.drain(..).enumerate() {
+        for (other_index, mut set) in other.chunk_sets.drain(..).enumerate() {
             // search for a matching chunk set
             let mut set_match = None;
-            for index in 0..self.chunk_sets.len() {
+            for self_index in 0..self.chunk_sets.len() {
                 let mut matches = true;
                 for (type_id, tags) in self.tags.0.iter() {
                     unsafe {
-                        let (a_ptr, size, _) = tags.data_raw();
-                        let (b_ptr, _, _) = other_tags.get(*type_id).unwrap().data_raw();
+                        let (self_tag_ptr, size, _) = tags.data_raw();
+                        let (other_tag_ptr, _, _) = other_tags.get(*type_id).unwrap().data_raw();
 
                         if !tags.element().equals(
-                            a_ptr.as_ptr().add(index * size),
-                            b_ptr.as_ptr().add(i * size),
+                            self_tag_ptr.as_ptr().add(self_index * size),
+                            other_tag_ptr.as_ptr().add(other_index * size),
                         ) {
                             matches = false;
                             break;
@@ -648,7 +648,7 @@ impl ArchetypeData {
                 }
 
                 if matches {
-                    set_match = Some(index);
+                    set_match = Some(self_index);
                     break;
                 }
             }
