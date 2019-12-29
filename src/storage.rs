@@ -648,7 +648,7 @@ impl ArchetypeData {
                 }
 
                 if matches {
-                    set_match = Some(i);
+                    set_match = Some(index);
                     break;
                 }
             }
