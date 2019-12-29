@@ -635,33 +635,64 @@ impl ArchetypeData {
     /// Gets the unique ID of this archetype.
     pub fn id(&self) -> ArchetypeId { self.id }
 
+    fn find_chunk_set_by_tags(&self, other_tags: &Tags, other_set_index: usize) -> Option<usize> {
+        // search for a matching chunk set
+        let mut set_match = None;
+        for self_set_index in 0..self.chunk_sets.len() {
+            let mut matches = true;
+            for (type_id, tags) in self.tags.0.iter() {
+                unsafe {
+                    let (a_ptr, size, _) = tags.data_raw();
+                    let (b_ptr, _, _) = other_tags.get(*type_id).unwrap().data_raw();
+
+                    if !tags.element().equals(
+                        a_ptr.as_ptr().add(self_set_index * size),
+                        b_ptr.as_ptr().add(other_set_index * size),
+                    ) {
+                        matches = false;
+                        break;
+                    }
+                }
+            }
+
+            if matches {
+                set_match = Some(self_set_index);
+                break;
+            }
+        }
+
+        set_match
+    }
+
     pub(crate) fn merge(&mut self, mut other: ArchetypeData) {
         let other_tags = &other.tags;
         for (other_index, mut set) in other.chunk_sets.drain(..).enumerate() {
             // search for a matching chunk set
-            let mut set_match = None;
-            for self_index in 0..self.chunk_sets.len() {
-                let mut matches = true;
-                for (type_id, tags) in self.tags.0.iter() {
-                    unsafe {
-                        let (self_tag_ptr, size, _) = tags.data_raw();
-                        let (other_tag_ptr, _, _) = other_tags.get(*type_id).unwrap().data_raw();
+            //            let mut set_match = None;
+            //            for self_index in 0..self.chunk_sets.len() {
+            //                let mut matches = true;
+            //                for (type_id, tags) in self.tags.0.iter() {
+            //                    unsafe {
+            //                        let (a_ptr, size, _) = tags.data_raw();
+            //                        let (b_ptr, _, _) = other_tags.get(*type_id).unwrap().data_raw();
+            //
+            //                        if !tags.element().equals(
+            //                            a_ptr.as_ptr().add(self_index * size),
+            //                            b_ptr.as_ptr().add(other_index * size),
+            //                        ) {
+            //                            matches = false;
+            //                            break;
+            //                        }
+            //                    }
+            //                }
+            //
+            //                if matches {
+            //                    set_match = Some(self_index);
+            //                    break;
+            //                }
+            //            }
 
-                        if !tags.element().equals(
-                            self_tag_ptr.as_ptr().add(self_index * size),
-                            other_tag_ptr.as_ptr().add(other_index * size),
-                        ) {
-                            matches = false;
-                            break;
-                        }
-                    }
-                }
-
-                if matches {
-                    set_match = Some(self_index);
-                    break;
-                }
-            }
+            let mut set_match = self.find_chunk_set_by_tags(&other_tags, other_index);
 
             if let Some(chunk_set) = set_match {
                 // if we found a match, move the chunks into the set
@@ -684,6 +715,74 @@ impl ArchetypeData {
         }
 
         self.tags.validate(self.chunk_sets.len());
+    }
+
+    pub(crate) fn clone_merge<C: crate::world::CloneImpl>(&mut self, other: &ArchetypeData, c: &C) {
+        println!(
+            "clone_merge on {:?} {:?}",
+            self.desc.tag_names, self.desc.component_names
+        );
+
+        let other_tags = &other.tags;
+        for (other_set_index, other_chunk_set) in other.chunk_sets.iter().enumerate() {
+            println!("handling chunk set");
+
+            let self_set_index = self.find_chunk_set_by_tags(&other_tags, other_set_index);
+            println!("Match: {:?}", self_set_index);
+
+            let self_set_index = self_set_index.unwrap_or_else(|| {
+                println!("Creating new chunk set");
+                self.alloc_chunk_set(|self_tags| {
+                    for (type_id, other_tags) in other_tags.0.iter() {
+                        unsafe {
+                            let (src, _, _) = other_tags.data_raw();
+                            let dst = self_tags.get_mut(*type_id).unwrap().alloc_ptr();
+                            other_tags.element().clone(src.as_ptr(), dst);
+                        }
+                    }
+                })
+            });
+
+            for (other_chunk_idx, other_chunk) in other_chunk_set.chunks.iter().enumerate() {
+                println!("Pulling data from other chunk set");
+
+                let mut entities_remaining = other_chunk.len();
+                while entities_remaining > 0 {
+                    let free_chunk_index = self.get_free_chunk(self_set_index, entities_remaining);
+                    let target_chunk_set = &mut self.chunk_sets[self_set_index];
+                    let chunk = &mut target_chunk_set.chunks[free_chunk_index];
+                    let entities_to_write = std::cmp::min(entities_remaining, chunk.capacity());
+                    let mut writer = chunk.writer();
+                    let (dst_entities, dst_components) = writer.get();
+                    let dst_components = unsafe { &mut *dst_components.get() };
+                    let entity_start_idx = other_chunk.len() - entities_remaining;
+                    dst_entities.extend_from_slice(
+                        &other_chunk.entities[entity_start_idx..entities_to_write],
+                    );
+                    // TODO set entity location and REMOVE THE ENTITY ID IF IT ALREADY EXISTS??
+                    for src_type in other.description().components() {
+                        let (dst_type, dst_type_meta) = c.map_component_type(src_type);
+                        let mut self_comp_storage = dst_components
+                            .get_mut(dst_type)
+                            .expect("ComponentResourceSet missing in clone_merge")
+                            .writer();
+                        let other_comp_storage = other_chunk
+                            .components(src_type.0)
+                            .expect("ComponentResourceSet missing in clone_merge");
+                        let (comp_src, src_element_size, _) = other_comp_storage.data_raw();
+                        unsafe {
+                            // offset to the first entity we want to copy
+                            let comp_src = comp_src.add(src_element_size * entity_start_idx);
+
+                            let comp_dst = self_comp_storage.reserve_raw(entities_to_write).as_ptr();
+                            c.clone(&src_type.1, &dst_type_meta, comp_src, comp_dst, entities_to_write);
+                            println!("cloned {} entities for type {:?} to type {:?} from chunk {} to chunk {}", entities_to_write, src_type.0, dst_type, other_chunk_idx, free_chunk_index );
+                        }
+                    }
+                    entities_remaining -= entities_to_write;
+                }
+            }
+        }
     }
 
     pub(crate) fn enumerate_entities<'a>(
