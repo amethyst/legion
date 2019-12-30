@@ -761,8 +761,9 @@ impl ArchetypeData {
         other: &ArchetypeData,
         archetype_index: usize,
         entity_allocator: &mut crate::entity::EntityAllocator,
-        entity_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
+        resources: &crate::resource::Resources,
         clone_impl: &C,
+        entity_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
     ) {
         println!(
             "clone_merge on {:?} {:?}",
@@ -889,7 +890,14 @@ impl ArchetypeData {
                                 self_comp_storage.reserve_raw(entities_to_write).as_ptr();
 
                             // Delegate the clone operation to the provided CloneImpl
-                            clone_impl.clone(&dst_entities[src_entity_start_idx..src_entity_end_idx], *src_type, comp_src, comp_dst, entities_to_write);
+                            clone_impl.clone_components(
+                                resources,
+                                *src_type,
+                                &dst_entities[src_entity_start_idx..src_entity_end_idx],
+                                comp_src,
+                                comp_dst,
+                                entities_to_write,
+                            );
 
                             // Component storages are dense (swap-removes are used to keep them from becoming fragmented.) This means
                             // the open slots in the chunk are at the end. We extended dst_entities all at once above so we can offset

@@ -902,8 +902,9 @@ impl World {
                     old_archetype,
                     arch_index,
                     &mut self.entity_allocator,
-                    entity_mappings,
+                    &mut self.resources,
                     clone_impl,
+                    entity_mappings,
                 );
         }
     }
@@ -1000,10 +1001,11 @@ pub trait CloneImpl {
         component_type: ComponentTypeId,
     ) -> (ComponentTypeId, ComponentMeta);
 
-    fn clone(
+    fn clone_components(
         &self,
-        entities: &[Entity],
+        resources: &Resources,
         src_type: ComponentTypeId,
+        entities: &[Entity],
         src_data: *const u8,
         dst_data: *mut u8,
         num_components: usize,
