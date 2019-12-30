@@ -293,18 +293,9 @@ impl World {
         }
 
         if self.entity_allocator.delete_entity(entity) {
-            // find entity's chunk
             let location = self.entity_locations.get(entity).unwrap();
-            let chunk = self.storage_mut().chunk_mut(location).unwrap();
-
-            // swap remove with last entity in chunk
-            if let Some(swapped) = chunk.swap_remove(location.component(), true) {
-                // record swapped entity's new location
-                self.entity_locations.set(swapped, location);
-            }
-
+            self.delete_location(location);
             trace!(world = self.id().0, ?entity, "Deleted entity");
-
             true
         } else {
             false
@@ -318,6 +309,20 @@ impl World {
         }
 
         self.entity_allocator.delete_all_entities();
+    }
+
+    fn delete_location(&mut self, location: EntityLocation) {
+        // find entity's chunk
+        let chunk = self
+            .storage_mut()
+            .chunk_mut(location)
+            .unwrap();
+
+        // swap remove with last entity in chunk
+        if let Some(swapped) = chunk.swap_remove(location.component(), true) {
+            // record swapped entity's new location
+            self.entity_locations.set(swapped, location);
+        }
     }
 
     fn find_chunk_with_delta(
@@ -813,12 +818,42 @@ impl World {
         }
     }
 
-    pub fn clone_merge<C: CloneImpl>(&mut self, world: &World, clone_impl: &C) {
+    pub fn clone_merge<C: CloneImpl>(
+        &mut self,
+        world: &World,
+        clone_impl: &C,
+        entity_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
+    ) {
         let span = span!(Level::INFO, "CloneMerging worlds", source = world.id().0, destination = ?self.id());
         let _guard = span.enter();
 
         let old_storage = unsafe { &(*world.storage.get()) };
         let new_storage = unsafe { &mut (*self.storage.get()) };
+
+        // Erase all entities that are referred to by value. The code following will update the location
+        // of all these entities to point to new, valid locations
+        if let Some(entity_mappings) = entity_mappings {
+            //TODO: Compile this out in release?
+            for (k, _) in entity_mappings {
+                if !world.entity_allocator.is_alive(*k) {
+                    panic!("clone_merge assumes all entity_mapping keys exist in the source world");
+                }
+            }
+
+            for (_, v) in entity_mappings {
+                if self.entity_allocator.is_alive(*v) {
+                    let location = self
+                        .entity_allocator
+                        .get_location(v.index())
+                        .expect("Failed to get location of live entity");
+                    self.delete_location(location);
+
+                    println!("Delete the data for entity {:?} at {:?}", v, location)
+                } else {
+                    panic!("clone_merge assumes all entity_mapping values exist in the destination world");
+                }
+            }
+        }
 
         // Iterate all archetypes in the old world
         for old_archetype in old_storage.archetypes() {
@@ -863,7 +898,13 @@ impl World {
                 .archetypes_mut()
                 .get_mut(arch_index)
                 .unwrap()
-                .clone_merge(old_archetype, &mut self.entity_allocator, clone_impl);
+                .clone_merge(
+                    old_archetype,
+                    arch_index,
+                    &mut self.entity_allocator,
+                    entity_mappings,
+                    clone_impl,
+                );
         }
     }
 

@@ -759,7 +759,9 @@ impl ArchetypeData {
     pub(crate) fn clone_merge<C: crate::world::CloneImpl>(
         &mut self,
         other: &ArchetypeData,
+        archetype_index: usize,
         entity_allocator: &mut crate::entity::EntityAllocator,
+        entity_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
         clone_impl: &C,
     ) {
         println!(
@@ -811,20 +813,53 @@ impl ArchetypeData {
                     let src_entity_start_idx = other_chunk.len() - entities_remaining;
                     let src_entity_end_idx = src_entity_start_idx + entities_to_write;
 
-                    // Copy all the entities to the destination chunk.
-                    // TODO: This is dangerous because these entities could already exist elsewhere.
-                    // - First pass: allocate new entities
-                    // - Second pass: Allow end-user to specify a HashMap<Entity, Entity>. For each entity we copy,
-                    //   if it exists as a key within the map, then we insert the corresponding value into the
-                    //   destination chunk instead. We would also want to delete all entities that exist as a
-                    //   matching *value* - The rationale of this behavior is to support hot-reload of data, where
-                    //   we want to respawn entities using new data.
+                    // Copy all the entities to the destination chunk. The normal case is that we simply allocate
+                    // new entities.
+                    //
+                    // We also allow end-user to specify a HashMap<Entity, Entity>. The key is an Entity from
+                    // the source chunk and the value is an Entity from the destination chunk. Rather than appending
+                    // data to the destination chunk, we will *replace* the data, according to the mapping. This
+                    // is specifically intended for use with hot-reloading data. When some source data is changed,
+                    // we can use the mapping to respawn entities as needed using the new data.
 
-                    // For each entity we are copying over from the source chunk, allocate a new entity
+                    // We know how many entities will be appended to this list
                     dst_entities.reserve(dst_entities.len() + entities_to_write);
-                    for _ in 0..entities_to_write {
-                        dst_entities.push(entity_allocator.create_entity());
-                        println!("Allocated entity {:?}", dst_entities.last().unwrap());
+
+                    for src_entity_idx in src_entity_start_idx..src_entity_end_idx {
+                        // The location of the next entity
+                        let location = EntityLocation::new(
+                            archetype_index,
+                            self_set_index,
+                            free_chunk_index,
+                            dst_entities.len(),
+                        );
+
+                        // Determine if there is an entity we will be replacing
+                        let dst_entity = entity_mappings
+                            .and_then(|x| x.get(&other_chunk.entities[src_entity_idx]));
+
+                        let entity = if let Some(dst_entity) = dst_entity {
+                            // We are replacing data
+                            // Verify that the entity is alive.. this checks the index and version of the entity
+                            //TODO: This check may not be needed in release mode since World::clone_merge checks it
+                            assert!(entity_allocator.is_alive(*dst_entity));
+                            println!(
+                                "Remapping entity {:?} to location {:?}",
+                                dst_entity, location
+                            );
+                            *dst_entity
+                        } else {
+                            // We are appending data, allocate a new entity
+                            let new_entity = entity_allocator.create_entity();
+                            println!(
+                                "Allocating entity {:?} for location {:?}",
+                                new_entity, location
+                            );
+                            new_entity
+                        };
+
+                        entity_allocator.set_location(entity.index(), location);
+                        dst_entities.push(entity);
                     }
 
                     // Walk through each component type to copy the data from the source chunk to the destination chunk
@@ -854,12 +889,7 @@ impl ArchetypeData {
                                 self_comp_storage.reserve_raw(entities_to_write).as_ptr();
 
                             // Delegate the clone operation to the provided CloneImpl
-                            clone_impl.clone(
-                                *src_type,
-                                comp_src,
-                                comp_dst,
-                                entities_to_write,
-                            );
+                            clone_impl.clone(*src_type, comp_src, comp_dst, entities_to_write);
 
                             // Component storages are dense (swap-removes are used to keep them from becoming fragmented.) This means
                             // the open slots in the chunk are at the end. We extended dst_entities all at once above so we can offset
