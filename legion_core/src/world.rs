@@ -813,7 +813,7 @@ impl World {
         }
     }
 
-    pub fn clone_merge<C: CloneImpl>(&mut self, world: &World, c: &C) {
+    pub fn clone_merge<C: CloneImpl>(&mut self, world: &World, clone_impl: &C) {
         let span = span!(Level::INFO, "CloneMerging worlds", source = world.id().0, destination = ?self.id());
         let _guard = span.enter();
 
@@ -830,14 +830,23 @@ impl World {
             // See if we need to transform from one type into another
             let mut new_archetype = ArchetypeDescription::default();
             for component_type in old_archetype.description().components() {
-                let (type_id, meta) = c.map_component_type(component_type);
+                let (type_id, meta) = clone_impl.map_component_type(component_type);
                 new_archetype.register_component_raw(type_id, meta);
 
-                println!("map {:?} of size {} to {:?} of size {}", component_type.0, component_type.1.size(), type_id, meta.size());
+                println!(
+                    "map {:?} of size {} to {:?} of size {}",
+                    component_type.0,
+                    component_type.1.size(),
+                    type_id,
+                    meta.size()
+                );
             }
 
             // Find or create the archetype in the new world
-            let matches = new_archetype.matches(archetype_data).matching_indices().next();
+            let matches = new_archetype
+                .matches(archetype_data)
+                .matching_indices()
+                .next();
             let arch_index = if let Some(arch_index) = matches {
                 println!("found archetype");
                 arch_index
@@ -846,59 +855,12 @@ impl World {
                 new_storage.alloc_archetype(new_archetype).0
             };
 
-            // Need to allocate entities and pass them in here? Or pass down the entity allocator?
-            // self.entity_allocator.create_entity()
-
             new_storage
                 .archetypes_mut()
                 .get_mut(arch_index)
                 .unwrap()
-                .clone_merge(old_archetype, c);
+                .clone_merge(old_archetype, &mut self.entity_allocator, clone_impl);
         }
-
-
-
-        // for each archetype, for each chunk... allocate archetypes/chunks
-/*
-        let old_storage = unsafe { &(*world.storage.get()) };
-        let new_storage = unsafe { &mut (*self.storage.get()) };
-        for old_archetype in old_storage.archetypes() {
-            let new_archetype = new_storage.archetypes().iter().filter(|new_archetype| old_archetype.description() == new_archetype.description()).nth(0);
-
-            let new_archetype = if let Some(new_archetype) = new_archetype {
-                new_archetype
-            } else {
-                let index = new_storage.alloc_archetype(old_archetype.clone());
-            };
-
-
-//            let archetype_data = ArchetypeFilterData {
-//                component_types: self.storage().component_types(),
-//                tag_types: self.storage().tag_types(),
-//            };
-
-            //old_archetype.description().is_match()
-
-            //self.find_or_create_archetype()
-
-//            let new_archetype = old_archetype.description().matches(archetype_data)
-//                .zip(old_archetype.description().matches(archetype_data))
-//                .enumerate()
-//                .take(self.storage().archetypes().len())
-//                .filter(|(_, (a, b))| *a && *b)
-//                .map(|(i, _)| i)
-//                .next();
-
-            //self.storage.get()
-            //old_archetype.description().
-
-//            for old_chunkset in old_archetype.chunksets() {
-//
-//            }
-        }
-        */
-
-
     }
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<ArchetypeIndex>
@@ -988,7 +950,10 @@ impl World {
 }
 
 pub trait CloneImpl {
-    fn map_component_type(&self, component_type: &(ComponentTypeId, ComponentMeta)) -> (ComponentTypeId, ComponentMeta);
+    fn map_component_type(
+        &self,
+        component_type: &(ComponentTypeId, ComponentMeta),
+    ) -> (ComponentTypeId, ComponentMeta);
 
     fn clone(
         &self,
@@ -996,7 +961,7 @@ pub trait CloneImpl {
         dst_type: &ComponentMeta,
         src_data: *const u8,
         dst_data: *mut u8,
-        num_components: usize
+        num_components: usize,
     );
 }
 

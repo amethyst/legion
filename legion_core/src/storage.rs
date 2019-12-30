@@ -756,7 +756,12 @@ impl ArchetypeData {
         self.tags.validate(self.chunk_sets.len());
     }
 
-    pub(crate) fn clone_merge<C: crate::world::CloneImpl>(&mut self, other: &ArchetypeData, c: &C) {
+    pub(crate) fn clone_merge<C: crate::world::CloneImpl>(
+        &mut self,
+        other: &ArchetypeData,
+        entity_allocator: &mut crate::entity::EntityAllocator,
+        clone_impl: &C,
+    ) {
         println!(
             "clone_merge on {:?} {:?}",
             self.desc.tag_names, self.desc.component_names
@@ -787,35 +792,92 @@ impl ArchetypeData {
 
                 let mut entities_remaining = other_chunk.len();
                 while entities_remaining > 0 {
+                    // Get or allocate a chunk.. since we could be transforming to a larger component size, it's possible
+                    // that even a brand-new, empty chunk won't be large enough to hold everything in the chunk we are copying from
                     let free_chunk_index = self.get_free_chunk(self_set_index, entities_remaining);
                     let target_chunk_set = &mut self.chunk_sets[self_set_index];
                     let chunk = &mut target_chunk_set.chunks[free_chunk_index];
-                    let entities_to_write = std::cmp::min(entities_remaining, chunk.capacity() - chunk.len());
+
+                    // Determine how many entities we will write
+                    let entities_to_write =
+                        std::cmp::min(entities_remaining, chunk.capacity() - chunk.len());
+
+                    // Prepare to write to the chunk storage
                     let mut writer = chunk.writer();
                     let (dst_entities, dst_components) = writer.get();
                     let dst_components = unsafe { &mut *dst_components.get() };
-                    let entity_start_idx = other_chunk.len() - entities_remaining;
-                    dst_entities.extend_from_slice(
-                        &other_chunk.entities[entity_start_idx..entities_to_write],
-                    );
-                    // TODO set entity location and REMOVE THE ENTITY ID IF IT ALREADY EXISTS??
+
+                    // Find the region of memory we will be reading from in the source chunk
+                    let src_entity_start_idx = other_chunk.len() - entities_remaining;
+                    let src_entity_end_idx = src_entity_start_idx + entities_to_write;
+
+                    // Copy all the entities to the destination chunk.
+                    // TODO: This is dangerous because these entities could already exist elsewhere.
+                    // - First pass: allocate new entities
+                    // - Second pass: Allow end-user to specify a HashMap<Entity, Entity>. For each entity we copy,
+                    //   if it exists as a key within the map, then we insert the corresponding value into the
+                    //   destination chunk instead. We would also want to delete all entities that exist as a
+                    //   matching *value* - The rationale of this behavior is to support hot-reload of data, where
+                    //   we want to respawn entities using new data.
+
+                    // For each entity we are copying over from the source chunk, allocate a new entity
+                    dst_entities.reserve(dst_entities.len() + entities_to_write);
+                    for _ in 0..entities_to_write {
+                        dst_entities.push(entity_allocator.create_entity());
+                        println!("Allocated entity {:?}", dst_entities.last().unwrap());
+                    }
+
+                    // Walk through each component type to copy the data from the source chunk to the destination chunk
                     for src_type in other.description().components() {
-                        let (dst_type, dst_type_meta) = c.map_component_type(src_type);
+                        // Look up what type we should transform the data into (can be the same type, meaning it should be cloned)
+                        let (dst_type, dst_type_meta) = clone_impl.map_component_type(src_type);
+                        let (src_type, src_type_meta) = src_type;
+
+                        // Create a writer that will insert the data into the destination chunk
                         let mut self_comp_storage = dst_components
                             .get_mut(dst_type)
                             .expect("ComponentResourceSet missing in clone_merge")
                             .writer();
+
+                        // Find the data in the source chunk
                         let other_comp_storage = other_chunk
-                            .components(src_type.0)
+                            .components(*src_type)
                             .expect("ComponentResourceSet missing in clone_merge");
                         let (comp_src, src_element_size, _) = other_comp_storage.data_raw();
-                        unsafe {
-                            // offset to the first entity we want to copy
-                            let comp_src = comp_src.add(src_element_size * entity_start_idx);
 
-                            let comp_dst = self_comp_storage.reserve_raw(entities_to_write).as_ptr();
-                            c.clone(&src_type.1, &dst_type_meta, comp_src, comp_dst, entities_to_write);
-                            println!("cloned {} entities for type {:?} to type {:?} from chunk {} to chunk {}, starting at src idx {} and writing to dst idx {}", entities_to_write, src_type.0, dst_type, other_chunk_idx, free_chunk_index, entity_start_idx, dst_entities.len() - entities_to_write);
+                        // Now copy the data
+                        unsafe {
+                            // offset to the first entity we want to copy from the source chunk
+                            let comp_src = comp_src.add(src_element_size * src_entity_start_idx);
+
+                            // allocate the space we need in the destination chunk
+                            let comp_dst =
+                                self_comp_storage.reserve_raw(entities_to_write).as_ptr();
+
+                            // Delegate the clone operation to the provided CloneImpl
+                            clone_impl.clone(
+                                &src_type_meta,
+                                &dst_type_meta,
+                                comp_src,
+                                comp_dst,
+                                entities_to_write,
+                            );
+
+                            // Component storages are dense (swap-removes are used to keep them from becoming fragmented.) This means
+                            // the open slots in the chunk are at the end. We extended dst_entities all at once above so we can offset
+                            // it by entities_to_write
+                            let dst_entity_start_idx = dst_entities.len() - entities_to_write;
+
+                            println!(
+                                "cloned {} entities for type {:?} to type {:?} from chunk {} to chunk {}, starting at src idx {} and writing to dst idx {}",
+                                entities_to_write,
+                                src_type.0,
+                                dst_type,
+                                other_chunk_idx,
+                                free_chunk_index,
+                                src_entity_start_idx,
+                                dst_entity_start_idx
+                            );
                         }
                     }
                     entities_remaining -= entities_to_write;
