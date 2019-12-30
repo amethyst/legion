@@ -875,6 +875,7 @@ pub trait CloneImpl {
 
     fn clone(
         &self,
+        entities: &[Entity],
         src_type: ComponentTypeId,
         src_data: *const u8,
         dst_data: *mut u8,
