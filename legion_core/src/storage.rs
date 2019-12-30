@@ -828,10 +828,9 @@ impl ArchetypeData {
                     }
 
                     // Walk through each component type to copy the data from the source chunk to the destination chunk
-                    for src_type in other.description().components() {
+                    for (src_type, _) in other.description().components() {
                         // Look up what type we should transform the data into (can be the same type, meaning it should be cloned)
-                        let (dst_type, dst_type_meta) = clone_impl.map_component_type(src_type);
-                        let (src_type, src_type_meta) = src_type;
+                        let (dst_type, _) = clone_impl.map_component_type(*src_type);
 
                         // Create a writer that will insert the data into the destination chunk
                         let mut self_comp_storage = dst_components
@@ -856,8 +855,7 @@ impl ArchetypeData {
 
                             // Delegate the clone operation to the provided CloneImpl
                             clone_impl.clone(
-                                &src_type_meta,
-                                &dst_type_meta,
+                                *src_type,
                                 comp_src,
                                 comp_dst,
                                 entities_to_write,

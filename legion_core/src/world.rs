@@ -827,18 +827,19 @@ impl World {
                 tag_types: self.storage().tag_types(),
             };
 
-            // See if we need to transform from one type into another
+            // Build the archetype that we will write into. The caller of this function provides an
+            // impl to do the clone, optionally transforming components from one type to another
             let mut new_archetype = ArchetypeDescription::default();
-            for component_type in old_archetype.description().components() {
-                let (type_id, meta) = clone_impl.map_component_type(component_type);
-                new_archetype.register_component_raw(type_id, meta);
+            for (from_type_id, from_meta) in old_archetype.description().components() {
+                let (into_type_id, into_meta) = clone_impl.map_component_type(*from_type_id);
+                new_archetype.register_component_raw(into_type_id, into_meta);
 
                 println!(
                     "map {:?} of size {} to {:?} of size {}",
-                    component_type.0,
-                    component_type.1.size(),
-                    type_id,
-                    meta.size()
+                    from_type_id,
+                    from_meta.size(),
+                    into_type_id,
+                    into_meta.size()
                 );
             }
 
@@ -847,6 +848,8 @@ impl World {
                 .matches(archetype_data)
                 .matching_indices()
                 .next();
+
+            // If it doesn't exist, allocate it
             let arch_index = if let Some(arch_index) = matches {
                 println!("found archetype");
                 arch_index
@@ -855,6 +858,7 @@ impl World {
                 new_storage.alloc_archetype(new_archetype).0
             };
 
+            // Do the clone_merge for this archetype
             new_storage
                 .archetypes_mut()
                 .get_mut(arch_index)
@@ -952,13 +956,12 @@ impl World {
 pub trait CloneImpl {
     fn map_component_type(
         &self,
-        component_type: &(ComponentTypeId, ComponentMeta),
+        component_type: ComponentTypeId,
     ) -> (ComponentTypeId, ComponentMeta);
 
     fn clone(
         &self,
-        src_type: &ComponentMeta,
-        dst_type: &ComponentMeta,
+        src_type: ComponentTypeId,
         src_data: *const u8,
         dst_data: *mut u8,
         num_components: usize,
