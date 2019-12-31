@@ -692,7 +692,8 @@ impl World {
         &mut self,
         world: &World,
         clone_impl: &C,
-        entity_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
+        replace_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
+        mut result_mappings: Option<&mut std::collections::HashMap<Entity, Entity>>,
     ) {
         let span = span!(Level::INFO, "CloneMerging worlds", source = world.id().0, destination = ?self.id());
         let _guard = span.enter();
@@ -702,15 +703,15 @@ impl World {
 
         // Erase all entities that are referred to by value. The code following will update the location
         // of all these entities to point to new, valid locations
-        if let Some(entity_mappings) = entity_mappings {
+        if let Some(replace_mappings) = replace_mappings {
             //TODO: Compile this out in release?
-            for (k, _) in entity_mappings {
+            for (k, _) in replace_mappings {
                 if !world.entity_allocator.is_alive(*k) {
                     panic!("clone_merge assumes all entity_mapping keys exist in the source world");
                 }
             }
 
-            for (_, v) in entity_mappings {
+            for (_, v) in replace_mappings {
                 if self.entity_allocator.is_alive(*v) {
                     let location = self
                         .entity_allocator
@@ -774,7 +775,8 @@ impl World {
                     &mut self.entity_allocator,
                     &mut self.resources,
                     clone_impl,
-                    entity_mappings,
+                    replace_mappings,
+                    &mut result_mappings
                 );
         }
     }
