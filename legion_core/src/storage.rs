@@ -763,7 +763,8 @@ impl ArchetypeData {
         entity_allocator: &mut crate::entity::EntityAllocator,
         resources: &crate::resource::Resources,
         clone_impl: &C,
-        entity_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
+        replace_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
+        result_mappings: &mut Option<&mut std::collections::HashMap<Entity, Entity>>,
     ) {
         println!(
             "clone_merge on {:?} {:?}",
@@ -836,7 +837,7 @@ impl ArchetypeData {
                         );
 
                         // Determine if there is an entity we will be replacing
-                        let dst_entity = entity_mappings
+                        let dst_entity = replace_mappings
                             .and_then(|x| x.get(&other_chunk.entities[src_entity_idx]));
 
                         let entity = if let Some(dst_entity) = dst_entity {
@@ -861,6 +862,10 @@ impl ArchetypeData {
 
                         entity_allocator.set_location(entity.index(), location);
                         dst_entities.push(entity);
+
+                        if let Some(result_mappings) = result_mappings {
+                            result_mappings.insert(other_chunk.entities[src_entity_idx], entity);
+                        }
                     }
 
                     // Walk through each component type to copy the data from the source chunk to the destination chunk
