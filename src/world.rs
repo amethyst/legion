@@ -542,6 +542,18 @@ impl World {
         }
     }
 
+    /// Removes a component from an entity.
+    pub fn remove_components<T: ComponentTypeTupleSet>(&mut self, entity: Entity) {
+        let components = T::collect();
+        for component in components.iter() {
+            if !self.has_component_by_id(entity, *component) {
+                return;
+            }
+        }
+
+        self.move_entity(entity, &[], &components, &[], &[]);
+    }
+
     /// Adds a tag to an entity, or sets its value if the tag is
     /// already present.
     pub fn add_tag<T: Tag>(&mut self, entity: Entity, tag: T) {
@@ -609,6 +621,40 @@ impl World {
         let component = slice.get(location.component())?;
 
         Some(Ref::new(slice_borrow, component))
+    }
+
+    fn get_component_storage(&self, entity: Entity) -> Option<&ComponentStorage> {
+        let location = self.entity_allocator.get_location(entity.index())?;
+        let archetype = self.storage().archetypes().get(location.archetype())?;
+        Some(
+            archetype
+                .chunksets()
+                .get(location.set())?
+                .get(location.chunk())?,
+        )
+    }
+
+    /// Checks that the provided `ComponentTypeId` is present on a given entity.
+    ///
+    /// Returns true if it exists, otherwise false.
+    pub fn has_component_by_id(&self, entity: Entity, component: ComponentTypeId) -> bool {
+        if !self.is_alive(entity) {
+            return false;
+        }
+
+        if let Some(chunkset) = self.get_component_storage(entity) {
+            return chunkset.components(component).is_some();
+        }
+
+        false
+    }
+
+    /// Checks that the provided `Component` is present on a given entity.
+    ///
+    /// Returns true if it exists, otherwise false.
+    #[inline]
+    pub fn has_component<T: Component>(&self, entity: Entity) -> bool {
+        self.has_component_by_id(entity, ComponentTypeId::of::<T>())
     }
 
     /// Mutably borrows entity data for the given entity.
@@ -951,6 +997,10 @@ pub struct ComponentTupleFilter<T> {
     _phantom: PhantomData<T>,
 }
 
+pub trait ComponentTypeTupleSet {
+    fn collect() -> Vec<ComponentTypeId>;
+}
+
 mod tuple_impls {
     use super::*;
     use crate::iterator::SliceVecIter;
@@ -1079,6 +1129,15 @@ mod tuple_impls {
                 fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
                     let types = &[$( ComponentTypeId::of::<$ty>() ),*];
                     Some(types.len() == item.len() && types.iter().all(|t| item.contains(t)))
+                }
+            }
+
+            impl<$( $ty ),*> ComponentTypeTupleSet for ($( $ty, )*)
+            where
+                $( $ty: Component ),*
+            {
+                fn collect() -> Vec<ComponentTypeId> {
+                    vec![$( ComponentTypeId::of::<$ty>() ),*]
                 }
             }
         };
