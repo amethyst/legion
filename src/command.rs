@@ -8,7 +8,7 @@ use crate::{
 };
 use derivative::Derivative;
 use smallvec::SmallVec;
-use std::{iter::FromIterator, marker::PhantomData, sync::Arc};
+use std::{collections::VecDeque, iter::FromIterator, marker::PhantomData, sync::Arc};
 
 pub trait WorldWritable {
     fn write(self: Arc<Self>, world: &mut World);
@@ -48,8 +48,12 @@ where
         world.insert_buffered(&consumed.entities, consumed.tags, consumed.components);
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
-    fn write_tags(&self) -> Vec<TagTypeId> { self.write_tags.clone() }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        self.write_components.clone()
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        self.write_tags.clone()
+    }
 }
 
 #[derive(Derivative)]
@@ -78,8 +82,12 @@ where
         world.insert(consumed.tags, consumed.components);
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
-    fn write_tags(&self) -> Vec<TagTypeId> { self.write_tags.clone() }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        self.write_components.clone()
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        self.write_tags.clone()
+    }
 }
 
 #[derive(Derivative)]
@@ -91,8 +99,12 @@ impl WorldWritable for DeleteEntityCommand {
         world.delete(self.0);
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-    fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        Vec::with_capacity(0)
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        Vec::with_capacity(0)
+    }
 }
 
 #[derive(Derivative)]
@@ -112,8 +124,12 @@ where
         world.add_tag(consumed.entity, consumed.tag)
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-    fn write_tags(&self) -> Vec<TagTypeId> { vec![TagTypeId::of::<T>()] }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        Vec::with_capacity(0)
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        vec![TagTypeId::of::<T>()]
+    }
 }
 
 #[derive(Derivative)]
@@ -135,8 +151,12 @@ where
         world.remove_tag::<T>(self.entity)
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-    fn write_tags(&self) -> Vec<TagTypeId> { vec![TagTypeId::of::<T>()] }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        Vec::with_capacity(0)
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        vec![TagTypeId::of::<T>()]
+    }
 }
 
 #[derive(Derivative)]
@@ -163,8 +183,12 @@ where
             .unwrap();
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }
-    fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        vec![ComponentTypeId::of::<C>()]
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        Vec::with_capacity(0)
+    }
 }
 
 #[derive(Derivative)]
@@ -182,8 +206,12 @@ where
         world.remove_component::<C>(self.entity)
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }
-    fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
+    fn write_components(&self) -> Vec<ComponentTypeId> {
+        vec![ComponentTypeId::of::<C>()]
+    }
+    fn write_tags(&self) -> Vec<TagTypeId> {
+        Vec::with_capacity(0)
+    }
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -241,7 +269,7 @@ where
         buffer
             .commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(InsertBufferedCommand {
+            .push_front(EntityCommand::WriteWorld(Arc::new(InsertBufferedCommand {
                 write_components: Vec::default(),
                 write_tags: Vec::default(),
                 tags: self.tags.flatten(),
@@ -256,16 +284,20 @@ pub enum CommandError {
     EntityBlockFull,
 }
 impl std::fmt::Display for CommandError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "CommandError") }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CommandError")
+    }
 }
 
 impl std::error::Error for CommandError {
-    fn cause(&self) -> Option<&dyn std::error::Error> { None }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        None
+    }
 }
 
 #[derive(Default)]
 pub struct CommandBuffer {
-    commands: AtomicRefCell<SmallVec<[EntityCommand; 128]>>,
+    commands: AtomicRefCell<VecDeque<EntityCommand>>,
     pub(crate) free_list: SmallVec<[Entity; 64]>,
     pub(crate) used_list: SmallVec<[Entity; 64]>,
 }
@@ -329,7 +361,7 @@ impl CommandBuffer {
         );
         self.used_list.clear();
 
-        while let Some(command) = self.commands.get_mut().pop() {
+        while let Some(command) = self.commands.get_mut().pop_back() {
             match command {
                 EntityCommand::WriteWorld(ptr) => ptr.write(world),
                 EntityCommand::ExecMutWorld(closure) => closure(world),
@@ -365,7 +397,7 @@ impl CommandBuffer {
     {
         self.commands
             .get_mut()
-            .push(EntityCommand::ExecMutWorld(Arc::new(f)));
+            .push_front(EntityCommand::ExecMutWorld(Arc::new(f)));
     }
 
     pub fn insert_writer<W>(&self, writer: W)
@@ -374,7 +406,7 @@ impl CommandBuffer {
     {
         self.commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(writer)));
+            .push_front(EntityCommand::WriteWorld(Arc::new(writer)));
     }
 
     pub fn insert_unbuffered<T, C>(&mut self, tags: T, components: C)
@@ -384,7 +416,7 @@ impl CommandBuffer {
     {
         self.commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(InsertCommand {
+            .push_front(EntityCommand::WriteWorld(Arc::new(InsertCommand {
                 write_components: Vec::default(),
                 write_tags: Vec::default(),
                 tags,
@@ -409,7 +441,7 @@ impl CommandBuffer {
 
         self.commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(InsertBufferedCommand {
+            .push_front(EntityCommand::WriteWorld(Arc::new(InsertBufferedCommand {
                 write_components: Vec::default(),
                 write_tags: Vec::default(),
                 tags,
@@ -423,7 +455,7 @@ impl CommandBuffer {
     pub fn delete(&self, entity: Entity) {
         self.commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(DeleteEntityCommand(
+            .push_front(EntityCommand::WriteWorld(Arc::new(DeleteEntityCommand(
                 entity,
             ))));
     }
@@ -431,7 +463,7 @@ impl CommandBuffer {
     pub fn add_component<C: Component>(&self, entity: Entity, component: C) {
         self.commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(AddComponentCommand {
+            .push_front(EntityCommand::WriteWorld(Arc::new(AddComponentCommand {
                 entity,
                 component,
             })));
@@ -440,7 +472,7 @@ impl CommandBuffer {
     pub fn remove_component<C: Component>(&self, entity: Entity) {
         self.commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(
+            .push_front(EntityCommand::WriteWorld(Arc::new(
                 RemoveComponentCommand {
                     entity,
                     _marker: PhantomData::<C>::default(),
@@ -451,7 +483,7 @@ impl CommandBuffer {
     pub fn add_tag<T: Tag>(&self, entity: Entity, tag: T) {
         self.commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(AddTagCommand {
+            .push_front(EntityCommand::WriteWorld(Arc::new(AddTagCommand {
                 entity,
                 tag,
             })));
@@ -460,17 +492,21 @@ impl CommandBuffer {
     pub fn remove_tag<T: Tag>(&self, entity: Entity) {
         self.commands
             .get_mut()
-            .push(EntityCommand::WriteWorld(Arc::new(RemoveTagCommand {
+            .push_front(EntityCommand::WriteWorld(Arc::new(RemoveTagCommand {
                 entity,
                 _marker: PhantomData::<T>::default(),
             })));
     }
 
     #[inline]
-    pub fn len(&self) -> usize { self.commands.get().len() }
+    pub fn len(&self) -> usize {
+        self.commands.get().len()
+    }
 
     #[inline]
-    pub fn is_empty(&self) -> bool { self.commands.get().len() == 0 }
+    pub fn is_empty(&self) -> bool {
+        self.commands.get().len() == 0
+    }
 }
 
 #[cfg(test)]
