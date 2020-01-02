@@ -48,12 +48,8 @@ where
         world.insert_buffered(&consumed.entities, consumed.tags, consumed.components);
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> {
-        self.write_components.clone()
-    }
-    fn write_tags(&self) -> Vec<TagTypeId> {
-        self.write_tags.clone()
-    }
+    fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
+    fn write_tags(&self) -> Vec<TagTypeId> { self.write_tags.clone() }
 }
 
 #[derive(Derivative)]
@@ -82,12 +78,8 @@ where
         world.insert(consumed.tags, consumed.components);
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> {
-        self.write_components.clone()
-    }
-    fn write_tags(&self) -> Vec<TagTypeId> {
-        self.write_tags.clone()
-    }
+    fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
+    fn write_tags(&self) -> Vec<TagTypeId> { self.write_tags.clone() }
 }
 
 #[derive(Derivative)]
@@ -99,12 +91,8 @@ impl WorldWritable for DeleteEntityCommand {
         world.delete(self.0);
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> {
-        Vec::with_capacity(0)
-    }
-    fn write_tags(&self) -> Vec<TagTypeId> {
-        Vec::with_capacity(0)
-    }
+    fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
+    fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
 }
 
 #[derive(Derivative)]
@@ -124,12 +112,8 @@ where
         world.add_tag(consumed.entity, consumed.tag)
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> {
-        Vec::with_capacity(0)
-    }
-    fn write_tags(&self) -> Vec<TagTypeId> {
-        vec![TagTypeId::of::<T>()]
-    }
+    fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
+    fn write_tags(&self) -> Vec<TagTypeId> { vec![TagTypeId::of::<T>()] }
 }
 
 #[derive(Derivative)]
@@ -151,12 +135,8 @@ where
         world.remove_tag::<T>(self.entity)
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> {
-        Vec::with_capacity(0)
-    }
-    fn write_tags(&self) -> Vec<TagTypeId> {
-        vec![TagTypeId::of::<T>()]
-    }
+    fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
+    fn write_tags(&self) -> Vec<TagTypeId> { vec![TagTypeId::of::<T>()] }
 }
 
 #[derive(Derivative)]
@@ -183,12 +163,8 @@ where
             .unwrap();
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> {
-        vec![ComponentTypeId::of::<C>()]
-    }
-    fn write_tags(&self) -> Vec<TagTypeId> {
-        Vec::with_capacity(0)
-    }
+    fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }
+    fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
 }
 
 #[derive(Derivative)]
@@ -206,12 +182,8 @@ where
         world.remove_component::<C>(self.entity)
     }
 
-    fn write_components(&self) -> Vec<ComponentTypeId> {
-        vec![ComponentTypeId::of::<C>()]
-    }
-    fn write_tags(&self) -> Vec<TagTypeId> {
-        Vec::with_capacity(0)
-    }
+    fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }
+    fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -284,15 +256,11 @@ pub enum CommandError {
     EntityBlockFull,
 }
 impl std::fmt::Display for CommandError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "CommandError")
-    }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "CommandError") }
 }
 
 impl std::error::Error for CommandError {
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        None
-    }
+    fn cause(&self) -> Option<&dyn std::error::Error> { None }
 }
 
 #[derive(Default)]
@@ -499,14 +467,10 @@ impl CommandBuffer {
     }
 
     #[inline]
-    pub fn len(&self) -> usize {
-        self.commands.get().len()
-    }
+    pub fn len(&self) -> usize { self.commands.get().len() }
 
     #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.commands.get().len() == 0
-    }
+    pub fn is_empty(&self) -> bool { self.commands.get().len() == 0 }
 }
 
 #[cfg(test)]
