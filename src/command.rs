@@ -266,6 +266,7 @@ impl std::error::Error for CommandError {
 #[derive(Default)]
 pub struct CommandBuffer {
     commands: AtomicRefCell<VecDeque<EntityCommand>>,
+    pub(crate) custom_capacity: Option<usize>,
     pub(crate) free_list: SmallVec<[Entity; 64]>,
     pub(crate) used_list: SmallVec<[Entity; 64]>,
 }
@@ -275,6 +276,17 @@ unsafe impl Send for CommandBuffer {}
 unsafe impl Sync for CommandBuffer {}
 
 impl CommandBuffer {
+    pub fn with_capacity(capacity: usize) -> Self {
+        // Pull  free entities from the world.
+
+        Self {
+            custom_capacity: Some(capacity),
+            free_list: SmallVec::with_capacity(capacity),
+            commands: Default::default(),
+            used_list: SmallVec::with_capacity(capacity),
+        }
+    }
+
     pub fn from_world_with_capacity(world: &mut World, capacity: usize) -> Self {
         // Pull  free entities from the world.
 
@@ -283,8 +295,9 @@ impl CommandBuffer {
 
         Self {
             free_list,
+            custom_capacity: Some(capacity),
             commands: Default::default(),
-            used_list: Default::default(),
+            used_list: SmallVec::with_capacity(capacity),
         }
     }
 
@@ -297,20 +310,20 @@ impl CommandBuffer {
 
         Self {
             free_list,
+            custom_capacity: None,
             commands: Default::default(),
-            used_list: Default::default(),
+            used_list: SmallVec::with_capacity(world.command_buffer_size()),
         }
     }
 
     #[allow(clippy::comparison_chain)]
-    pub fn resize(&mut self, world: &mut World) {
-        let entity_count = world.command_buffer_size();
-        if self.free_list.len() < entity_count {
-            (self.free_list.len()..entity_count)
+    pub fn resize(&mut self, world: &mut World, capacity: usize) {
+        if self.free_list.len() < capacity {
+            (self.free_list.len()..capacity)
                 .for_each(|_| self.free_list.push(world.entity_allocator.create_entity()));
-        } else if self.free_list.len() > entity_count {
+        } else if self.free_list.len() > capacity {
             // Free the entities
-            (self.free_list.len() - entity_count..entity_count).for_each(|_| {
+            (self.free_list.len() - capacity..capacity).for_each(|_| {
                 world
                     .entity_allocator
                     .delete_entity(self.free_list.pop().unwrap());
@@ -321,14 +334,6 @@ impl CommandBuffer {
     pub fn write(&mut self, world: &mut World) {
         tracing::trace!("Draining command buffer");
 
-        let empty = Vec::from_iter((0..self.used_list.len()).map(|_| ()));
-        world.insert_buffered(
-            self.used_list.as_slice(),
-            (),
-            IntoComponentSource::into(empty),
-        );
-        self.used_list.clear();
-
         while let Some(command) = self.commands.get_mut().pop_back() {
             match command {
                 EntityCommand::WriteWorld(ptr) => ptr.write(world),
@@ -338,8 +343,11 @@ impl CommandBuffer {
         }
 
         // Refill our entity buffer from the world
-        (0..world.command_buffer_size() - self.free_list.len())
-            .for_each(|_| self.free_list.push(world.entity_allocator.create_entity()));
+        if let Some(custom_capacity) = self.custom_capacity {
+            self.resize(world, custom_capacity);
+        } else {
+            self.resize(world, world.command_buffer_size());
+        }
     }
 
     pub fn build_entity(&mut self) -> Result<EntityBuilder<(), ()>, CommandError> {

@@ -235,7 +235,12 @@ impl Executor {
     /// Only enabled with par-schedule is disabled
     #[cfg(not(feature = "par-schedule"))]
     pub fn run_systems(&mut self, world: &mut World) {
-        self.resize_command_buffers(world);
+        // preflush command buffers
+        // This also handles the first case of allocating them.
+        self.systems
+            .iter()
+            .for_each(|system| system.command_buffer_mut().write(world));
+
         self.systems.iter_mut().for_each(|system| {
             system.run(world);
         });
@@ -249,7 +254,11 @@ impl Executor {
     /// Call from within `rayon::ThreadPool::install()` to execute within a specific thread pool.
     #[cfg(feature = "par-schedule")]
     pub fn run_systems(&mut self, world: &mut World) {
-        self.resize_command_buffers(world);
+        // preflush command buffers
+        // This also handles the first case of allocating them.
+        self.systems
+            .iter()
+            .for_each(|system| system.command_buffer_mut().write(world));
 
         rayon::join(
             || {},
@@ -306,13 +315,6 @@ impl Executor {
                 }
             },
         );
-    }
-
-    /// Resizes all command buffers where appropriate to the world
-    pub fn resize_command_buffers(&mut self, world: &mut World) {
-        self.systems.iter().for_each(|system| {
-            system.command_buffer_mut().resize(world);
-        });
     }
 
     /// Flushes the recorded command buffers for all systems.
