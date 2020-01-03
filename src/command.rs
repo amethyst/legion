@@ -334,6 +334,14 @@ impl CommandBuffer {
     pub fn write(&mut self, world: &mut World) {
         tracing::trace!("Draining command buffer");
 
+        let empty = Vec::from_iter((0..self.used_list.len()).map(|_| ()));
+        world.insert_buffered(
+            self.used_list.as_slice(),
+            (),
+            IntoComponentSource::into(empty),
+        );
+        self.used_list.clear();
+
         while let Some(command) = self.commands.get_mut().pop_back() {
             match command {
                 EntityCommand::WriteWorld(ptr) => ptr.write(world),
