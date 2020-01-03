@@ -10,10 +10,20 @@ use derivative::Derivative;
 use smallvec::SmallVec;
 use std::{collections::VecDeque, iter::FromIterator, marker::PhantomData, sync::Arc};
 
+/// This trait can be used to implement custom world writer types that can be directly
+/// inserted into the command buffer, for more custom and complex world operations. This is analogous
+/// to the `CommandBuffer::exec_mut` function type, but does not perform explicit any/any archetype
+/// access.
 pub trait WorldWritable {
+    /// Destructs the writer and performs the write operations on the world.
     fn write(self: Arc<Self>, world: &mut World);
 
+    /// Returns the list of `ComponentTypeId` which are written by this command buffer. This is leveraged
+    /// to allow parralel command buffer flushing.
     fn write_components(&self) -> Vec<ComponentTypeId>;
+
+    /// Returns the list of `TagTypeId` which are written by this command buffer. This is leveraged
+    /// to allow parralel command buffer flushing.
     fn write_tags(&self) -> Vec<TagTypeId>;
 }
 
@@ -193,6 +203,30 @@ enum EntityCommand {
     ExecMutWorld(Arc<dyn Fn(&mut World)>),
 }
 
+/// A builder type which can be retrieved from the command buffer. This is the ideal use case for
+/// inserted complex entities with multiple components and tags from a command buffer. Although
+/// `add_component` will perform a new move operation on every addition, this allows the construction
+/// of a single `insert` command for an entity, but without using the actual `insert` command
+/// provided by the `CommandBuffer`
+///
+/// # Examples
+///
+/// Inserting an entity using the `EntityBuilder`:
+///
+/// ```
+/// # use legion::prelude::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position(f32);
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Rotation(f32);
+/// # let universe = Universe::new();
+/// # let mut world = universe.create_world();
+/// let mut command_buffer = CommandBuffer::from_world(&mut world);
+/// command_buffer.build_entity().unwrap()
+///     .with_component(Position(123.0))
+///     .with_component(Rotation(456.0)).build(&mut command_buffer);
+/// command_buffer.write(&mut world);
+/// ```
 pub struct EntityBuilder<TS = (), CS = ()> {
     entity: Entity,
     tags: TS,
@@ -203,6 +237,8 @@ where
     TS: 'static + Send + ConsFlatten,
     CS: 'static + Send + ConsFlatten,
 {
+    /// Adds a component to this builder, returning a new builder type containing that component type
+    /// and its data.
     pub fn with_component<C: Component>(
         self,
         component: C,
@@ -218,6 +254,8 @@ where
         }
     }
 
+    /// Adds a tag to this builder, returning a new builder type containing that component type
+    /// and its data.
     pub fn with_tag<T: Tag>(self, tag: T) -> EntityBuilder<<TS as ConsAppend<T>>::Output, CS>
     where
         TS: ConsAppend<T>,
@@ -230,7 +268,9 @@ where
         }
     }
 
-    fn build(self, buffer: &mut CommandBuffer)
+    /// Finalizes this builder type and submits it to the `CommandBuffer` as a `WorldWritable` trait
+    /// object.
+    pub fn build(self, buffer: &mut CommandBuffer)
     where
         <TS as ConsFlatten>::Output: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
         ComponentTupleSet<
@@ -251,8 +291,12 @@ where
     }
 }
 
+/// Errors returned by the `CommandBuffer`
 #[derive(Debug)]
 pub enum CommandError {
+    /// The command buffers entity cache has been exhausted. This is defaulted to 64 at `World::DEFAULT_COMMAND_BUFFER_SIZE`.
+    /// This upper limit can be changed via `SystemBuilder::with_command_buffer_size` for specific systems,
+    /// or globally via `World::set_command_buffer_size`.
     EntityBlockFull,
 }
 impl std::fmt::Display for CommandError {
@@ -263,6 +307,37 @@ impl std::error::Error for CommandError {
     fn cause(&self) -> Option<&dyn std::error::Error> { None }
 }
 
+/// A command buffer used to queue mutable changes to the world from a system. This buffer is automatically
+/// flushed and refreshed at the beginning of every frame by `Schedule`. If `Schedule` is not used,
+/// then the user needs to manually flush it by performing `CommandBuffer::write`.
+///
+/// This buffer operates as follows:
+///     - All commands are queued as trait object of type `WorldWritable`, to be executed when `CommandBuffer:write` is called.
+///     - Entities are allocated at the time of `CommandBuffer:write` occuring, being directly allocated from the world
+///       and cached internally in the system. This means that only N number of entities can be directly retrieved
+///       from any `CommandBuffer` in a single frame. This upper limit can be changed via `SystemBuilder::with_command_buffer_size`
+///       for specific systems, or globally via `World::set_command_buffer_size`.
+///
+/// # Examples
+///
+/// Inserting an entity using the `CommandBuffer`:
+///
+/// ```
+/// # use legion::prelude::*;
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Position(f32);
+/// # #[derive(Copy, Clone, Debug, PartialEq)]
+/// # struct Rotation(f32);
+/// # let universe = Universe::new();
+/// # let mut world = universe.create_world();
+/// let mut command_buffer = CommandBuffer::from_world(&mut world);
+/// let entity = command_buffer.create_entity().unwrap();
+///
+/// command_buffer.add_component(entity, Position(123.0));
+/// command_buffer.delete(entity);
+///
+/// command_buffer.write(&mut world);
+/// ```
 #[derive(Default)]
 pub struct CommandBuffer {
     commands: AtomicRefCell<VecDeque<EntityCommand>>,
@@ -276,6 +351,13 @@ unsafe impl Send for CommandBuffer {}
 unsafe impl Sync for CommandBuffer {}
 
 impl CommandBuffer {
+    /// Creates a `CommandBuffer` with a custom capacity of cached Entity's to be collected every frame.
+    /// Allocating a command buffer in this manner will overwrite `World::set_command_buffer_size` and
+    /// this system will always allocate the custom provide capacity of entities every frame.
+    ///
+    /// # Notes
+    /// This function does not perform any actual entity preallocation. `ComamandBuffer:resize` or `CommandBuffer:write`
+    /// must be called before using the command buffer for the first time to make entities available.
     pub fn with_capacity(capacity: usize) -> Self {
         // Pull  free entities from the world.
 
@@ -287,6 +369,11 @@ impl CommandBuffer {
         }
     }
 
+    /// Creates a `CommandBuffer` with a custom capacity of cached Entity's to be collected every frame.
+    /// Allocating a command buffer in this manner will overwrite `World::set_command_buffer_size` and
+    /// this system will always allocate the custom provide capacity of entities every frame.
+    ///
+    /// This constructor will preallocate the first round of entities needed from the world.
     pub fn from_world_with_capacity(world: &mut World, capacity: usize) -> Self {
         // Pull  free entities from the world.
 
@@ -301,6 +388,11 @@ impl CommandBuffer {
         }
     }
 
+    /// Creates a `CommandBuffer` with a custom capacity of cached Entity's to be collected every frame.
+    /// Allocating a command buffer in this manner will use the default `World::set_command_buffer_size`
+    /// value.
+    ///
+    /// This constructor will preallocate the first round of entities needed from the world.
     pub fn from_world(world: &mut World) -> Self {
         // Pull  free entities from the world.
 
@@ -316,6 +408,11 @@ impl CommandBuffer {
         }
     }
 
+    /// Changes the capacity of this `Commandbuffer` to the specified capacity. This includes shrinking
+    /// and growing the allocated entities, and possibly returning them to the entity allocator in the
+    /// case of a shrink.
+    ///
+    /// This function does *NOT* set the `Commandbuffer::custom_capacity` override.
     #[allow(clippy::comparison_chain)]
     pub fn resize(&mut self, world: &mut World, capacity: usize) {
         if self.free_list.len() < capacity {
@@ -331,6 +428,13 @@ impl CommandBuffer {
         }
     }
 
+    /// Flushes this command buffer, draining all stored commands and writing them to the world.
+    ///
+    /// Command flushes are performed in a FIFO manner, allowing for reliable, linear commands being
+    /// executed in the order they were provided.
+    ///
+    /// This function also calls `CommandBuffer:resize`, performing any appropriate entity preallocation,
+    /// refilling the entity cache of any consumed entities.
     pub fn write(&mut self, world: &mut World) {
         tracing::trace!("Draining command buffer");
 
@@ -358,6 +462,7 @@ impl CommandBuffer {
         }
     }
 
+    /// Consumed an internally cached entity, returning an `EntityBuilder` using that entity.
     pub fn build_entity(&mut self) -> Result<EntityBuilder<(), ()>, CommandError> {
         let entity = self.create_entity()?;
 
@@ -368,6 +473,7 @@ impl CommandBuffer {
         })
     }
 
+    /// Consumed an internally cached entity, or returns `CommandError`
     pub fn create_entity(&mut self) -> Result<Entity, CommandError> {
         let entity = self.free_list.pop().ok_or(CommandError::EntityBlockFull)?;
         self.used_list.push(entity);
@@ -375,6 +481,8 @@ impl CommandBuffer {
         Ok(entity)
     }
 
+    /// Executes an arbitrary closure against the mutable world, allowing for queued exclusive
+    /// access to the world.
     pub fn exec_mut<F>(&self, f: F)
     where
         F: 'static + Fn(&mut World),
@@ -384,6 +492,9 @@ impl CommandBuffer {
             .push_front(EntityCommand::ExecMutWorld(Arc::new(f)));
     }
 
+    /// Inserts an arbitrary implementor of the `WorldWritable` trait into the command queue.
+    /// This can be leveraged for creating custom `WorldWritable` trait implementors, and is used
+    /// internally for the default writers.
     pub fn insert_writer<W>(&self, writer: W)
     where
         W: 'static + WorldWritable,
@@ -393,6 +504,15 @@ impl CommandBuffer {
             .push_front(EntityCommand::WriteWorld(Arc::new(writer)));
     }
 
+    /// Queues an *unbuffered* insertion into the world. This command follows the same syntax as
+    /// the normal `World::insert`, except for one caviate - entities are NOT returned by this
+    /// function, meaning that the internal entity cache and limits of this `CommandBuffer` are not
+    /// applicable to this function.
+    ///
+    /// This function can be considered a "fire and forget" entity creation method which is not bound
+    /// by the standard command buffer size limits of the other entity insertion functions. This allows
+    /// for mass insertion of entities, exceeding the command buffer sizes, to occur in scenarios that
+    /// the entities do not need to be retrieved.
     pub fn insert_unbuffered<T, C>(&mut self, tags: T, components: C)
     where
         T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
@@ -408,6 +528,8 @@ impl CommandBuffer {
             })));
     }
 
+    /// Queues an insertion into the world. This command follows the same syntax as
+    /// the normal `World::insert`, returning the entities created for this command.
     pub fn insert<T, C>(&mut self, tags: T, components: C) -> Result<Vec<Entity>, CommandError>
     where
         T: 'static + TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
@@ -436,6 +558,7 @@ impl CommandBuffer {
         Ok(entities)
     }
 
+    /// Queues the deletion of an entity in the command buffer. This writer calls `World::delete`
     pub fn delete(&self, entity: Entity) {
         self.commands
             .get_mut()
@@ -444,6 +567,8 @@ impl CommandBuffer {
             ))));
     }
 
+    /// Queues the addition of a component from an entity in the command buffer.
+    /// This writer calls `World::add_component`
     pub fn add_component<C: Component>(&self, entity: Entity, component: C) {
         self.commands
             .get_mut()
@@ -453,6 +578,8 @@ impl CommandBuffer {
             })));
     }
 
+    /// Queues the removal of a component from an entity in the command buffer.
+    /// This writer calls `World::remove_component`
     pub fn remove_component<C: Component>(&self, entity: Entity) {
         self.commands
             .get_mut()
@@ -464,6 +591,8 @@ impl CommandBuffer {
             )));
     }
 
+    /// Queues the addition of a tag from an entity in the command buffer.
+    /// This writer calls `World::add_tag`
     pub fn add_tag<T: Tag>(&self, entity: Entity, tag: T) {
         self.commands
             .get_mut()
@@ -473,6 +602,8 @@ impl CommandBuffer {
             })));
     }
 
+    /// Queues the removal of a tag from an entity in the command buffer.
+    /// This writer calls `World::remove_tag`
     pub fn remove_tag<T: Tag>(&self, entity: Entity) {
         self.commands
             .get_mut()
@@ -482,9 +613,11 @@ impl CommandBuffer {
             })));
     }
 
+    /// Returns the current number of commands already queued in this `CommandBuffer` instance.
     #[inline]
     pub fn len(&self) -> usize { self.commands.get().len() }
 
+    /// Returns true if this `CommandBuffer` is currently empty and contains no writers.
     #[inline]
     pub fn is_empty(&self) -> bool { self.commands.get().len() == 0 }
 }

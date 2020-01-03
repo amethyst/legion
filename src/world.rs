@@ -164,7 +164,8 @@ impl World {
     /// Gets the unique ID of this world within its universe.
     pub fn id(&self) -> WorldId { self.id }
 
-    /// Inserts new entities into the world.
+    /// Inserts new entities into the world. This insertion method should be preferred, as it performs
+    /// no movement of components for inserting multiple entities and components.
     ///
     /// # Examples
     ///
@@ -480,6 +481,13 @@ impl World {
 
     /// Adds a component to an entity, or sets its value if the component is
     /// already present.
+    ///
+    /// # Notes
+    /// This function has the overhead of moving the entity to either an existing or new archetype,
+    /// causing a memory copy of the entity to a new location. This function should not be used
+    /// multiple times in successive order.
+    ///
+    /// `World::add_components` should be used for adding multiple omponents to an entity at once.
     pub fn add_component<T: Component>(
         &mut self,
         entity: Entity,
@@ -528,6 +536,13 @@ impl World {
     }
 
     /// Removes a component from an entity.
+    ///
+    /// # Notes
+    /// This function has the overhead of moving the entity to either an existing or new archetype,
+    /// causing a memory copy of the entity to a new location. This function should not be used
+    /// multiple times in successive order.
+    ///
+    /// `World::remove_components` should be used for adding multiple omponents to an entity at once.
     pub fn remove_component<T: Component>(&mut self, entity: Entity) {
         if self.get_component::<T>(entity).is_some() {
             trace!(
@@ -543,6 +558,11 @@ impl World {
     }
 
     /// Removes a component from an entity.
+    ///
+    /// # Notes
+    /// This function is provided for bulk deleting components from an entity. This difference between this
+    /// function and `remove_component` is this allows us to remove multiple components and still only
+    /// perform a single move operation of the entity.
     pub fn remove_components<T: ComponentTypeTupleSet>(&mut self, entity: Entity) {
         let components = T::collect();
         for component in components.iter() {
@@ -762,6 +782,8 @@ impl World {
         }
     }
 
+    /// Merge this world with another, copying all appropriate archetypes, tags entities and components
+    /// into this world.
     pub fn merge(&mut self, world: World) {
         let span =
             span!(Level::INFO, "Merging worlds", source = world.id().0, destination = ?self.id());
