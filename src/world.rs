@@ -85,10 +85,11 @@ impl WorldId {
 pub struct World {
     id: WorldId,
     storage: UnsafeCell<Storage>,
-    pub(crate) entity_allocator: EntityAllocator,
+    pub(crate) entity_allocator: Arc<EntityAllocator>,
     defrag_progress: usize,
     pub resources: Resources,
     command_buffer_size: usize,
+    pub(crate) allocation_buffer: Vec<Entity>,
 }
 
 unsafe impl Send for World {}
@@ -113,10 +114,11 @@ impl World {
         Self {
             id,
             storage: UnsafeCell::new(Storage::new(id)),
-            entity_allocator: allocator,
+            entity_allocator: Arc::new(allocator),
             defrag_progress: 0,
             resources: Resources::default(),
             command_buffer_size: Self::DEFAULT_COMMAND_BUFFER_SIZE,
+            allocation_buffer: Vec::with_capacity(Self::DEFAULT_COMMAND_BUFFER_SIZE),
         }
     }
 
@@ -212,7 +214,7 @@ impl World {
         // find or create chunk set
         let chunk_set_index = self.find_or_create_chunk(archetype_index, &mut tags);
 
-        self.entity_allocator.clear_allocation_buffer();
+        self.allocation_buffer.clear();
 
         // insert components into chunks
         while !components.is_empty() {
@@ -231,7 +233,8 @@ impl World {
             };
 
             // insert as many components as we can into the chunk
-            let allocated = components.write(&mut self.entity_allocator, chunk);
+            let allocated =
+                components.write(&self.entity_allocator, &mut self.allocation_buffer, chunk);
 
             // record new entity locations
             let start = chunk.len() - allocated;
@@ -243,11 +246,9 @@ impl World {
             }
         }
 
-        let entities = self.entity_allocator.allocation_buffer();
+        trace!(count = self.allocation_buffer.len(), "Inserted entities");
 
-        trace!(count = entities.len(), "Inserted entities");
-
-        entities
+        &self.allocation_buffer
     }
 
     pub(crate) fn insert_buffered<T, C>(
@@ -789,7 +790,8 @@ impl World {
             span!(Level::INFO, "Merging worlds", source = world.id().0, destination = ?self.id());
         let _guard = span.enter();
 
-        self.entity_allocator.merge(world.entity_allocator);
+        self.entity_allocator
+            .merge(Arc::try_unwrap(world.entity_allocator).unwrap());
 
         for archetype in unsafe { &mut *world.storage.get() }.drain(..) {
             let target_archetype = {
@@ -955,7 +957,12 @@ pub trait ComponentSource: ComponentLayout {
     fn len(&self) -> usize;
 
     /// Writes as many components as possible into a chunk.
-    fn write(&mut self, allocator: &mut EntityAllocator, chunk: &mut ComponentStorage) -> usize;
+    fn write(
+        &mut self,
+        allocator: &EntityAllocator,
+        allocation_buffer: &mut Vec<Entity>,
+        chunk: &mut ComponentStorage,
+    ) -> usize;
 
     /// Writes as many components as possible into a chunk, from the provided entities list
     fn write_entities(
@@ -1106,7 +1113,7 @@ mod tuple_impls {
                     count
                 }
 
-                fn write(&mut self, allocator: &mut EntityAllocator, chunk: &mut ComponentStorage) -> usize {
+                fn write(&mut self, allocator: &EntityAllocator, allocation_buffer: &mut Vec<Entity>, chunk: &mut ComponentStorage) -> usize {
                     #![allow(unused_variables)]
                     #![allow(unused_unsafe)]
                     #![allow(non_snake_case)]
@@ -1123,6 +1130,7 @@ mod tuple_impls {
                         while let Some(($( $id, )*)) = { if count == space { None } else { self.iter.next() } } {
                             let entity = allocator.create_entity();
                             entities.push(entity);
+                            allocation_buffer.push(entity);
 
                             // TODO: Trigger component addition events here
                             $(
@@ -1517,7 +1525,7 @@ mod tests {
         ];
         world.insert(shared, components);
 
-        assert_eq!(2, world.entity_allocator.allocation_buffer().len());
+        assert_eq!(2, world.allocation_buffer.len());
     }
 
     #[test]
@@ -1550,7 +1558,7 @@ mod tests {
             assert_eq!(Scale(2., 2., 2.), *world.get_component(*e).unwrap());
         }
 
-        assert_eq!(2, world.entity_allocator.allocation_buffer().len());
+        assert_eq!(2, world.allocation_buffer.len());
     }
 
     #[test]
@@ -1563,7 +1571,7 @@ mod tests {
         let components = vec![(4f32, 5u64, 6u16), (4f32, 5u64, 6u16)];
         world.insert(shared, components);
 
-        assert_eq!(2, world.entity_allocator.allocation_buffer().len());
+        assert_eq!(2, world.allocation_buffer.len());
     }
 
     #[test]
@@ -1580,13 +1588,7 @@ mod tests {
 
         world.insert(shared, components.clone());
 
-        for (i, e) in world
-            .entity_allocator
-            .allocation_buffer()
-            .to_vec()
-            .iter()
-            .enumerate()
-        {
+        for (i, e) in world.allocation_buffer.iter().enumerate() {
             match world.get_component(*e) {
                 Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
                 None => assert_eq!(components.get(i).map(|(x, _)| x), None),
@@ -1606,7 +1608,7 @@ mod tests {
 
         world.insert((), vec![(0f64,)]);
 
-        let entity = *world.entity_allocator.allocation_buffer().get(0).unwrap();
+        let entity = *world.allocation_buffer.get(0).unwrap();
 
         assert!(world.get_component::<i32>(entity).is_none());
     }
@@ -1625,7 +1627,7 @@ mod tests {
 
         world.insert(shared, components);
 
-        for e in world.entity_allocator.allocation_buffer().to_vec().iter() {
+        for e in world.allocation_buffer.iter() {
             assert_eq!(&Static, world.get_tag::<Static>(*e).unwrap().deref());
             assert_eq!(&Model(5), world.get_tag::<Model>(*e).unwrap().deref());
         }
@@ -1637,9 +1639,7 @@ mod tests {
 
         let mut world = create();
 
-        world.insert((Static,), vec![(0f64,)]);
-
-        let entity = *world.entity_allocator.allocation_buffer().get(0).unwrap();
+        let entity = world.insert((Static,), vec![(0f64,)])[0];
 
         assert!(world.get_tag::<Model>(entity).is_none());
     }
