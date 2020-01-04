@@ -886,6 +886,8 @@ impl ArchetypeData {
                             // Delegate the clone operation to the provided CloneImpl
                             clone_impl.clone_components(
                                 src_world,
+                                src_chunk,
+                                src_entity_start_idx..src_entity_end_idx,
                                 dst_resources,
                                 *src_type,
                                 &src_chunk.entities[src_entity_start_idx..src_entity_end_idx],
