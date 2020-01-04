@@ -900,6 +900,8 @@ pub trait CloneMergeImpl {
     fn clone_components(
         &self,
         src_world: &World,
+        src_component_storage: &ComponentStorage,
+        src_component_storage_indexes: core::ops::Range<usize>,
         dst_resources: &Resources,
         src_type: ComponentTypeId,
         src_entities: &[Entity],
