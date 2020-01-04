@@ -302,6 +302,16 @@ impl Resources {
             _marker: Default::default(),
         })
     }
+
+    /// Performs merging of two resource storages, which occurs during a world merge.
+    /// This merge will retain any already-existant resources in the local world, while moving any
+    /// new resources from the source world into this one, consuming the resources.
+    pub fn merge(&mut self, mut other: Resources) {
+        // Merge resources, retaining our local ones but moving in any non-existant ones
+        for resource in other.storage.drain() {
+            self.storage.entry(resource.0).or_insert(resource.1);
+        }
+    }
 }
 
 impl ResourceSet for () {

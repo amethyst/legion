@@ -823,6 +823,9 @@ impl World {
                 self.entity_allocator.set_location(entity.index(), location);
             }
         }
+
+        // Merge resources
+        self.resources.merge(world.resources);
     }
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<usize>
