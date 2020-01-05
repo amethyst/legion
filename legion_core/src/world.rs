@@ -731,6 +731,31 @@ impl World {
     /// Determines if the given `Entity` is alive within this `World`.
     pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
+    /// Returns the entity's component types, if the entity exists.
+    pub fn entity_component_types(&self, entity: Entity) -> Option<&[(ComponentTypeId, ComponentMeta)]> {
+        if !self.is_alive(entity) {
+            return None
+        }
+        let location = self
+            .entity_allocator
+            .get_location(entity.index());
+        let archetype = location.map(|location| self.storage().archetypes().get(location.archetype())).flatten();
+        archetype.map(|archetype| archetype.description().components())
+    }
+
+    /// Returns the entity's tag types, if the entity exists.
+    pub fn entity_tag_types(&self, entity: Entity) -> Option<&[(TagTypeId, TagMeta)]> {
+        if !self.is_alive(entity) {
+            return None
+        }
+        let location = self
+            .entity_allocator
+            .get_location(entity.index());
+        let archetype = location.map(|location| self.storage().archetypes().get(location.archetype())).flatten();
+        archetype.map(|archetype| archetype.description().tags())
+        
+    }
+
     /// Iteratively defragments the world's internal memory.
     ///
     /// This compacts entities into fewer more continuous chunks.
