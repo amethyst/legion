@@ -128,7 +128,7 @@ fn parallel(world: &mut World) {
     );
 }
 
-fn par_for_each(world: &mut World) {
+fn par_for_each_mut(world: &mut World) {
     join(
         || unsafe {
             <(Write<B>, Read<A>)>::query().par_for_each_unchecked(&world, |(mut b, a)| {
@@ -165,10 +165,10 @@ fn bench_ordered(c: &mut Criterion) {
             let mut world = setup(&data);
             join(|| {}, || b.iter(|| parallel(&mut world)));
         })
-        .with_function("par_for_each", |b, n| {
+        .with_function("par_for_each_mut", |b, n| {
             let data = data(*n);
             let mut world = setup(&data);
-            join(|| {}, || b.iter(|| par_for_each(&mut world)));
+            join(|| {}, || b.iter(|| par_for_each_mut(&mut world)));
         }),
     );
 }

@@ -45,7 +45,7 @@
 //! let mut query = <(Write<Position>, Read<Velocity>)>::query();
 //!
 //! // Iterate through all entities that match the query in the world
-//! for (mut pos, vel) in query.iter(&mut world) {
+//! for (mut pos, vel) in query.iter_mut(&mut world) {
 //!     pos.x += vel.dx;
 //!     pos.y += vel.dy;
 //! }
@@ -207,7 +207,7 @@
 //! let mut query = Read::<Transform>::query()
 //!     .filter(tag::<Model>());
 //!
-//! for chunk in query.iter_chunks(&mut world) {
+//! for chunk in query.iter_chunks_mut(&mut world) {
 //!     // get the chunk's model
 //!     let model: &Model = chunk.tag().unwrap();
 //!

@@ -144,7 +144,7 @@ fn bench_iter_chunks_simple(c: &mut Criterion) {
         let query = <(Write<Position>, Read<Rotation>)>::query();
 
         b.iter(|| {
-            for c in query.iter_chunks(&mut world) {
+            for c in query.iter_chunks_mut(&mut world) {
                 unsafe {
                     c.components_mut::<Position>()
                         .unwrap()
@@ -172,7 +172,7 @@ fn bench_iter_chunks_complex(c: &mut Criterion) {
             .filter(!component::<A>() & tag_value(&Tag(2.0)));
 
         b.iter(|| {
-            for c in query.iter_chunks(&mut world) {
+            for c in query.iter_chunks_mut(&mut world) {
                 unsafe {
                     c.components_mut::<Position>()
                         .unwrap()

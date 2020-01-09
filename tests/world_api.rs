@@ -402,7 +402,7 @@ fn mutate_change_tag() {
     assert_eq!(
         1,
         query_model_3
-            .iter_entities(&mut world)
+            .iter_entities_mut(&mut world)
             .map(|e| {
                 tracing::trace!("iter: {:?}", e);
                 e

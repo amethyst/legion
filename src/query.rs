@@ -485,7 +485,7 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
 
     /// Get an iterator of all data and entity IDs contained within the chunk.
     #[inline]
-    pub fn iter_entities(&mut self) -> ZipEntities<'a, V> {
+    pub fn iter_entities_mut(&mut self) -> ZipEntities<'a, V> {
         ZipEntities {
             entities: self.entities(),
             data: V::fetch(self.archetype, self.components, self.index),
@@ -732,7 +732,7 @@ where
                 }
             }
             match self.iter.next() {
-                Some(mut inner) => self.frontier = Some(inner.iter_entities()),
+                Some(mut inner) => self.frontier = Some(inner.iter_entities_mut()),
                 None => return None,
             }
         }
@@ -828,7 +828,7 @@ where
 /// // Tags are read-only, and is distinguished from entity data reads with `Tagged<T>`.
 /// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
-/// for (mut pos, vel, model) in query.iter(&mut world) {
+/// for (mut pos, vel, model) in query.iter_mut(&mut world) {
 ///     // `.iter` yields tuples of references to a single entity's data:
 ///     // pos: &mut Position
 ///     // vel: &Velocity
@@ -836,7 +836,7 @@ where
 /// }
 /// ```
 ///
-/// The lower level `iter_chunks` function allows access to each underlying chunk of entity data.
+/// The lower level `iter_chunks_mut` function allows access to each underlying chunk of entity data.
 /// This allows you to run code for each tag value, or to retrieve a contiguous data slice.
 ///
 /// ```rust
@@ -851,14 +851,14 @@ where
 /// # let mut world = universe.create_world();
 /// let mut query = <(Write<Position>, Read<Velocity>, Tagged<Model>)>::query();
 ///
-/// for chunk in query.iter_chunks(&mut world) {
+/// for chunk in query.iter_chunks_mut(&mut world) {
 ///     let model = chunk.tag::<Model>();
 ///     let positions = chunk.components_mut::<Position>();
 ///     let velocities = chunk.components::<Velocity>();
 /// }
 /// ```
 ///
-/// The `ChunkView` yielded from `iter_chunks` allows access to all shared data in the chunk (queried for or not),
+/// The `ChunkView` yielded from `iter_chunks_mut` allows access to all shared data in the chunk (queried for or not),
 /// but entity data slices can only be accessed if they were requested in the query's view. Attempting to access
 /// other data types, or attempting to write to components that were only requested via a `Read` will panic.
 #[derive(Derivative)]
@@ -920,7 +920,7 @@ where
     }
 
     /// Gets an iterator which iterates through all chunks that match the query.
-    pub fn iter_chunks_immutable<'a, 'data>(
+    pub fn iter_chunks<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
@@ -932,7 +932,7 @@ where
     }
 
     /// Gets an iterator which iterates through all chunks that match the query.
-    pub fn iter_chunks<'a, 'data>(
+    pub fn iter_chunks_mut<'a, 'data>(
         &'a self,
         world: &'data mut World,
     ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
@@ -966,7 +966,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
-    pub fn iter_entities_immutable<'a, 'data>(
+    pub fn iter_entities<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkEntityIter<
@@ -982,7 +982,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
-    pub fn iter_entities<'a, 'data>(
+    pub fn iter_entities_mut<'a, 'data>(
         &'a self,
         world: &'data mut World,
     ) -> ChunkEntityIter<
@@ -1020,7 +1020,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query.
-    pub fn iter_immutable<'a, 'data>(
+    pub fn iter<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkDataIter<
@@ -1036,7 +1036,7 @@ where
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query.
-    pub fn iter<'a, 'data>(
+    pub fn iter_mut<'a, 'data>(
         &'a self,
         world: &'data mut World,
     ) -> ChunkDataIter<
@@ -1066,7 +1066,7 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each_entities_immutable<'a, 'data, T>(&'a self, world: &'data World, f: T)
+    pub fn for_each_entities<'a, 'data, T>(&'a self, world: &'data World, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
         V: ReadOnly,
@@ -1076,7 +1076,7 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each_entities<'a, 'data, T>(&'a self, world: &'data mut World, f: T)
+    pub fn for_each_entities_mut<'a, 'data, T>(&'a self, world: &'data mut World, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
     {
@@ -1102,7 +1102,7 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each_immutable<'a, 'data, T>(&'a self, world: &'data World, f: T)
+    pub fn for_each<'a, 'data, T>(&'a self, world: &'data World, f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
         V: ReadOnly,
@@ -1112,7 +1112,7 @@ where
     }
 
     /// Iterates through all entity data that matches the query.
-    pub fn for_each<'a, 'data, T>(&'a self, world: &'data mut World, f: T)
+    pub fn for_each_mut<'a, 'data, T>(&'a self, world: &'data mut World, f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
@@ -1160,7 +1160,7 @@ where
 
     #[cfg(feature = "par-iter")]
     /// Gets an iterator which iterates through all chunks that match the query in parallel.
-    pub fn par_iter_chunks_immutable<'a, 'data>(
+    pub fn par_iter_chunks<'a, 'data>(
         &'a self,
         world: &'data World,
     ) -> ChunkViewParIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
@@ -1176,7 +1176,7 @@ where
 
     #[cfg(feature = "par-iter")]
     /// Gets an iterator which iterates through all chunks that match the query in parallel.
-    pub fn par_iter_chunks<'a, 'data>(
+    pub fn par_iter_chunks_mut<'a, 'data>(
         &'a self,
         world: &'data mut World,
     ) -> ChunkViewParIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
@@ -1208,7 +1208,7 @@ where
         <F::ChunkFilter as Filter<ChunkFilterData<'a>>>::Iter: FissileIterator,
     {
         self.par_for_each_chunk_unchecked(world, |mut chunk| {
-            for data in chunk.iter_entities() {
+            for data in chunk.iter_entities_mut() {
                 f(data);
             }
         });
@@ -1216,7 +1216,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_entities_for_each_immutable<'a, T>(&'a self, world: &'a World, f: T)
+    pub fn par_entities_for_each<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1230,7 +1230,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_entities_for_each<'a, T>(&'a self, world: &'a mut World, f: T)
+    pub fn par_entities_for_each_mut<'a, T>(&'a self, world: &'a mut World, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1268,7 +1268,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each_immutable<'a, T>(&'a self, world: &'a World, f: T)
+    pub fn par_for_each<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1282,7 +1282,7 @@ where
 
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each<'a, T>(&'a self, world: &'a mut World, f: T)
+    pub fn par_for_each_mut<'a, T>(&'a self, world: &'a mut World, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1319,7 +1319,7 @@ where
 
     /// Iterates through all chunks that match the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each_chunk_immutable<'a, T>(&'a self, world: &'a World, f: T)
+    pub fn par_for_each_chunk<'a, T>(&'a self, world: &'a World, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -1333,7 +1333,7 @@ where
 
     /// Iterates through all chunks that match the query in parallel.
     #[cfg(feature = "par-iter")]
-    pub fn par_for_each_chunk<'a, T>(&'a self, world: &'a mut World, f: T)
+    pub fn par_for_each_chunk_mut<'a, T>(&'a self, world: &'a mut World, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,

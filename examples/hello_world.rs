@@ -25,7 +25,7 @@ fn main() {
 
     // update positions
     let query = <(Write<Pos>, Read<Vel>)>::query();
-    for (mut pos, vel) in query.iter(&mut world) {
+    for (mut pos, vel) in query.iter_mut(&mut world) {
         pos.0 += vel.0;
         pos.1 += vel.1;
         pos.2 += vel.2;
@@ -35,7 +35,7 @@ fn main() {
     let update_positions = SystemBuilder::new("update_positions")
         .with_query(<(Write<Pos>, Read<Vel>)>::query())
         .build(|_, mut world, _, query| {
-            for (mut pos, vel) in query.iter(&mut world) {
+            for (mut pos, vel) in query.iter_mut(&mut world) {
                 pos.0 += vel.0;
                 pos.1 += vel.1;
                 pos.2 += vel.2;
