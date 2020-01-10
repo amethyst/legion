@@ -65,15 +65,14 @@ impl<T> AtomicRefCell<T> {
     /// `Some(T)` if the value can be retrieved.
     /// `Err` if the value is already mutably borrowed.
     #[cfg(debug_assertions)]
-    pub fn try_get(&self) -> Result<Ref<T>, &'static str> {
+    pub fn try_get(&self) -> Result<Ref<T>, String> {
         loop {
             let read = self.borrow_state.load(std::sync::atomic::Ordering::SeqCst);
             if read < 0 {
-                println!(
+                return Err(format!(
                     "resource already borrowed as mutable: {}",
                     std::any::type_name::<T>()
-                );
-                return Err("resource already borrowed as mutable");
+                ));
             }
 
             if self.borrow_state.compare_and_swap(
@@ -138,7 +137,7 @@ impl<T> AtomicRefCell<T> {
     /// cause undefined behavior if borrow rules are violated. This means they should be enforced
     /// on the use of this type.
     #[cfg(debug_assertions)]
-    pub fn try_get_mut(&self) -> Result<RefMut<T>, &'static str> {
+    pub fn try_get_mut(&self) -> Result<RefMut<T>, String> {
         let borrowed =
             self.borrow_state
                 .compare_and_swap(0, -1, std::sync::atomic::Ordering::SeqCst);
@@ -146,20 +145,14 @@ impl<T> AtomicRefCell<T> {
             0 => Ok(RefMut::new(Exclusive::new(&self.borrow_state), unsafe {
                 &mut *self.value.get()
             })),
-            x if x < 0 => {
-                println!(
-                    "resource already borrowed as mutable: {}",
-                    std::any::type_name::<T>()
-                );
-                Err("resource already borrowed as mutable")
-            }
-            _ => {
-                println!(
-                    "resource already borrowed as immutable: {}",
-                    std::any::type_name::<T>()
-                );
-                Err("resource already borrowed as immutable")
-            }
+            x if x < 0 => Err(format!(
+                "resource already borrowed as mutable: {}",
+                std::any::type_name::<T>()
+            )),
+            _ => Err(format!(
+                "resource already borrowed as immutable: {}",
+                std::any::type_name::<T>()
+            )),
         }
     }
 
