@@ -855,7 +855,7 @@ where
         let _guard = span.enter();
 
         debug!("Initializing");
-        let mut resources = R::fetch(&world.resources);
+        let mut resources = unsafe { R::fetch_unchecked(&world.resources) };
         let mut queries = self.queries.get_mut();
         let mut prepared_queries = unsafe { queries.prepare() };
         let mut world_shim =

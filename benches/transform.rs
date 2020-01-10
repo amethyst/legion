@@ -65,7 +65,7 @@ fn sequential(world: &mut World) {
         Read<Scale>,
         Write<Transform>,
     )>::query()
-    .iter(world)
+    .iter_mut(world)
     {
         trans.0 = process(&pos.0, &orient.0, &scale.0);
     }

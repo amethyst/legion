@@ -104,11 +104,11 @@ fn ideal(ab: &mut Vec<(A, B)>, ac: &mut Vec<(A, C)>) {
 }
 
 fn sequential(world: &mut World) {
-    for (mut b, a) in <(Write<B>, Read<A>)>::query().iter(world) {
+    for (mut b, a) in <(Write<B>, Read<A>)>::query().iter_mut(world) {
         b.0 = a.0;
     }
 
-    for (mut c, a) in <(Write<C>, Read<A>)>::query().iter(world) {
+    for (mut c, a) in <(Write<C>, Read<A>)>::query().iter_mut(world) {
         c.0 = a.0;
     }
 }
