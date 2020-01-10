@@ -59,7 +59,7 @@ fn main() {
         .build(|_, mut world, (res1, res2), query| {
             res1.0 = res2.0.clone(); // Write the mutable resource from the immutable resource
 
-            for (mut pos, vel) in query.iter(&mut world) {
+            for (mut pos, vel) in query.iter_mut(&mut world) {
                 pos.0 += vel.0;
                 pos.1 += vel.1;
                 pos.2 += vel.2;
@@ -92,7 +92,7 @@ fn main() {
     let thread_local_example = Box::new(|world: &mut World| {
         // This is an example of a thread local system which has full, exclusive mutable access to the world.
         let query = <(Write<Pos>, Read<Vel>)>::query();
-        for (mut pos, vel) in query.iter(world) {
+        for (mut pos, vel) in query.iter_mut(world) {
             pos.0 += vel.0;
             pos.1 += vel.1;
             pos.2 += vel.2;

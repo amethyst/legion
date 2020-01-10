@@ -45,7 +45,7 @@ impl ResourceTypeId {
 /// resources.insert(TypeB(12));
 ///
 /// {
-///     let (a, mut b) = <(Read<TypeA>, Write<TypeB>)>::fetch(&resources);
+///     let (a, mut b) = <(Read<TypeA>, Write<TypeB>)>::fetch_mut(&mut resources);
 ///     assert_ne!(a.0, b.0);
 ///     b.0 = a.0;
 /// }
@@ -339,7 +339,7 @@ impl<T: Resource> ResourceSet for Read<T> {
         let resource = resources
             .get::<T>()
             .unwrap_or_else(|| panic!("Failed to fetch resource!: {}", std::any::type_name::<T>()));
-        unsafe { PreparedRead::new(resource.deref() as *const T) }
+        PreparedRead::new(resource.deref() as *const T)
     }
 }
 impl<T: Resource> ResourceSet for Write<T> {
@@ -349,7 +349,7 @@ impl<T: Resource> ResourceSet for Write<T> {
         let mut resource = resources
             .get_mut::<T>()
             .unwrap_or_else(|| panic!("Failed to fetch resource!: {}", std::any::type_name::<T>()));
-        unsafe { PreparedWrite::new(resource.deref_mut() as *mut T) }
+        PreparedWrite::new(resource.deref_mut() as *mut T)
     }
 }
 

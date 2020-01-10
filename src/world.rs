@@ -273,7 +273,7 @@ impl World {
                     .archetypes_mut()
                     .get_unchecked_mut(archetype_index)
             };
-            let chunk_index = archetype.get_free_chunk(chunk_set_index);
+            let chunk_index = archetype.get_free_chunk(chunk_set_index, 1);
             let chunk = unsafe {
                 archetype
                     .chunksets_mut()

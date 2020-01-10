@@ -357,7 +357,7 @@ impl legion::de::WorldDeserializer for DeserializeImpl {
     fn deserialize_entities<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
-        entity_allocator: &mut EntityAllocator,
+        entity_allocator: &EntityAllocator,
         entities: &mut Vec<Entity>,
     ) -> Result<(), <D as Deserializer<'de>>::Error> {
         let entity_uuids = <Vec<uuid::Bytes> as Deserialize>::deserialize(deserializer)?;
