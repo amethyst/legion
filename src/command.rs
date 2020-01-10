@@ -48,13 +48,6 @@ where
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
 
-        tracing::trace!(
-            "insert_buffered, ({}. {}), {:?}",
-            std::any::type_name::<T>(),
-            std::any::type_name::<C>(),
-            consumed.entities
-        );
-
         world.insert_buffered(&consumed.entities, consumed.tags, consumed.components);
     }
 
@@ -79,11 +72,6 @@ where
     C: IntoComponentSource,
 {
     fn write(self: Arc<Self>, world: &mut World) {
-        tracing::trace!(
-            "insert, ({}. {})",
-            std::any::type_name::<T>(),
-            std::any::type_name::<C>()
-        );
         let consumed = Arc::try_unwrap(self).unwrap();
         world.insert(consumed.tags, consumed.components);
     }
@@ -96,10 +84,7 @@ where
 #[derivative(Debug(bound = ""))]
 struct DeleteEntityCommand(Entity);
 impl WorldWritable for DeleteEntityCommand {
-    fn write(self: Arc<Self>, world: &mut World) {
-        tracing::trace!("delete_entity, type = {}", self.0);
-        world.delete(self.0);
-    }
+    fn write(self: Arc<Self>, world: &mut World) { world.delete(self.0); }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
     fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
@@ -118,7 +103,6 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        tracing::trace!("add_tag, type = {}", std::any::type_name::<T>());
         world.add_tag(consumed.entity, consumed.tag)
     }
 
@@ -136,14 +120,7 @@ impl<T> WorldWritable for RemoveTagCommand<T>
 where
     T: Tag,
 {
-    fn write(self: Arc<Self>, world: &mut World) {
-        tracing::trace!(
-            "remove_tag, type = {}, entity = {:?}",
-            std::any::type_name::<T>(),
-            self.entity
-        );
-        world.remove_tag::<T>(self.entity)
-    }
+    fn write(self: Arc<Self>, world: &mut World) { world.remove_tag::<T>(self.entity) }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
     fn write_tags(&self) -> Vec<TagTypeId> { vec![TagTypeId::of::<T>()] }
@@ -163,11 +140,6 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        tracing::trace!(
-            "add_component, type = {}, entity = {:?}",
-            std::any::type_name::<C>(),
-            consumed.entity
-        );
         world
             .add_component::<C>(consumed.entity, consumed.component)
             .unwrap();
@@ -187,10 +159,7 @@ impl<C> WorldWritable for RemoveComponentCommand<C>
 where
     C: Component,
 {
-    fn write(self: Arc<Self>, world: &mut World) {
-        tracing::trace!("remove_component, type = {}", std::any::type_name::<C>());
-        world.remove_component::<C>(self.entity)
-    }
+    fn write(self: Arc<Self>, world: &mut World) { world.remove_component::<C>(self.entity) }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }
     fn write_tags(&self) -> Vec<TagTypeId> { Vec::with_capacity(0) }
@@ -314,9 +283,12 @@ impl std::error::Error for CommandError {
 /// This buffer operates as follows:
 ///     - All commands are queued as trait object of type `WorldWritable`, to be executed when `CommandBuffer:write` is called.
 ///     - Entities are allocated at the time of `CommandBuffer:write` occuring, being directly allocated from the world
-///       and cached internally in the system. This means that only N number of entities can be directly retrieved
-///       from any `CommandBuffer` in a single frame. This upper limit can be changed via `SystemBuilder::with_command_buffer_size`
-///       for specific systems, or globally via `World::set_command_buffer_size`.
+///       and cached internally in the system. This upper cache size can be changed via `SystemBuilder::with_command_buffer_size`
+///       for specific systems, or globally via `World::set_command_buffer_size`. In the event the cached entity count is exceeded,
+///       the cache will be refilled on demand from the world `EntityAllocator`.
+///  
+/// This behavior exists because `EntityAllocator` is a shared lock within the world, so in order to reduce lock contention with many
+/// systems running and adding entities, the `CommandBuffer` will cache the configured number of entities - reducing contention.
 ///
 /// # Examples
 ///
@@ -412,11 +384,11 @@ impl CommandBuffer {
         }
     }
 
-    /// Changes the capacity of this `Commandbuffer` to the specified capacity. This includes shrinking
+    /// Changes the cached capacity of this `CommandBuffer` to the specified capacity. This includes shrinking
     /// and growing the allocated entities, and possibly returning them to the entity allocator in the
     /// case of a shrink.
     ///
-    /// This function does *NOT* set the `Commandbuffer::custom_capacity` override.
+    /// This function does *NOT* set the `CommandBuffer::custom_capacity` override.
     #[allow(clippy::comparison_chain)]
     pub fn resize(&mut self, capacity: usize) {
         let allocator = &self.entity_allocator;
