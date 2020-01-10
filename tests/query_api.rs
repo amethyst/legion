@@ -45,7 +45,7 @@ fn query_read_entity_data() {
     let query = Read::<Pos>::query();
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities(&mut world) {
+    for (entity, pos) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -84,7 +84,7 @@ fn query_try_write_entity_data() {
     let entity = world.insert((), Some((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))))[0];
 
     let query = TryWrite::<Rot>::query();
-    for mut x in query.iter(&mut world).filter_map(|x| x) {
+    for mut x in query.iter_mut(&mut world).filter_map(|x| x) {
         *x = Rot(9.0, 9.0, 9.0);
     }
     assert_eq!(
@@ -117,7 +117,7 @@ fn query_cached_read_entity_data() {
     let query = Read::<Pos>::query(); //.cached();
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities(&mut world) {
+    for (entity, pos) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -149,8 +149,8 @@ fn query_read_entity_data_par() {
 
     let count = AtomicUsize::new(0);
     let query = Read::<Pos>::query();
-    query.par_for_each_chunk(&mut world, |mut chunk| {
-        for (entity, pos) in chunk.iter_entities() {
+    query.par_for_each_chunk_mut(&mut world, |mut chunk| {
+        for (entity, pos) in chunk.iter_entities_mut() {
             assert_eq!(expected.get(&entity).unwrap().0, *pos);
             count.fetch_add(1, Ordering::SeqCst);
         }
@@ -183,7 +183,7 @@ fn query_read_entity_data_par_foreach() {
 
     let count = AtomicUsize::new(0);
     let query = Read::<Pos>::query();
-    query.par_for_each(&mut world, |_pos| {
+    query.par_for_each_mut(&mut world, |_pos| {
         count.fetch_add(1, Ordering::SeqCst);
     });
 
@@ -214,7 +214,7 @@ fn query_read_entity_data_tuple() {
     let query = <(Read<Pos>, Read<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, rot)) in query.iter_entities(&mut world) {
+    for (entity, (pos, rot)) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
@@ -247,7 +247,7 @@ fn query_write_entity_data() {
     let query = Write::<Pos>::query();
 
     let mut count = 0;
-    for (entity, mut pos) in query.iter_entities(&mut world) {
+    for (entity, mut pos) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
 
@@ -281,7 +281,7 @@ fn query_write_entity_data_tuple() {
     let query = <(Write<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (mut pos, mut rot)) in query.iter_entities(&mut world) {
+    for (entity, (mut pos, mut rot)) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
@@ -317,7 +317,7 @@ fn query_mixed_entity_data_tuple() {
     let query = <(Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, mut rot)) in query.iter_entities(&mut world) {
+    for (entity, (pos, mut rot)) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
@@ -352,7 +352,7 @@ fn query_partial_match() {
     let query = <(Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, mut rot)) in query.iter_entities(&mut world) {
+    for (entity, (pos, mut rot)) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
@@ -413,7 +413,7 @@ fn query_on_changed_first() {
     let query = Read::<Pos>::query().filter(changed::<Pos>() | changed::<Rot>());
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities(&mut world) {
+    for (entity, pos) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -445,7 +445,7 @@ fn query_on_changed_no_changes() {
     let query = Read::<Pos>::query().filter(changed::<Pos>());
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities(&mut world) {
+    for (entity, pos) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -453,7 +453,7 @@ fn query_on_changed_no_changes() {
     assert_eq!(components.len(), count);
 
     count = 0;
-    for (entity, pos) in query.iter_entities(&mut world) {
+    for (entity, pos) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -485,7 +485,7 @@ fn query_on_changed_self_changes() {
     let query = Write::<Pos>::query().filter(changed::<Pos>());
 
     let mut count = 0;
-    for (entity, mut pos) in query.iter_entities(&mut world) {
+    for (entity, mut pos) in query.iter_entities_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         *pos = Pos(1., 1., 1.);
         count += 1;
@@ -494,7 +494,7 @@ fn query_on_changed_self_changes() {
     assert_eq!(components.len(), count);
 
     count = 0;
-    for pos in query.iter(&mut world) {
+    for pos in query.iter_mut(&mut world) {
         assert_eq!(Pos(1., 1., 1.), *pos);
         count += 1;
     }
@@ -525,7 +525,7 @@ fn query_try_with_changed_filter() {
         <(Write<Sum>, TryRead<A>, TryRead<B>)>::query().filter(changed::<A>() | changed::<B>());
 
     let mut count = 0;
-    for (mut sum, a, b) in query.iter(&mut world) {
+    for (mut sum, a, b) in query.iter_mut(&mut world) {
         sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
         count += 1;
     }
@@ -548,7 +548,7 @@ fn query_try_with_changed_filter() {
     );
 
     count = 0;
-    for (mut sum, a, b) in query.iter(&mut world) {
+    for (mut sum, a, b) in query.iter_mut(&mut world) {
         sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
         count += 1;
     }
@@ -556,7 +556,7 @@ fn query_try_with_changed_filter() {
 
     *world.get_component_mut::<B>(a_b_entity).unwrap() = B(3.0);
     count = 0;
-    for (mut sum, a, b) in query.iter(&mut world) {
+    for (mut sum, a, b) in query.iter_mut(&mut world) {
         sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
         count += 1;
     }
@@ -580,7 +580,7 @@ fn query_iter_chunks_tag() {
 
     let query = <(Tagged<Static>, Tagged<Model>)>::query();
 
-    for chunk in query.iter_chunks_immutable(&world) {
+    for chunk in query.iter_chunks(&world) {
         let model = chunk.tag::<Model>().cloned();
         for entity in chunk.entities() {
             assert_eq!(world.get_tag::<Model>(*entity), model.as_ref());

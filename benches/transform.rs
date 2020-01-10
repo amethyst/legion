@@ -65,20 +65,20 @@ fn sequential(world: &mut World) {
         Read<Scale>,
         Write<Transform>,
     )>::query()
-    .iter(world)
+    .iter_mut(world)
     {
         trans.0 = process(&pos.0, &orient.0, &scale.0);
     }
 }
 
-fn par_for_each(world: &mut World) {
+fn par_for_each_mut(world: &mut World) {
     <(
         Read<Position>,
         Read<Orientation>,
         Read<Scale>,
         Write<Transform>,
     )>::query()
-    .par_for_each(world, |(pos, orient, scale, mut trans)| {
+    .par_for_each_mut(world, |(pos, orient, scale, mut trans)| {
         trans.0 = process(&pos.0, &orient.0, &scale.0);
     });
 }
@@ -99,10 +99,10 @@ fn bench_transform(c: &mut Criterion) {
             let mut world = setup(data);
             b.iter(|| sequential(&mut world));
         })
-        .with_function("par_for_each", |b, n| {
+        .with_function("par_for_each_mut", |b, n| {
             let data = data(*n);
             let mut world = setup(data);
-            join(|| {}, || b.iter(|| par_for_each(&mut world)));
+            join(|| {}, || b.iter(|| par_for_each_mut(&mut world)));
         }),
     );
 }

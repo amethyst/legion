@@ -1,5 +1,5 @@
 use crate::borrow::{AtomicRefCell, Ref, RefMut};
-use crate::query::{Read, Write};
+use crate::query::{Read, ReadOnly, Write};
 use downcast_rs::{impl_downcast, Downcast};
 use fxhash::FxHashMap;
 use std::{
@@ -59,7 +59,19 @@ impl ResourceTypeId {
 pub trait ResourceSet: Send + Sync {
     type PreparedResources;
 
-    fn fetch(resources: &Resources) -> Self::PreparedResources;
+    unsafe fn fetch_unchecked(resources: &Resources) -> Self::PreparedResources;
+
+    fn fetch_mut(resources: &mut Resources) -> Self::PreparedResources {
+        // safe because mutable borrow ensures exclusivity
+        unsafe { Self::fetch_unchecked(resources) }
+    }
+
+    fn fetch(resources: &Resources) -> Self::PreparedResources
+    where
+        Self: ReadOnly,
+    {
+        unsafe { Self::fetch_unchecked(resources) }
+    }
 }
 
 /// Blanket trait for resource types.
@@ -317,13 +329,13 @@ impl Resources {
 impl ResourceSet for () {
     type PreparedResources = ();
 
-    fn fetch(_: &Resources) {}
+    unsafe fn fetch_unchecked(_: &Resources) {}
 }
 
 impl<T: Resource> ResourceSet for Read<T> {
     type PreparedResources = PreparedRead<T>;
 
-    fn fetch(resources: &Resources) -> Self::PreparedResources {
+    unsafe fn fetch_unchecked(resources: &Resources) -> Self::PreparedResources {
         let resource = resources
             .get::<T>()
             .unwrap_or_else(|| panic!("Failed to fetch resource!: {}", std::any::type_name::<T>()));
@@ -333,7 +345,7 @@ impl<T: Resource> ResourceSet for Read<T> {
 impl<T: Resource> ResourceSet for Write<T> {
     type PreparedResources = PreparedWrite<T>;
 
-    fn fetch(resources: &Resources) -> Self::PreparedResources {
+    unsafe fn fetch_unchecked(resources: &Resources) -> Self::PreparedResources {
         let mut resource = resources
             .get_mut::<T>()
             .unwrap_or_else(|| panic!("Failed to fetch resource!: {}", std::any::type_name::<T>()));
@@ -348,9 +360,9 @@ macro_rules! impl_resource_tuple {
         {
             type PreparedResources = ($( $ty::PreparedResources, )*);
 
-            fn fetch(resources: &Resources) -> Self::PreparedResources {
-                ($( $ty::fetch(resources), )*)
-             }
+            unsafe fn fetch_unchecked(resources: &Resources) -> Self::PreparedResources {
+                ($( $ty::fetch_unchecked(resources), )*)
+            }
         }
     };
 }

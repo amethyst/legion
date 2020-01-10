@@ -45,7 +45,7 @@ fn main() {
     // update positions
     // This example shows the use of a `iter`, which is default mutable, across a query.
     let query = <(Write<Pos>, Read<Vel>)>::query();
-    for (mut pos, vel) in query.iter(&mut world) {
+    for (mut pos, vel) in query.iter_mut(&mut world) {
         pos.0 += vel.0;
         pos.1 += vel.1;
         pos.2 += vel.2;

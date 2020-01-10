@@ -151,7 +151,7 @@ fn render_instanced(model: &Model, transforms: &[Transform]) {
 let query = Read::<Transform>::query()
     .filter(tag::<Model>());
 
-for chunk in query.iter_chunks(&mut world) {
+for chunk in query.iter_chunks_mut(&mut world) {
     // get the chunk's model
     let model: &Model = chunk.tag().unwrap();
 

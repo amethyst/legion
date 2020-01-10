@@ -160,7 +160,7 @@ where
 
     /// Gets an iterator which iterates through all chunks that match the query.
     #[inline]
-    pub fn iter_chunks_immutable<'a, 'b>(
+    pub fn iter_chunks<'a, 'b>(
         &'b self,
         world: &SubWorld,
     ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
@@ -173,7 +173,7 @@ where
 
     /// Gets an iterator which iterates through all chunks that match the query.
     #[inline]
-    pub fn iter_chunks<'a, 'b>(
+    pub fn iter_chunks_mut<'a, 'b>(
         &'b self,
         world: &mut SubWorld,
     ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
@@ -205,7 +205,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     #[inline]
-    pub fn iter_entities_immutable<'a, 'b>(
+    pub fn iter_entities<'a, 'b>(
         &'b self,
         world: &SubWorld,
     ) -> ChunkEntityIter<
@@ -222,7 +222,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     #[inline]
-    pub fn iter_entities<'a, 'b>(
+    pub fn iter_entities_mut<'a, 'b>(
         &'b self,
         world: &mut SubWorld,
     ) -> ChunkEntityIter<
@@ -258,7 +258,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query.
     #[inline]
-    pub fn iter_immutable<'a, 'data>(
+    pub fn iter<'a, 'data>(
         &'a self,
         world: &SubWorld,
     ) -> ChunkDataIter<
@@ -275,7 +275,7 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query.
     #[inline]
-    pub fn iter<'a, 'data>(
+    pub fn iter_mut<'a, 'data>(
         &'a self,
         world: &mut SubWorld,
     ) -> ChunkDataIter<
@@ -307,7 +307,7 @@ where
 
     /// Iterates through all entity data that matches the query.
     #[inline]
-    pub fn for_each_immutable<'a, 'data, T>(&'a self, world: &SubWorld, f: T)
+    pub fn for_each<'a, 'data, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
         V: ReadOnly,
@@ -318,7 +318,7 @@ where
 
     /// Iterates through all entity data that matches the query.
     #[inline]
-    pub fn for_each<'a, 'data, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn for_each_mut<'a, 'data, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
     {
@@ -350,7 +350,7 @@ where
     /// Iterates through all entity data that matches the query.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn for_each_entities_immutable<'a, 'data, T>(&'a self, world: &SubWorld, f: T)
+    pub fn for_each_entities<'a, 'data, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
         V: ReadOnly,
@@ -362,7 +362,7 @@ where
     /// Iterates through all entity data that matches the query.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn for_each_entities<'a, 'data, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn for_each_entities_mut<'a, 'data, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
     {
@@ -397,7 +397,7 @@ where
     /// Iterates through all entities that matches the query in parallel by chunk.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_entities_for_each_immutable<'a, T>(&'a self, world: &SubWorld, f: T)
+    pub fn par_entities_for_each<'a, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -412,7 +412,7 @@ where
     /// Iterates through all entities that matches the query in parallel by chunk.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_entities_for_each<'a, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn par_entities_for_each_mut<'a, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn((Entity, <<V as View<'a>>::Iter as Iterator>::Item)) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -448,7 +448,7 @@ where
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each_immutable<'a, T>(&'a self, world: &SubWorld, f: T)
+    pub fn par_for_each<'a, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -463,7 +463,7 @@ where
     /// Iterates through all entity data that matches the query in parallel.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each<'a, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn par_for_each_mut<'a, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn(<<V as View<'a>>::Iter as Iterator>::Item) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -501,7 +501,7 @@ where
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each_chunk_immutable<'a, T>(&'a self, world: &SubWorld, f: T)
+    pub fn par_for_each_chunk<'a, T>(&'a self, world: &SubWorld, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -516,7 +516,7 @@ where
     /// Gets a parallel iterator of chunks that match the query.
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each_chunk<'a, T>(&'a self, world: &mut SubWorld, f: T)
+    pub fn par_for_each_chunk_mut<'a, T>(&'a self, world: &mut SubWorld, f: T)
     where
         T: Fn(Chunk<'a, V>) + Send + Sync,
         <F::ArchetypeFilter as Filter<ArchetypeFilterData<'a>>>::Iter: FissileIterator,
@@ -855,7 +855,7 @@ where
         let _guard = span.enter();
 
         debug!("Initializing");
-        let mut resources = R::fetch(&world.resources);
+        let mut resources = unsafe { R::fetch_unchecked(&world.resources) };
         let mut queries = self.queries.get_mut();
         let mut prepared_queries = unsafe { queries.prepare() };
         let mut world_shim =
@@ -943,7 +943,7 @@ where
 ///            .build(move |commands, world, resource, queries| {
 ///               let mut count = 0;
 ///                {
-///                    for (entity, pos) in queries.iter_entities(&mut *world) {
+///                    for (entity, pos) in queries.iter_entities_mut(&mut *world) {
 ///
 ///                    }
 ///                }
@@ -1324,7 +1324,7 @@ mod tests {
                 assert_eq!(resource.0, 123);
                 let mut count = 0;
                 {
-                    for (entity, pos) in queries.0.iter_entities_immutable(world) {
+                    for (entity, pos) in queries.0.iter_entities(world) {
                         assert_eq!(expected.get(&entity).unwrap().0, *pos);
                         count += 1;
                     }
@@ -1399,7 +1399,7 @@ mod tests {
             .build(move |_, world, _, query| {
                 let mut count = 0;
                 {
-                    for (entity, (pos, vel)) in query.iter_entities_immutable(world) {
+                    for (entity, (pos, vel)) in query.iter_entities(world) {
                         assert_eq!(expected_copy.get(&entity).unwrap().0, *pos);
                         assert_eq!(expected_copy.get(&entity).unwrap().1, *vel);
                         count += 1;
@@ -1448,7 +1448,7 @@ mod tests {
             .build(move |command_buffer, world, _, query| {
                 let mut count = 0;
                 {
-                    for (entity, (pos, vel)) in query.iter_entities_immutable(world) {
+                    for (entity, (pos, vel)) in query.iter_entities(world) {
                         assert_eq!(expected_copy.get(&entity).unwrap().0, *pos);
                         assert_eq!(expected_copy.get(&entity).unwrap().1, *vel);
                         count += 1;
@@ -1638,7 +1638,7 @@ mod tests {
         let system2 = SystemBuilder::<()>::new("TestSystem2")
             .with_query(<(Write<Comp1>, Read<Comp2>)>::query())
             .build(move |_, world, _, query| {
-                query.iter(world).for_each(|(mut one, two)| {
+                query.iter_mut(world).for_each(|(mut one, two)| {
                     one.0 = 456.;
                     one.1 = 456.;
                     one.2 = 456.;
@@ -1652,7 +1652,7 @@ mod tests {
         let system3 = SystemBuilder::<()>::new("TestSystem3")
             .with_query(<(Write<Comp1>, Write<Comp2>)>::query())
             .build(move |_, world, _, query| {
-                query.iter(world).for_each(|(mut one, two)| {
+                query.iter_mut(world).for_each(|(mut one, two)| {
                     assert_eq!(one.0, 456.);
                     assert_eq!(one.1, 456.);
                     assert_eq!(one.2, 456.);
@@ -1688,7 +1688,7 @@ mod tests {
         let system5 = SystemBuilder::<()>::new("TestSystem5")
             .with_query(<(Write<Comp1>, Write<Comp2>)>::query())
             .build(move |_, world, _, query| {
-                query.iter(world).for_each(|(mut one, mut two)| {
+                query.iter_mut(world).for_each(|(mut one, mut two)| {
                     assert_eq!(one.0, 789.);
                     assert_eq!(one.1, 789.);
                     assert_eq!(one.2, 789.);

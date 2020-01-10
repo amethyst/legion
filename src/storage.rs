@@ -45,7 +45,7 @@ fn next_version() -> u64 {
 #[cfg(not(feature = "ffi"))]
 /// A type ID identifying a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub struct ComponentTypeId(TypeId);
+pub struct ComponentTypeId(pub TypeId);
 
 #[cfg(not(feature = "ffi"))]
 impl ComponentTypeId {
@@ -56,7 +56,7 @@ impl ComponentTypeId {
 #[cfg(feature = "ffi")]
 /// A type ID identifying a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub struct ComponentTypeId(TypeId, u32);
+pub struct ComponentTypeId(pub TypeId, pub u32);
 
 #[cfg(feature = "ffi")]
 impl ComponentTypeId {
@@ -67,7 +67,7 @@ impl ComponentTypeId {
 #[cfg(not(feature = "ffi"))]
 /// A type ID identifying a tag type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub struct TagTypeId(TypeId);
+pub struct TagTypeId(pub TypeId);
 
 #[cfg(not(feature = "ffi"))]
 impl TagTypeId {
@@ -78,7 +78,7 @@ impl TagTypeId {
 #[cfg(feature = "ffi")]
 /// A type ID identifying a tag type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub struct TagTypeId(TypeId, u32);
+pub struct TagTypeId(pub TypeId, pub u32);
 
 #[cfg(feature = "ffi")]
 impl TagTypeId {
@@ -272,7 +272,7 @@ impl Storage {
 }
 
 /// Stores metadata decribing the type of a tag.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct TagMeta {
     size: usize,
     align: usize,
@@ -296,9 +296,15 @@ impl TagMeta {
         }
     }
 
-    pub(crate) fn equals(&self, a: *const u8, b: *const u8) -> bool { (self.eq_fn)(a, b) }
+    pub(crate) unsafe fn equals(&self, a: *const u8, b: *const u8) -> bool { (self.eq_fn)(a, b) }
 
-    pub(crate) fn clone(&self, src: *const u8, dst: *mut u8) { (self.clone_fn)(src, dst) }
+    pub(crate) unsafe fn clone(&self, src: *const u8, dst: *mut u8) { (self.clone_fn)(src, dst) }
+
+    pub(crate) unsafe fn drop(&self, val: *mut u8) {
+        if let Some(drop_fn) = self.drop_fn {
+            (drop_fn)(val);
+        }
+    }
 
     pub(crate) fn layout(&self) -> std::alloc::Layout {
         unsafe { std::alloc::Layout::from_size_align_unchecked(self.size, self.align) }
@@ -308,7 +314,7 @@ impl TagMeta {
 }
 
 /// Stores metadata describing the type of a component.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct ComponentMeta {
     size: usize,
     align: usize,
@@ -324,11 +330,15 @@ impl ComponentMeta {
             drop_fn: Some(|ptr| unsafe { std::ptr::drop_in_place(ptr as *mut T) }),
         }
     }
+
+    pub(crate) fn size(&self) -> usize { self.size }
+
+    pub(crate) fn align(&self) -> usize { self.align }
 }
 
 /// Describes the layout of an archetype, including what components
 /// and tags shall be attached to entities stored within an archetype.
-#[derive(Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub struct ArchetypeDescription {
     tags: Vec<(TagTypeId, TagMeta)>,
     components: Vec<(ComponentTypeId, ComponentMeta)>,
@@ -402,7 +412,7 @@ impl ArchetypeId {
 }
 
 /// Contains all of the tags attached to the entities in each chunk.
-pub struct Tags(SmallVec<[(TagTypeId, TagStorage); 3]>);
+pub struct Tags(pub(crate) SmallVec<[(TagTypeId, TagStorage); 3]>);
 
 impl Tags {
     fn new(mut data: SmallVec<[(TagTypeId, TagStorage); 3]>) -> Self {
@@ -627,19 +637,19 @@ impl ArchetypeData {
 
     pub(crate) fn merge(&mut self, mut other: ArchetypeData) {
         let other_tags = &other.tags;
-        for (i, mut set) in other.chunk_sets.drain(..).enumerate() {
+        for (other_index, mut set) in other.chunk_sets.drain(..).enumerate() {
             // search for a matching chunk set
             let mut set_match = None;
-            for index in 0..self.chunk_sets.len() {
+            for self_index in 0..self.chunk_sets.len() {
                 let mut matches = true;
                 for (type_id, tags) in self.tags.0.iter() {
                     unsafe {
-                        let (a_ptr, size, _) = tags.data_raw();
-                        let (b_ptr, _, _) = other_tags.get(*type_id).unwrap().data_raw();
+                        let (self_tag_ptr, size, _) = tags.data_raw();
+                        let (other_tag_ptr, _, _) = other_tags.get(*type_id).unwrap().data_raw();
 
                         if !tags.element().equals(
-                            a_ptr.as_ptr().add(index * size),
-                            b_ptr.as_ptr().add(i * size),
+                            self_tag_ptr.as_ptr().add(self_index * size),
+                            other_tag_ptr.as_ptr().add(other_index * size),
                         ) {
                             matches = false;
                             break;
@@ -648,7 +658,7 @@ impl ArchetypeData {
                 }
 
                 if matches {
-                    set_match = Some(i);
+                    set_match = Some(self_index);
                     break;
                 }
             }
@@ -729,13 +739,14 @@ impl ArchetypeData {
         self.chunk_sets.len() - 1
     }
 
-    /// Finds a chunk with space free for at least one entity, creating one if needed.
-    pub(crate) fn get_free_chunk(&mut self, set_index: usize) -> usize {
+    /// Finds a chunk with space free for at least `minimum_space` entities, creating a chunk if needed.
+    pub(crate) fn get_free_chunk(&mut self, set_index: usize, minimum_space: usize) -> usize {
         let count = {
             let chunks = &mut self.chunk_sets[set_index];
             let len = chunks.len();
             for (i, chunk) in chunks.iter_mut().enumerate() {
-                if !chunk.is_full() {
+                let space_left = chunk.capacity() - chunk.len();
+                if space_left >= minimum_space {
                     return i;
                 }
             }
@@ -768,6 +779,9 @@ impl ArchetypeData {
 
     /// Gets the tag storage for all chunks in the archetype.
     pub fn tags(&self) -> &Tags { &self.tags }
+
+    /// Mutably gets the tag storage for all chunks in the archetype.
+    pub fn tags_mut(&mut self) -> &mut Tags { &mut self.tags }
 
     /// Gets a slice of chunksets.
     pub fn chunksets(&self) -> &[Chunkset] { &self.chunk_sets }
@@ -1456,6 +1470,29 @@ impl<'a> ComponentWriter<'a> {
         }
     }
 
+    /// Increases the length of the associated `ComponentResourceSet` by `count`
+    /// and returns a pointer to the start of the memory that is reserved as a result.
+    ///
+    /// # Safety
+    ///
+    /// Ensure the memory returned by this function is properly initialized before calling
+    /// any other storage function. Ensure that the data written into the returned pointer
+    /// is representative of the component types stored in the associated ComponentResourceSet.
+    ///
+    /// # Panics
+    ///
+    /// Will panic when an internal u64 counter overflows.
+    /// It will happen in 50000 years if you do 10000 mutations a millisecond.
+    pub(crate) unsafe fn reserve_raw(&mut self, count: usize) -> NonNull<u8> {
+        debug_assert!((*self.accessor.count.get() + count) <= self.accessor.capacity);
+        let ptr = self
+            .ptr
+            .add(*self.accessor.count.get() * self.accessor.element_size);
+        *self.accessor.count.get() += count;
+        *self.accessor.version.get() = next_version();
+        NonNull::new_unchecked(ptr)
+    }
+
     /// Pushes new components onto the end of the vec.
     ///
     /// # Safety
@@ -1547,7 +1584,7 @@ pub struct TagStorage {
 }
 
 impl TagStorage {
-    fn new(element: TagMeta) -> Self {
+    pub(crate) fn new(element: TagMeta) -> Self {
         let capacity = if element.size == 0 { !0 } else { 4 };
 
         let ptr = unsafe {
@@ -1666,6 +1703,12 @@ impl TagStorage {
         std::slice::from_raw_parts(self.ptr.as_ptr() as *const T, self.len)
     }
 
+    /// Drop the storage without dropping the tags contained in the storage
+    pub(crate) fn forget_data(mut self) {
+        // this is a bit of a hack, but it makes the Drop impl not drop the elements
+        self.element.drop_fn = None;
+    }
+
     fn grow(&mut self) {
         assert!(self.element.size != 0, "capacity overflow");
         unsafe {
@@ -1751,7 +1794,7 @@ mod test {
             tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize)
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let components = data
             .chunksets_mut()
             .get_mut(set)
@@ -1786,7 +1829,7 @@ mod test {
             tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize)
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let chunk = data
             .chunksets_mut()
             .get_mut(set)
@@ -1816,7 +1859,7 @@ mod test {
             tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize)
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let chunk = data
             .chunksets_mut()
             .get_mut(set)
@@ -1860,7 +1903,7 @@ mod test {
 
         let (_arch_id, data) = archetypes.alloc_archetype(desc);
         let set = data.alloc_chunk_set(|_| {});
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let components = data
             .chunksets_mut()
             .get_mut(set)
@@ -1991,7 +2034,7 @@ mod test {
                 .push(ZeroSize);
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let components = data
             .chunksets_mut()
             .get_mut(set)
@@ -2026,7 +2069,7 @@ mod test {
             tags.get_mut(TagTypeId::of::<usize>()).unwrap().push(1isize);
         });
 
-        let chunk_index = data.get_free_chunk(set);
+        let chunk_index = data.get_free_chunk(set, 1);
         let components = data
             .chunksets_mut()
             .get_mut(set)

@@ -533,10 +533,10 @@ mod tests {
         });
         let system_two = SystemBuilder::new("two")
             .with_query(Write::<TestComp>::query())
-            .build(move |_, world, _, query| assert_eq!(0, query.iter(world).count()));
+            .build(move |_, world, _, query| assert_eq!(0, query.iter_mut(world).count()));
         let system_three = SystemBuilder::new("three")
             .with_query(Write::<TestComp>::query())
-            .build(move |_, world, _, query| assert_eq!(1, query.iter(world).count()));
+            .build(move |_, world, _, query| assert_eq!(1, query.iter_mut(world).count()));
 
         let mut schedule = Schedule::builder()
             .add_system(system_one)
