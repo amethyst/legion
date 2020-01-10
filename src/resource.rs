@@ -59,6 +59,11 @@ impl ResourceTypeId {
 pub trait ResourceSet: Send + Sync {
     type PreparedResources;
 
+    /// Fetches all defined resources, without checking mutability.
+    ///
+    /// # Safety
+    /// It is up to the end user to validate proper mutability rules across the resources being accessed.
+    ///
     unsafe fn fetch_unchecked(resources: &Resources) -> Self::PreparedResources;
 
     fn fetch_mut(resources: &mut Resources) -> Self::PreparedResources {
