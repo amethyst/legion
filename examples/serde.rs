@@ -199,7 +199,7 @@ struct SerializeImpl {
     comp_types: HashMap<TypeId, ComponentRegistration>,
     entity_map: RefCell<HashMap<Entity, uuid::Bytes>>,
 }
-impl legion::ser::WorldSerializer for SerializeImpl {
+impl legion::serialize::ser::WorldSerializer for SerializeImpl {
     fn can_serialize_tag(&self, ty: &TagTypeId, _meta: &TagMeta) -> bool {
         self.tag_types.get(&ty.0).is_some()
     }
@@ -302,7 +302,7 @@ struct DeserializeImpl {
     comp_types_by_uuid: HashMap<type_uuid::Bytes, ComponentRegistration>,
     entity_map: RefCell<HashMap<uuid::Bytes, Entity>>,
 }
-impl legion::de::WorldDeserializer for DeserializeImpl {
+impl legion::serialize::de::WorldDeserializer for DeserializeImpl {
     fn deserialize_archetype_description<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
@@ -417,7 +417,7 @@ fn main() {
         entity_map: RefCell::new(HashMap::new()),
     };
 
-    let serializable = legion::ser::serializable_world(&world, &ser_helper);
+    let serializable = legion::serialize::ser::serializable_world(&world, &ser_helper);
     let serialized_data = serde_json::to_string(&serializable).unwrap();
     let de_helper = DeserializeImpl {
         tag_types_by_uuid: HashMap::from_iter(
@@ -445,7 +445,8 @@ fn main() {
     };
     let mut deserialized_world = universe.create_world();
     let mut deserializer = serde_json::Deserializer::from_str(&serialized_data);
-    legion::de::deserialize(&mut deserialized_world, &de_helper, &mut deserializer).unwrap();
+    legion::serialize::de::deserialize(&mut deserialized_world, &de_helper, &mut deserializer)
+        .unwrap();
     let ser_helper = SerializeImpl {
         tag_types: de_helper.tag_types,
         comp_types: de_helper.comp_types,
@@ -458,7 +459,7 @@ fn main() {
                 .map(|(uuid, e)| (e, uuid)),
         )),
     };
-    let serializable = legion::ser::serializable_world(&deserialized_world, &ser_helper);
+    let serializable = legion::serialize::ser::serializable_world(&deserialized_world, &ser_helper);
     let roundtrip_data = serde_json::to_string(&serializable).unwrap();
     assert_eq!(roundtrip_data, serialized_data);
 }

@@ -1,9 +1,9 @@
-use crate::system::SystemId;
 use crate::{
-    borrow::RefMut, command::CommandBuffer, resource::ResourceTypeId, storage::ComponentTypeId,
-    world::World,
+    resource::{ResourceTypeId, Resources},
+    system::SystemId,
 };
 use bit_set::BitSet;
+use legion_core::{borrow::RefMut, command::CommandBuffer, storage::ComponentTypeId, world::World};
 
 #[cfg(feature = "par-schedule")]
 use tracing::{span, trace, Level};
@@ -57,7 +57,7 @@ pub trait Runnable {
     fn writes(&self) -> (&[ResourceTypeId], &[ComponentTypeId]);
     fn prepare(&mut self, world: &World);
     fn accesses_archetypes(&self) -> &ArchetypeAccess;
-    fn run(&self, world: &World);
+    fn run(&self, world: &World, resources: &Resources);
     fn command_buffer_mut(&self) -> RefMut<CommandBuffer>;
 }
 
@@ -225,8 +225,8 @@ impl Executor {
     pub fn into_vec(self) -> Vec<Box<dyn Schedulable>> { self.systems }
 
     /// Executes all systems and then flushes their command buffers.
-    pub fn execute(&mut self, world: &mut World) {
-        self.run_systems(world);
+    pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
+        self.run_systems(world, resources);
         self.flush_command_buffers(world);
     }
 
@@ -234,7 +234,7 @@ impl Executor {
     ///
     /// Only enabled with par-schedule is disabled
     #[cfg(not(feature = "par-schedule"))]
-    pub fn run_systems(&mut self, world: &mut World) {
+    pub fn run_systems(&mut self, world: &mut World, resources: &mut Resources) {
         // preflush command buffers
         // This also handles the first case of allocating them.
         self.systems
@@ -242,7 +242,7 @@ impl Executor {
             .for_each(|system| system.command_buffer_mut().write(world));
 
         self.systems.iter_mut().for_each(|system| {
-            system.run(world);
+            system.run(world, resources);
         });
     }
 
@@ -253,7 +253,7 @@ impl Executor {
     ///
     /// Call from within `rayon::ThreadPool::install()` to execute within a specific thread pool.
     #[cfg(feature = "par-schedule")]
-    pub fn run_systems(&mut self, world: &mut World) {
+    pub fn run_systems(&mut self, world: &mut World, resources: &mut Resources) {
         // preflush command buffers
         // This also handles the first case of allocating them.
         self.systems
@@ -265,7 +265,7 @@ impl Executor {
             || {
                 match self.systems.len() {
                     1 => {
-                        self.systems[0].run(world);
+                        self.systems[0].run(world, resources);
                     }
                     _ => {
                         let systems = &mut self.systems;
@@ -309,7 +309,7 @@ impl Executor {
                         (0..systems.len())
                             .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
                             .for_each(|i| {
-                                self.run_recursive(i, world);
+                                self.run_recursive(i, world, resources);
                             });
                     }
                 }
@@ -326,8 +326,8 @@ impl Executor {
 
     /// Recursively execute through the generated depedency cascade and exhaust it.
     #[cfg(feature = "par-schedule")]
-    fn run_recursive(&self, i: usize, world: &World) {
-        self.systems[i].run(world);
+    fn run_recursive(&self, i: usize, world: &World, resources: &Resources) {
+        self.systems[i].run(world, resources);
 
         self.static_dependants[i].par_iter().for_each(|dep| {
             match self.awaiting[*dep].compare_exchange(
@@ -337,7 +337,7 @@ impl Executor {
                 Ordering::Relaxed,
             ) {
                 Ok(_) => {
-                    self.run_recursive(*dep, world);
+                    self.run_recursive(*dep, world, resources);
                 }
                 Err(_) => {
                     self.awaiting[*dep].fetch_sub(1, Ordering::Relaxed);
@@ -378,10 +378,13 @@ impl Builder {
     }
 
     /// Adds a thread local function to the schedule. This function will be executed on the main thread.
-    pub fn add_thread_local_fn<F: FnMut(&mut World) + 'static>(mut self, f: F) -> Self {
+    pub fn add_thread_local_fn<F: FnMut(&mut World, &mut Resources) + 'static>(
+        mut self,
+        f: F,
+    ) -> Self {
         self.finalize_executor();
         self.steps.push(Step::ThreadLocalFn(
-            Box::new(f) as Box<dyn FnMut(&mut World)>
+            Box::new(f) as Box<dyn FnMut(&mut World, &mut Resources)>
         ));
         self
     }
@@ -389,7 +392,7 @@ impl Builder {
     /// Adds a thread local system to the schedule. This system will be executed on the main thread.
     pub fn add_thread_local<S: Into<Box<dyn Runnable>>>(self, system: S) -> Self {
         let system = system.into();
-        self.add_thread_local_fn(move |world| system.run(world))
+        self.add_thread_local_fn(move |world, resources| system.run(world, resources))
     }
 
     /// Finalizes the builder into a `Schedule`.
@@ -412,7 +415,7 @@ pub enum Step {
     /// Flush system command buffers.
     FlushCmdBuffers,
     /// A thread local function.
-    ThreadLocalFn(Box<dyn FnMut(&mut World)>),
+    ThreadLocalFn(Box<dyn FnMut(&mut World, &mut Resources)>),
 }
 
 /// A schedule of systems for execution.
@@ -443,18 +446,18 @@ impl Schedule {
     pub fn builder() -> Builder { Builder::default() }
 
     /// Executes all of the steps in the schedule.
-    pub fn execute(&mut self, world: &mut World) {
+    pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
         let mut waiting_flush: Vec<&mut Executor> = Vec::new();
         for step in &mut self.steps {
             match step {
                 Step::Systems(executor) => {
-                    executor.run_systems(world);
+                    executor.run_systems(world, resources);
                     waiting_flush.push(executor);
                 }
                 Step::FlushCmdBuffers => waiting_flush
                     .drain(..)
                     .for_each(|e| e.flush_command_buffers(world)),
-                Step::ThreadLocalFn(function) => function(world),
+                Step::ThreadLocalFn(function) => function(world, resources),
             }
         }
     }

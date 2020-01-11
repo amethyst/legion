@@ -1,7 +1,7 @@
-use crate::borrow::{AtomicRefCell, Ref, RefMut};
-use crate::query::{Read, ReadOnly, Write};
 use downcast_rs::{impl_downcast, Downcast};
 use fxhash::FxHashMap;
+use legion_core::borrow::{AtomicRefCell, Ref, RefMut};
+use legion_core::query::{Read, ReadOnly, Write};
 use std::{
     any::TypeId,
     marker::PhantomData,

@@ -10,7 +10,6 @@ use crate::filter::ChunksetFilterData;
 use crate::filter::EntityFilter;
 use crate::filter::Filter;
 use crate::iterator::SliceVecIter;
-use crate::resource::Resources;
 use crate::storage::ArchetypeData;
 use crate::storage::ArchetypeDescription;
 use crate::storage::Component;
@@ -87,7 +86,6 @@ pub struct World {
     storage: UnsafeCell<Storage>,
     pub(crate) entity_allocator: Arc<EntityAllocator>,
     defrag_progress: usize,
-    pub resources: Resources,
     command_buffer_size: usize,
     pub(crate) allocation_buffer: Vec<Entity>,
 }
@@ -116,7 +114,6 @@ impl World {
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: Arc::new(allocator),
             defrag_progress: 0,
-            resources: Resources::default(),
             command_buffer_size: Self::DEFAULT_COMMAND_BUFFER_SIZE,
             allocation_buffer: Vec::with_capacity(Self::DEFAULT_COMMAND_BUFFER_SIZE),
         }
@@ -159,12 +156,20 @@ impl World {
         self.storage_mut().subscribe(sender, filter);
     }
 
-    pub(crate) fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
+    pub fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
 
-    pub(crate) fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
+    pub fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
 
     /// Gets the unique ID of this world within its universe.
     pub fn id(&self) -> WorldId { self.id }
+
+    pub fn get_entity_location(&self, entity: Entity) -> Option<EntityLocation> {
+        if self.is_alive(entity) {
+            self.entity_allocator.get_location(entity.index())
+        } else {
+            None
+        }
+    }
 
     /// Inserts new entities into the world. This insertion method should be preferred, as it performs
     /// no movement of components for inserting multiple entities and components.
@@ -823,9 +828,6 @@ impl World {
                 self.entity_allocator.set_location(entity.index(), location);
             }
         }
-
-        // Merge resources
-        self.resources.merge(world.resources);
     }
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<usize>

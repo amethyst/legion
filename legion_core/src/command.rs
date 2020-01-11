@@ -1,5 +1,5 @@
 use crate::{
-    borrow::AtomicRefCell,
+    borrow::{AtomicRefCell, RefMut},
     cons::{ConsAppend, ConsFlatten},
     entity::{Entity, EntityAllocator},
     filter::{ChunksetFilterData, Filter},
@@ -325,7 +325,7 @@ unsafe impl Sync for CommandBuffer {}
 
 impl CommandBuffer {
     /// Creates a `CommandBuffer` with a custom capacity of cached Entity's to be collected every frame.
-    /// Allocating a command buffer in this manner will overwrite `World::set_command_buffer_size` and
+    /// Allocating a command buffer in this manner will override `World::set_command_buffer_size` and
     /// this system will always allocate the custom provide capacity of entities every frame.
     ///
     /// # Notes
@@ -344,7 +344,7 @@ impl CommandBuffer {
     }
 
     /// Creates a `CommandBuffer` with a custom capacity of cached Entity's to be collected every frame.
-    /// Allocating a command buffer in this manner will overwrite `World::set_command_buffer_size` and
+    /// Allocating a command buffer in this manner will override `World::set_command_buffer_size` and
     /// this system will always allocate the custom provide capacity of entities every frame.
     ///
     /// This constructor will preallocate the first round of entities needed from the world.

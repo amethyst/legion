@@ -3,7 +3,7 @@ use std::fmt::Display;
 use std::num::Wrapping;
 use std::sync::Arc;
 
-pub(crate) type EntityIndex = u32;
+pub type EntityIndex = u32;
 pub(crate) type EntityVersion = Wrapping<u32>;
 
 /// A handle to an entity.
@@ -18,7 +18,7 @@ impl Entity {
         Entity { index, version }
     }
 
-    pub(crate) fn index(self) -> EntityIndex { self.index }
+    pub fn index(self) -> EntityIndex { self.index }
 }
 
 impl Display for Entity {
@@ -28,7 +28,7 @@ impl Display for Entity {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct EntityLocation {
+pub struct EntityLocation {
     archetype_index: usize,
     set_index: usize,
     chunk_index: usize,
@@ -50,13 +50,13 @@ impl EntityLocation {
         }
     }
 
-    pub(crate) fn archetype(&self) -> usize { self.archetype_index }
+    pub fn archetype(&self) -> usize { self.archetype_index }
 
-    pub(crate) fn set(&self) -> usize { self.set_index }
+    pub fn set(&self) -> usize { self.set_index }
 
-    pub(crate) fn chunk(&self) -> usize { self.chunk_index }
+    pub fn chunk(&self) -> usize { self.chunk_index }
 
-    pub(crate) fn component(&self) -> usize { self.component_index }
+    pub fn component(&self) -> usize { self.component_index }
 }
 
 #[derive(Debug)]
@@ -89,7 +89,7 @@ impl BlockAllocator {
 }
 
 #[derive(Debug)]
-pub(crate) struct EntityBlock {
+pub struct EntityBlock {
     start: EntityIndex,
     len: usize,
     versions: Vec<EntityVersion>,

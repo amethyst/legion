@@ -1,31 +1,29 @@
-use crate::borrow::{AtomicRefCell, Ref, RefMut};
-use crate::command::CommandBuffer;
-use crate::cons::{ConsAppend, ConsFlatten};
-use crate::entity::Entity;
-use crate::filter::EntityFilter;
-use crate::query::ReadOnly;
-use crate::query::{ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write};
-use crate::resource::{Resource, ResourceSet, ResourceTypeId};
+use crate::resource::{Resource, ResourceSet, ResourceTypeId, Resources};
 use crate::schedule::ArchetypeAccess;
 use crate::schedule::{Runnable, Schedulable};
-use crate::storage::Tag;
-use crate::storage::{Component, ComponentTypeId, TagTypeId};
-use crate::world::World;
 use bit_set::BitSet;
 use derivative::Derivative;
+use legion_core::borrow::{AtomicRefCell, Ref, RefMut};
+use legion_core::command::CommandBuffer;
+use legion_core::cons::{ConsAppend, ConsFlatten};
+use legion_core::entity::Entity;
+use legion_core::filter::EntityFilter;
+use legion_core::query::ReadOnly;
+use legion_core::query::{ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write};
+use legion_core::storage::Tag;
+use legion_core::storage::{Component, ComponentTypeId, TagTypeId};
+use legion_core::world::World;
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::marker::PhantomData;
 use tracing::{debug, info, span, Level};
 
 #[cfg(feature = "par-iter")]
-use crate::filter::{ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, Filter};
-
-#[cfg(feature = "par-iter")]
-use crate::iterator::FissileIterator;
-
-#[cfg(feature = "par-iter")]
-use crate::query::Chunk;
+use legion_core::{
+    filter::{ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, Filter},
+    iterator::FissileIterator,
+    query::Chunk,
+};
 
 /// Structure used by `SystemAccess` for describing access to the provided `T`
 #[derive(Derivative, Debug, Clone)]
@@ -652,8 +650,7 @@ impl SubWorld {
     fn validate_archetype_access(&self, entity: Entity) -> bool {
         unsafe {
             if let Some(archetypes) = self.archetypes {
-                if let Some(location) = (*self.world).entity_allocator.get_location(entity.index())
-                {
+                if let Some(location) = (*self.world).get_entity_location(entity) {
                     return (*archetypes).contains(location.archetype());
                 }
             }
@@ -850,12 +847,12 @@ where
 
     fn command_buffer_mut(&self) -> RefMut<CommandBuffer> { self.command_buffer.get_mut() }
 
-    fn run(&self, world: &World) {
+    fn run(&self, world: &World, resources: &Resources) {
         let span = span!(Level::INFO, "System", system = %self.name);
         let _guard = span.enter();
 
         debug!("Initializing");
-        let mut resources = unsafe { R::fetch_unchecked(&world.resources) };
+        let mut resources = unsafe { R::fetch_unchecked(resources) };
         let mut queries = self.queries.get_mut();
         let mut prepared_queries = unsafe { queries.prepare() };
         let mut world_shim =
