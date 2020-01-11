@@ -1,5 +1,5 @@
 use crate::{
-    borrow::{AtomicRefCell, RefMut},
+    borrow::AtomicRefCell,
     cons::{ConsAppend, ConsFlatten},
     entity::{Entity, EntityAllocator},
     filter::{ChunksetFilterData, Filter},
@@ -319,7 +319,7 @@ pub struct CommandBuffer {
     pub(crate) used_list: SmallVec<[Entity; 64]>,
 }
 // This is safe because only 1 system in 1 execution is only ever accessing a command buffer
-// and we garuntee the write operations of a command buffer occur in a safe manner
+// and we gaurantee the write operations of a command buffer occur in a safe manner
 unsafe impl Send for CommandBuffer {}
 unsafe impl Sync for CommandBuffer {}
 

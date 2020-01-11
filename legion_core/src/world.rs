@@ -36,48 +36,55 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tracing::{info, span, trace, Level};
 
+static NEXT_UNIVERSE_ID: AtomicUsize = AtomicUsize::new(1);
+static NEXT_WORLD_ID: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(Default, Copy, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct UniverseId(usize);
+
 /// The `Universe` is a factory for creating `World`s.
 ///
 /// Entities inserted into worlds created within the same universe are guarenteed to have
 /// unique `Entity` IDs, even across worlds.
 #[derive(Debug)]
 pub struct Universe {
+    id: UniverseId,
     allocator: Arc<Mutex<BlockAllocator>>,
-    world_count: AtomicUsize,
 }
 
 impl Universe {
     /// Creates a new `Universe`.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self {
+            id: UniverseId(NEXT_UNIVERSE_ID.fetch_add(1, Ordering::SeqCst)),
+            allocator: Arc::new(Mutex::new(BlockAllocator::new())),
+        }
+    }
 
     /// Creates a new `World` within this `Universe`.
     ///
     /// Entities inserted into worlds created within the same universe are guarenteed to have
     /// unique `Entity` IDs, even across worlds. See also `World::new`.
     pub fn create_world(&self) -> World {
-        let id = self.world_count.fetch_add(1, Ordering::SeqCst);
-        let world =
-            World::new_in_universe(WorldId(id), EntityAllocator::new(self.allocator.clone()));
+        let id = WorldId::next(self.id.0);
+        let world = World::new_in_universe(id, EntityAllocator::new(self.allocator.clone()));
 
-        info!(world = world.id().0, "Created world");
+        info!(universe = self.id.0, world = world.id().1, "Created world");
         world
     }
 }
 
-impl Default for Universe {
-    fn default() -> Self {
-        Self {
-            world_count: AtomicUsize::from(0),
-            allocator: Arc::new(Mutex::new(BlockAllocator::new())),
-        }
-    }
-}
-
 #[derive(Default, Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct WorldId(usize);
+pub struct WorldId(usize, usize);
 
 impl WorldId {
+    fn next(universe: usize) -> Self {
+        Self(universe, NEXT_WORLD_ID.fetch_add(1, Ordering::SeqCst))
+    }
+
     pub fn index(self) -> usize { self.0 }
+
+    pub fn is_same_universe(self, other: WorldId) -> bool { self.0 == other.0 }
 }
 
 /// Contains queryable collections of data associated with `Entity`s.
@@ -103,7 +110,7 @@ impl World {
     /// `Universe::create_world`.
     pub fn new() -> Self {
         Self::new_in_universe(
-            WorldId(0),
+            WorldId::next(0),
             EntityAllocator::new(Arc::new(Mutex::new(BlockAllocator::new()))),
         )
     }
