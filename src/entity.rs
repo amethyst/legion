@@ -1,4 +1,4 @@
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use std::fmt::Display;
 use std::num::Wrapping;
 use std::sync::Arc;
@@ -166,28 +166,24 @@ impl EntityBlock {
 }
 
 /// Manages the allocation and deletion of `Entity` IDs within a world.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EntityAllocator {
     allocator: Arc<Mutex<BlockAllocator>>,
-    blocks: Vec<EntityBlock>,
-    entity_buffer: Vec<Entity>,
+    blocks: Arc<RwLock<Vec<EntityBlock>>>,
 }
 
 impl EntityAllocator {
     pub(crate) fn new(allocator: Arc<Mutex<BlockAllocator>>) -> Self {
         EntityAllocator {
             allocator,
-            blocks: Vec::new(),
-            entity_buffer: Vec::new(),
+            blocks: Arc::new(RwLock::new(Vec::new())),
         }
     }
-
-    pub(crate) fn get_block(&mut self) -> EntityBlock { self.allocator.lock().allocate() }
-    pub(crate) fn push_block(&mut self, block: EntityBlock) { self.blocks.push(block); }
 
     /// Determines if the given `Entity` is considered alive.
     pub fn is_alive(&self, entity: Entity) -> bool {
         self.blocks
+            .read()
             .iter()
             .filter_map(|b| b.is_alive(entity))
             .nth(0)
@@ -195,32 +191,26 @@ impl EntityAllocator {
     }
 
     /// Allocates a new unused `Entity` ID.
-    pub fn create_entity(&mut self) -> Entity {
-        let entity = if let Some(entity) = self
-            .blocks
-            .iter_mut()
-            .rev()
-            .filter_map(|b| b.allocate())
-            .nth(0)
-        {
+    pub fn create_entity(&self) -> Entity {
+        let mut blocks = self.blocks.write();
+
+        if let Some(entity) = blocks.iter_mut().rev().filter_map(|b| b.allocate()).nth(0) {
             entity
         } else {
             let mut block = self.allocator.lock().allocate();
             let entity = block.allocate().unwrap();
-            self.blocks.push(block);
+            blocks.push(block);
             entity
-        };
-
-        self.entity_buffer.push(entity.clone());
-        entity
+        }
     }
 
-    pub(crate) fn delete_entity(&mut self, entity: Entity) -> Option<EntityLocation> {
-        self.blocks.iter_mut().find_map(|b| b.free(entity))
+    pub(crate) fn delete_entity(&self, entity: Entity) -> Option<EntityLocation> {
+        self.blocks.write().iter_mut().find_map(|b| b.free(entity))
     }
 
-    pub(crate) fn set_location(&mut self, entity: EntityIndex, location: EntityLocation) {
+    pub(crate) fn set_location(&self, entity: EntityIndex, location: EntityLocation) {
         self.blocks
+            .write()
             .iter_mut()
             .rev()
             .find(|b| b.in_range(entity))
@@ -230,24 +220,21 @@ impl EntityAllocator {
 
     pub(crate) fn get_location(&self, entity: EntityIndex) -> Option<EntityLocation> {
         self.blocks
+            .read()
             .iter()
             .find(|b| b.in_range(entity))
             .and_then(|b| b.get_location(entity))
     }
 
-    pub(crate) fn allocation_buffer(&self) -> &[Entity] { self.entity_buffer.as_slice() }
-
-    pub(crate) fn clear_allocation_buffer(&mut self) { self.entity_buffer.clear(); }
-
-    pub(crate) fn merge(&mut self, mut other: EntityAllocator) {
+    pub(crate) fn merge(&self, other: EntityAllocator) {
         assert!(Arc::ptr_eq(&self.allocator, &other.allocator));
-        self.blocks.append(&mut other.blocks);
+        self.blocks.write().append(&mut other.blocks.write());
     }
 }
 
 impl Drop for EntityAllocator {
     fn drop(&mut self) {
-        for block in self.blocks.drain(..) {
+        for block in self.blocks.write().drain(..) {
             self.allocator.lock().free(block);
         }
     }
@@ -260,13 +247,13 @@ mod tests {
 
     #[test]
     fn create_entity() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         allocator.create_entity();
     }
 
     #[test]
     fn create_entity_many() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
 
         for _ in 0..512 {
             allocator.create_entity();
@@ -275,7 +262,7 @@ mod tests {
 
     #[test]
     fn create_entity_many_blocks() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
 
         for _ in 0..3000 {
             allocator.create_entity();
@@ -284,7 +271,7 @@ mod tests {
 
     #[test]
     fn create_entity_recreate() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
 
         for _ in 0..3 {
             let entities: Vec<Entity> = (0..512).map(|_| allocator.create_entity()).collect();
@@ -296,7 +283,7 @@ mod tests {
 
     #[test]
     fn is_alive_allocated() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = allocator.create_entity();
 
         assert_eq!(true, allocator.is_alive(entity));
@@ -312,7 +299,7 @@ mod tests {
 
     #[test]
     fn is_alive_killed() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = allocator.create_entity();
         allocator.delete_entity(entity);
 
@@ -321,7 +308,7 @@ mod tests {
 
     #[test]
     fn delete_entity_was_alive() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = allocator.create_entity();
 
         assert_eq!(true, allocator.delete_entity(entity).is_some());
@@ -329,7 +316,7 @@ mod tests {
 
     #[test]
     fn delete_entity_was_dead() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = allocator.create_entity();
         allocator.delete_entity(entity);
 
@@ -338,7 +325,7 @@ mod tests {
 
     #[test]
     fn delete_entity_was_unallocated() {
-        let mut allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
+        let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = Entity::new(10 as EntityIndex, Wrapping(10));
 
         assert_eq!(None, allocator.delete_entity(entity));
@@ -347,8 +334,8 @@ mod tests {
     #[test]
     fn multiple_allocators_unique_ids() {
         let blocks = Arc::from(Mutex::new(BlockAllocator::new()));
-        let mut allocator_a = EntityAllocator::new(blocks.clone());
-        let mut allocator_b = EntityAllocator::new(blocks.clone());
+        let allocator_a = EntityAllocator::new(blocks.clone());
+        let allocator_b = EntityAllocator::new(blocks.clone());
 
         let mut entities_a = HashSet::<Entity>::default();
         let mut entities_b = HashSet::<Entity>::default();

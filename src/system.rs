@@ -1412,7 +1412,9 @@ mod tests {
         system.prepare(&world);
         system.run(&world);
 
-        world.add_component(*(expected.keys().nth(0).unwrap()), Balls::default());
+        world
+            .add_component(*(expected.keys().nth(0).unwrap()), Balls::default())
+            .unwrap();
 
         system.prepare(&world);
         system.run(&world);

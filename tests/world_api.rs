@@ -263,7 +263,9 @@ fn mutate_add_component() {
     assert_eq!(3, query_without_scale.iter(&mut world).count());
     assert_eq!(0, query_with_scale.iter(&mut world).count());
 
-    world.add_component(*entities.get(1).unwrap(), Scale(0.5, 0.5, 0.5));
+    world
+        .add_component(*entities.get(1).unwrap(), Scale(0.5, 0.5, 0.5))
+        .unwrap();
 
     assert_eq!(3, query_without_scale.iter(&mut world).count());
     assert_eq!(1, query_with_scale.iter(&mut world).count());

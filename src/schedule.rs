@@ -235,6 +235,12 @@ impl Executor {
     /// Only enabled with par-schedule is disabled
     #[cfg(not(feature = "par-schedule"))]
     pub fn run_systems(&mut self, world: &mut World) {
+        // preflush command buffers
+        // This also handles the first case of allocating them.
+        self.systems
+            .iter()
+            .for_each(|system| system.command_buffer_mut().write(world));
+
         self.systems.iter_mut().for_each(|system| {
             system.run(world);
         });
@@ -248,6 +254,12 @@ impl Executor {
     /// Call from within `rayon::ThreadPool::install()` to execute within a specific thread pool.
     #[cfg(feature = "par-schedule")]
     pub fn run_systems(&mut self, world: &mut World) {
+        // preflush command buffers
+        // This also handles the first case of allocating them.
+        self.systems
+            .iter()
+            .for_each(|system| system.command_buffer_mut().write(world));
+
         rayon::join(
             || {},
             || {
@@ -516,8 +528,9 @@ mod tests {
         #[derive(Clone, Copy, Debug, PartialEq)]
         struct TestComp(f32, f32, f32);
 
-        let system_one = SystemBuilder::new("one")
-            .build(move |cmd, _, _, _| cmd.insert((), vec![(TestComp(0., 0., 0.),)]));
+        let system_one = SystemBuilder::new("one").build(move |cmd, _, _, _| {
+            cmd.insert((), vec![(TestComp(0., 0., 0.),)]).unwrap();
+        });
         let system_two = SystemBuilder::new("two")
             .with_query(Write::<TestComp>::query())
             .build(move |_, world, _, query| assert_eq!(0, query.iter_mut(world).count()));

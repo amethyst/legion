@@ -77,7 +77,7 @@ pub trait WorldDeserializer {
     fn deserialize_entities<'de, D: Deserializer<'de>>(
         &self,
         deserializer: D,
-        entity_allocator: &mut EntityAllocator,
+        entity_allocator: &EntityAllocator,
         entities: &mut Vec<Entity>,
     ) -> Result<(), <D as Deserializer<'de>>::Error>;
 }
@@ -625,7 +625,7 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for EntitiesDeseri
         let mut entities = Vec::new();
         self.user.deserialize_entities(
             deserializer,
-            &mut self.world.entity_allocator,
+            &self.world.entity_allocator,
             &mut entities,
         )?;
         let archetype = &mut self.world.storage_mut().archetypes_mut()[self.archetype_idx];
