@@ -1,4 +1,4 @@
-use parking_lot::{Mutex, RwLock};
+use parking_lot::{Mutex, RwLock, RwLockWriteGuard};
 use std::fmt::Display;
 use std::num::Wrapping;
 use std::sync::Arc;
@@ -191,16 +191,13 @@ impl EntityAllocator {
     }
 
     /// Allocates a new unused `Entity` ID.
-    pub fn create_entity(&self) -> Entity {
-        let mut blocks = self.blocks.write();
+    pub fn create_entity(&self) -> Entity { self.create_entities().next().unwrap() }
 
-        if let Some(entity) = blocks.iter_mut().rev().filter_map(|b| b.allocate()).nth(0) {
-            entity
-        } else {
-            let mut block = self.allocator.lock().allocate();
-            let entity = block.allocate().unwrap();
-            blocks.push(block);
-            entity
+    /// Creates an iterator which allocates new `Entity` IDs.
+    pub fn create_entities(&self) -> CreateEntityIter {
+        CreateEntityIter {
+            blocks: self.blocks.write(),
+            allocator: &self.allocator,
         }
     }
 
@@ -236,6 +233,32 @@ impl Drop for EntityAllocator {
     fn drop(&mut self) {
         for block in self.blocks.write().drain(..) {
             self.allocator.lock().free(block);
+        }
+    }
+}
+
+pub struct CreateEntityIter<'a> {
+    blocks: RwLockWriteGuard<'a, Vec<EntityBlock>>,
+    allocator: &'a Mutex<BlockAllocator>,
+}
+
+impl<'a> Iterator for CreateEntityIter<'a> {
+    type Item = Entity;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(entity) = self
+            .blocks
+            .iter_mut()
+            .rev()
+            .filter_map(|b| b.allocate())
+            .nth(0)
+        {
+            Some(entity)
+        } else {
+            let mut block = self.allocator.lock().allocate();
+            let entity = block.allocate().unwrap();
+            self.blocks.push(block);
+            Some(entity)
         }
     }
 }

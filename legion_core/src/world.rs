@@ -25,6 +25,8 @@ use crate::tuple::TupleEq;
 use parking_lot::Mutex;
 use std::cell::UnsafeCell;
 use std::iter::Enumerate;
+use std::iter::Fuse;
+use std::iter::FusedIterator;
 use std::iter::Peekable;
 use std::iter::Repeat;
 use std::iter::Take;
@@ -245,8 +247,7 @@ impl World {
             };
 
             // insert as many components as we can into the chunk
-            let allocated =
-                components.write(&self.entity_allocator, &mut self.allocation_buffer, chunk);
+            let allocated = components.write(self.entity_allocator.create_entities(), chunk);
 
             // record new entity locations
             let start = chunk.len() - allocated;
@@ -255,56 +256,13 @@ impl World {
                 let location =
                     EntityLocation::new(archetype_index, chunk_set_index, chunk_index, i);
                 self.entity_allocator.set_location(e.index(), location);
+                self.allocation_buffer.push(*e);
             }
         }
 
         trace!(count = self.allocation_buffer.len(), "Inserted entities");
 
         &self.allocation_buffer
-    }
-
-    pub(crate) fn insert_buffered<T, C>(
-        &mut self,
-        entities: &[Entity],
-        mut tags: T,
-        mut components: C,
-    ) where
-        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-        C: ComponentSource,
-    {
-        let archetype_index = self.find_or_create_archetype(&mut tags, &mut components);
-
-        // find or create chunk set
-        let chunk_set_index = self.find_or_create_chunk(archetype_index, &mut tags);
-
-        // insert components into chunks
-        while !components.is_empty() {
-            // get chunk component storage
-            let archetype = unsafe {
-                (&mut *self.storage.get())
-                    .archetypes_mut()
-                    .get_unchecked_mut(archetype_index)
-            };
-            let chunk_index = archetype.get_free_chunk(chunk_set_index, 1);
-            let chunk = unsafe {
-                archetype
-                    .chunksets_mut()
-                    .get_unchecked_mut(chunk_set_index)
-                    .get_unchecked_mut(chunk_index)
-            };
-
-            // insert as many components as we can into the chunk
-            let allocated = components.write_entities(entities, chunk);
-
-            // record new entity locations
-            let start = chunk.len() - allocated;
-            let added = chunk.entities().iter().enumerate().skip(start);
-            for (i, e) in added {
-                let location =
-                    EntityLocation::new(archetype_index, chunk_set_index, chunk_index, i);
-                self.entity_allocator.set_location(e.index(), location);
-            }
-        }
     }
 
     /// Removes the given `Entity` from the `World`.
@@ -969,17 +927,9 @@ pub trait ComponentSource: ComponentLayout {
     fn len(&self) -> usize;
 
     /// Writes as many components as possible into a chunk.
-    fn write(
+    fn write<T: Iterator<Item = Entity>>(
         &mut self,
-        allocator: &EntityAllocator,
-        allocation_buffer: &mut Vec<Entity>,
-        chunk: &mut ComponentStorage,
-    ) -> usize;
-
-    /// Writes as many components as possible into a chunk, from the provided entities list
-    fn write_entities(
-        &mut self,
-        provided_entities: &[Entity],
+        entities: T,
         chunk: &mut ComponentStorage,
     ) -> usize;
 }
@@ -1032,6 +982,73 @@ where
             },
         }
     }
+}
+
+pub struct PreallocComponentSource<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> {
+    entities: I,
+    components: C,
+}
+
+impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> IntoComponentSource
+    for PreallocComponentSource<I, C>
+{
+    type Source = Self;
+
+    fn into(self) -> Self::Source { self }
+}
+
+impl<I: Iterator<Item = Entity>, C: ComponentSource> PreallocComponentSource<Fuse<I>, C> {
+    pub fn new(entities: I, components: C) -> Self {
+        Self {
+            entities: entities.fuse(),
+            components,
+        }
+    }
+}
+
+impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentLayout
+    for PreallocComponentSource<I, C>
+{
+    type Filter = C::Filter;
+
+    fn get_filter(&mut self) -> &mut Self::Filter { self.components.get_filter() }
+
+    fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
+        self.components.tailor_archetype(archetype)
+    }
+}
+
+impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentSource
+    for PreallocComponentSource<I, C>
+{
+    fn is_empty(&mut self) -> bool { self.components.is_empty() }
+
+    fn len(&self) -> usize { self.components.len() }
+
+    fn write<T: Iterator<Item = Entity>>(
+        &mut self,
+        mut entities: T,
+        chunk: &mut ComponentStorage,
+    ) -> usize {
+        let iter = ConcatIter {
+            a: &mut self.entities,
+            b: &mut entities,
+        };
+        self.components.write(iter, chunk)
+    }
+}
+
+struct ConcatIter<'a, T, A: Iterator<Item = T> + FusedIterator, B: Iterator<Item = T>> {
+    a: &'a mut A,
+    b: &'a mut B,
+}
+
+impl<'a, T, A: Iterator<Item = T> + FusedIterator, B: Iterator<Item = T>> Iterator
+    for ConcatIter<'a, T, A, B>
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> { self.a.next().or_else(|| self.b.next()) }
 }
 
 pub struct ComponentTupleFilter<T> {
@@ -1090,8 +1107,7 @@ mod tuple_impls {
                 fn len(&self) -> usize {
                     self.iter.len()
                 }
-
-                fn write_entities(&mut self, provided_entities: &[Entity], chunk: &mut ComponentStorage) -> usize {
+                fn write<EntityIter: Iterator<Item = Entity>>(&mut self, mut allocator: EntityIter, chunk: &mut ComponentStorage) -> usize {
                     #![allow(unused_variables)]
                     #![allow(unused_unsafe)]
                     #![allow(non_snake_case)]
@@ -1106,45 +1122,9 @@ mod tuple_impls {
                         )*
 
                         while let Some(($( $id, )*)) = { if count == space { None } else { self.iter.next() } } {
-                            if count == provided_entities.len() {
-                                break;
-                            }
-
-                            entities.push(provided_entities[count]);
-
-                            // TODO: Trigger component addition events here
-                            $(
-                                let slice = [$id];
-                                $ty.push(&slice);
-                                std::mem::forget(slice);
-                            )*
-                            count += 1;
-                        }
-                    }
-
-                    count
-                }
-
-                fn write(&mut self, allocator: &EntityAllocator, allocation_buffer: &mut Vec<Entity>, chunk: &mut ComponentStorage) -> usize {
-                    #![allow(unused_variables)]
-                    #![allow(unused_unsafe)]
-                    #![allow(non_snake_case)]
-                    let space = chunk.capacity() - chunk.len();
-                    let mut writer = chunk.writer();
-                    let (entities, components) = writer.get();
-                    let mut count = 0;
-
-                    unsafe {
-                        $(
-                            let mut $ty = (&mut *components.get()).get_mut(ComponentTypeId::of::<$ty>()).unwrap().writer();
-                        )*
-
-                        while let Some(($( $id, )*)) = { if count == space { None } else { self.iter.next() } } {
-                            let entity = allocator.create_entity();
+                            let entity = allocator.next().unwrap();
                             entities.push(entity);
-                            allocation_buffer.push(entity);
 
-                            // TODO: Trigger component addition events here
                             $(
                                 let slice = [$id];
                                 $ty.push(&slice);

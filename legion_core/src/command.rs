@@ -4,7 +4,10 @@ use crate::{
     entity::{Entity, EntityAllocator},
     filter::{ChunksetFilterData, Filter},
     storage::{Component, ComponentTypeId, Tag, TagTypeId},
-    world::{ComponentSource, ComponentTupleSet, IntoComponentSource, TagLayout, TagSet, World},
+    world::{
+        ComponentSource, ComponentTupleSet, IntoComponentSource, PreallocComponentSource,
+        TagLayout, TagSet, World,
+    },
 };
 use derivative::Derivative;
 use smallvec::SmallVec;
@@ -48,7 +51,10 @@ where
     fn write(self: Arc<Self>, world: &mut World) {
         let consumed = Arc::try_unwrap(self).unwrap();
 
-        world.insert_buffered(&consumed.entities, consumed.tags, consumed.components);
+        world.insert(
+            consumed.tags,
+            PreallocComponentSource::new(consumed.entities.iter().copied(), consumed.components),
+        );
     }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { self.write_components.clone() }
@@ -423,10 +429,12 @@ impl CommandBuffer {
         }
 
         let empty = Vec::from_iter((0..self.used_list.len()).map(|_| ()));
-        world.insert_buffered(
-            self.used_list.as_slice(),
+        world.insert(
             (),
-            IntoComponentSource::into(empty),
+            PreallocComponentSource::new(
+                self.used_list.iter().copied(),
+                IntoComponentSource::into(empty),
+            ),
         );
         self.used_list.clear();
 
