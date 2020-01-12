@@ -114,7 +114,9 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World, _: &CommandBuffer) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        world.add_tag(consumed.entity, consumed.tag)
+        if let Err(err) = world.add_tag(consumed.entity, consumed.tag) {
+            tracing::error!(error = %err, "error adding tag");
+        }
     }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
@@ -132,7 +134,9 @@ where
     T: Tag,
 {
     fn write(self: Arc<Self>, world: &mut World, _: &CommandBuffer) {
-        world.remove_tag::<T>(self.entity)
+        if let Err(err) = world.remove_tag::<T>(self.entity) {
+            tracing::error!(error = %err, "error removing tag");
+        }
     }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
@@ -153,9 +157,9 @@ where
 {
     fn write(self: Arc<Self>, world: &mut World, _: &CommandBuffer) {
         let consumed = Arc::try_unwrap(self).unwrap();
-        world
-            .add_component::<C>(consumed.entity, consumed.component)
-            .unwrap();
+        if let Err(err) = world.add_component::<C>(consumed.entity, consumed.component) {
+            tracing::error!(error = %err, "error adding component");
+        }
     }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }
@@ -173,7 +177,9 @@ where
     C: Component,
 {
     fn write(self: Arc<Self>, world: &mut World, _: &CommandBuffer) {
-        world.remove_component::<C>(self.entity)
+        if let Err(err) = world.remove_component::<C>(self.entity) {
+            tracing::error!(error = %err, "error removing component");
+        }
     }
 
     fn write_components(&self) -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<C>()] }

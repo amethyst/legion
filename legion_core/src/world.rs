@@ -36,6 +36,7 @@ use std::ptr::NonNull;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use thiserror::Error;
 use tracing::{info, span, trace, Level};
 
 static NEXT_UNIVERSE_ID: AtomicUsize = AtomicUsize::new(1);
@@ -463,9 +464,9 @@ impl World {
         &mut self,
         entity: Entity,
         component: T,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), EntityMutationError> {
         if !self.is_alive(entity) {
-            return Err("Attempted to add a component to a dead or non-existant entity.");
+            return Err(EntityMutationError::DoesNotExist);
         }
 
         if let Some(mut comp) = self.get_component_mut(entity) {
@@ -514,7 +515,14 @@ impl World {
     /// multiple times in successive order.
     ///
     /// `World::remove_components` should be used for adding multiple omponents to an entity at once.
-    pub fn remove_component<T: Component>(&mut self, entity: Entity) {
+    pub fn remove_component<T: Component>(
+        &mut self,
+        entity: Entity,
+    ) -> Result<(), EntityMutationError> {
+        if !self.is_alive(entity) {
+            return Err(EntityMutationError::DoesNotExist);
+        }
+
         if self.get_component::<T>(entity).is_some() {
             trace!(
                 world = self.id().0,
@@ -526,6 +534,8 @@ impl World {
             // move the entity into a suitable chunk
             self.move_entity(entity, &[], &[ComponentTypeId::of::<T>()], &[], &[]);
         }
+
+        Ok(())
     }
 
     /// Removes a component from an entity.
@@ -534,20 +544,32 @@ impl World {
     /// This function is provided for bulk deleting components from an entity. This difference between this
     /// function and `remove_component` is this allows us to remove multiple components and still only
     /// perform a single move operation of the entity.
-    pub fn remove_components<T: ComponentTypeTupleSet>(&mut self, entity: Entity) {
+    pub fn remove_components<T: ComponentTypeTupleSet>(
+        &mut self,
+        entity: Entity,
+    ) -> Result<(), EntityMutationError> {
+        if !self.is_alive(entity) {
+            return Err(EntityMutationError::DoesNotExist);
+        }
+
         let components = T::collect();
         for component in components.iter() {
             if !self.has_component_by_id(entity, *component) {
-                return;
+                return Ok(());
             }
         }
 
         self.move_entity(entity, &[], &components, &[], &[]);
+        Ok(())
     }
 
     /// Adds a tag to an entity, or sets its value if the tag is
     /// already present.
-    pub fn add_tag<T: Tag>(&mut self, entity: Entity, tag: T) {
+    pub fn add_tag<T: Tag>(&mut self, entity: Entity, tag: T) -> Result<(), EntityMutationError> {
+        if !self.is_alive(entity) {
+            return Err(EntityMutationError::DoesNotExist);
+        }
+
         if self.get_tag::<T>(entity).is_some() {
             self.remove_tag::<T>(entity);
         }
@@ -571,10 +593,16 @@ impl World {
             )],
             &[],
         );
+
+        Ok(())
     }
 
     /// Removes a tag from an entity.
-    pub fn remove_tag<T: Tag>(&mut self, entity: Entity) {
+    pub fn remove_tag<T: Tag>(&mut self, entity: Entity) -> Result<(), EntityMutationError> {
+        if !self.is_alive(entity) {
+            return Err(EntityMutationError::DoesNotExist);
+        }
+
         if self.get_tag::<T>(entity).is_some() {
             trace!(
                 world = self.id().0,
@@ -586,6 +614,8 @@ impl World {
             // move the entity into a suitable chunk
             self.move_entity(entity, &[], &[], &[], &[TagTypeId::of::<T>()]);
         }
+
+        Ok(())
     }
 
     /// Borrows component data for the given entity.
@@ -886,6 +916,12 @@ impl World {
 
 impl Default for World {
     fn default() -> Self { Self::new() }
+}
+
+#[derive(Error, Debug)]
+pub enum EntityMutationError {
+    #[error("entity does not exist")]
+    DoesNotExist,
 }
 
 /// Describes the types of a set of components attached to an entity.
