@@ -692,6 +692,7 @@ impl ArchetypeData {
         self.tags.validate(self.chunk_sets.len());
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn clone_merge<C: crate::world::CloneMergeImpl>(
         &mut self,
         src_world: &crate::world::World,
