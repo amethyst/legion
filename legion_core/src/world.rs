@@ -737,28 +737,30 @@ impl World {
     pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
 
     /// Returns the entity's component types, if the entity exists.
-    pub fn entity_component_types(&self, entity: Entity) -> Option<&[(ComponentTypeId, ComponentMeta)]> {
+    pub fn entity_component_types(
+        &self,
+        entity: Entity,
+    ) -> Option<&[(ComponentTypeId, ComponentMeta)]> {
         if !self.is_alive(entity) {
-            return None
+            return None;
         }
-        let location = self
-            .entity_allocator
-            .get_location(entity.index());
-        let archetype = location.map(|location| self.storage().archetypes().get(location.archetype())).unwrap_or(None);
+        let location = self.entity_allocator.get_location(entity.index());
+        let archetype = location
+            .map(|location| self.storage().archetypes().get(location.archetype()))
+            .unwrap_or(None);
         archetype.map(|archetype| archetype.description().components())
     }
 
     /// Returns the entity's tag types, if the entity exists.
     pub fn entity_tag_types(&self, entity: Entity) -> Option<&[(TagTypeId, TagMeta)]> {
         if !self.is_alive(entity) {
-            return None
+            return None;
         }
-        let location = self
-            .entity_allocator
-            .get_location(entity.index());
-        let archetype = location.map(|location| self.storage().archetypes().get(location.archetype())).unwrap_or(None);
+        let location = self.entity_allocator.get_location(entity.index());
+        let archetype = location
+            .map(|location| self.storage().archetypes().get(location.archetype()))
+            .unwrap_or(None);
         archetype.map(|archetype| archetype.description().tags())
-        
     }
 
     /// Iteratively defragments the world's internal memory.
@@ -876,7 +878,7 @@ impl World {
         if let Some(replace_mappings) = replace_mappings {
             // First check that all the keys exist in the source world. We're assuming the source
             // data will be available later to replace the data we're about to delete
-            for (k, _) in replace_mappings {
+            for k in replace_mappings.keys() {
                 if !src_world.entity_allocator.is_alive(*k) {
                     panic!("clone_merge assumes all entity_mapping keys exist in the source world");
                 }
@@ -885,7 +887,7 @@ impl World {
             // Delete all the data associated with keys in replace_mappings. This leaves the
             // associated entities in a dangling state, but we'll fix this later when we copy the
             // data over
-            for (_, v) in replace_mappings {
+            for v in replace_mappings.values() {
                 if self.entity_allocator.is_alive(*v) {
                     let location = self
                         .entity_allocator
@@ -936,7 +938,7 @@ impl World {
                     src_archetype,
                     dst_archetype_index,
                     &mut self.entity_allocator,
-                    &mut self.resources,
+                    &self.resources,
                     clone_impl,
                     replace_mappings,
                     &mut result_mappings,
@@ -1049,6 +1051,7 @@ pub trait CloneMergeImpl {
     /// src_world and src_entities are provided so that other components on the same Entity can
     /// be looked up. The dst_resources are provided so that any required side effects to resources
     /// (like registering a physics body into a physics engine) can be implemented.
+    #[allow(clippy::too_many_arguments)]
     fn clone_components(
         &self,
         src_world: &World,
