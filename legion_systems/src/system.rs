@@ -3,6 +3,7 @@ use crate::schedule::ArchetypeAccess;
 use crate::schedule::{Runnable, Schedulable};
 use bit_set::BitSet;
 use derivative::Derivative;
+use fxhash::FxHashMap;
 use legion_core::borrow::{AtomicRefCell, Ref, RefMut};
 use legion_core::command::CommandBuffer;
 use legion_core::cons::{ConsAppend, ConsFlatten};
@@ -13,6 +14,7 @@ use legion_core::query::{ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, R
 use legion_core::storage::Tag;
 use legion_core::storage::{Component, ComponentTypeId, TagTypeId};
 use legion_core::world::World;
+use legion_core::world::WorldId;
 use std::any::TypeId;
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -813,7 +815,7 @@ where
     access: SystemAccess,
 
     // We pre-allocate a command buffer for ourself. Writes are self-draining so we never have to rellocate.
-    command_buffer: AtomicRefCell<CommandBuffer>,
+    command_buffer: FxHashMap<WorldId, AtomicRefCell<CommandBuffer>>,
 }
 
 impl<R, Q, F> Runnable for System<R, Q, F>
@@ -845,9 +847,11 @@ where
 
     fn accesses_archetypes(&self) -> &ArchetypeAccess { &self.archetypes }
 
-    fn command_buffer_mut(&self) -> RefMut<CommandBuffer> { self.command_buffer.get_mut() }
+    fn command_buffer_mut(&self, world: WorldId) -> Option<RefMut<CommandBuffer>> {
+        self.command_buffer.get(&world).map(|cmd| cmd.get_mut())
+    }
 
-    fn run(&self, world: &World, resources: &Resources) {
+    fn run(&mut self, world: &World, resources: &Resources) {
         let span = span!(Level::INFO, "System", system = %self.name);
         let _guard = span.enter();
 
@@ -857,16 +861,16 @@ where
         let mut prepared_queries = unsafe { queries.prepare() };
         let mut world_shim =
             unsafe { SubWorld::new(world, &self.access.components, &self.archetypes) };
-
-        // Give the command buffer a new entity block.
-        // This should usually just pull a free block, or allocate a new one...
-        // TODO: The BlockAllocator should *ensure* keeping at least 1 free block so this prevents an allocation
+        let cmd = self
+            .command_buffer
+            .entry(world.id())
+            .or_insert_with(|| AtomicRefCell::new(CommandBuffer::new(world)));
 
         info!("Running");
         use std::ops::DerefMut;
         let mut borrow = self.run_fn.get_mut();
         borrow.deref_mut().run(
-            &mut self.command_buffer.get_mut(),
+            &mut cmd.get_mut(),
             &mut world_shim,
             &mut resources,
             &mut prepared_queries,
@@ -1128,7 +1132,7 @@ where
                 components: self.component_access,
                 tags: Access::default(),
             },
-            command_buffer: AtomicRefCell::new(CommandBuffer::default()),
+            command_buffer: FxHashMap::default(),
         })
     }
 
@@ -1163,7 +1167,7 @@ where
                 components: self.component_access,
                 tags: Access::default(),
             },
-            command_buffer: AtomicRefCell::new(CommandBuffer::default()),
+            command_buffer: FxHashMap::default(),
         })
     }
 }
