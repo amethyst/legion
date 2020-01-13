@@ -449,9 +449,13 @@ impl Tags {
 
         unsafe {
             for (type_id, storage) in self.0.iter() {
-                let (ptr, _, count) = storage.data_raw();
+                let (ptr, element_size, count) = storage.data_raw();
                 debug_assert!(chunk < count, "chunk index out of bounds");
-                tags.push(*type_id, *storage.element(), ptr);
+                tags.push(
+                    *type_id,
+                    *storage.element(),
+                    NonNull::new(ptr.as_ptr().add(element_size * chunk)).unwrap(),
+                );
             }
         }
 
