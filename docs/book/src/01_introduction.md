@@ -6,7 +6,7 @@ Welcome to the Legion book! This book is intended to be a summary overview of le
 - how it is different than other Entity-Component-Systems in the rust ecosystem
 - Overviews of some pertinent internals
 
-This book assumes a general understanding of the concepts of the Entity-Component-System design and data composition as a design pattern. More information can be found on the If you need a summary of what an ECS is, please see the [Wikipedia article on ECS].
+This book assumes a general understanding of the concepts of the Entity-Component-System design and data composition as a design pattern. If you need a summary of what an ECS is, please see the [Wikipedia article on ECS].
 
 ## Design
 
@@ -16,10 +16,10 @@ Legions internal architecture is heavily inspired by the new Unity ECS architect
 The core concept of Legion design is based around the concept of `Entities`, `Archetypes` and `Chunks`. These three core concepts are the building blocks of legion, and its entity component system.
 
 ##### Entities
-Entities are strictly ID's, allocated within a given `Universe` of legion, which allow for uniquely referencing component instances. ID's may be reused generationally, but legion garuntees taht they are unique in any given universe; this is accomplished by providing each `World` in a `Universe` its own Entity Allocator, which will be unique in that universe. 
+Entities are strictly ID's, allocated within a given `Universe` of legion, which allow for uniquely referencing component instances. ID's may be reused generationally, but legion guarantees that they are unique in any given universe; this is accomplished by providing each `World` in a `Universe` its own Entity Allocator, which will be unique in that universe. 
 
 ##### Archetypes
-An archetype is considered a "Grouping of Components and Tags". Entities may have varying numbers and types of components; any combination of these tags and components is considered an `Archetype`. In legion, entity storage and parralelization of system execution are all centered on this concept of Archetypes, or like-entities. 
+An Archetype is considered a "Grouping of Components and Tags". Entities may have varying numbers and types of components; any combination of these tags and components is considered an `Archetype`. In legion, entity storage and parallelization of system execution are all centered on this concept of Archetypes, or like-entities. 
  
 
 
