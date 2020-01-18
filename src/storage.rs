@@ -287,7 +287,11 @@ impl TagMeta {
         TagMeta {
             size: size_of::<T>(),
             align: std::mem::align_of::<T>(),
-            drop_fn: Some(|ptr| unsafe { std::ptr::drop_in_place(ptr as *mut T) }),
+            drop_fn: if std::mem::needs_drop::<T>() {
+                Some(|ptr| unsafe { std::ptr::drop_in_place(ptr as *mut T) })
+            } else {
+                None
+            },
             eq_fn: |a, b| unsafe { *(a as *const T) == *(b as *const T) },
             clone_fn: |src, dst| unsafe {
                 let clone = (&*(src as *const T)).clone();
@@ -327,7 +331,11 @@ impl ComponentMeta {
         ComponentMeta {
             size: size_of::<T>(),
             align: std::mem::align_of::<T>(),
-            drop_fn: Some(|ptr| unsafe { std::ptr::drop_in_place(ptr as *mut T) }),
+            drop_fn: if std::mem::needs_drop::<T>() {
+                Some(|ptr| unsafe { std::ptr::drop_in_place(ptr as *mut T) })
+            } else {
+                None
+            },
         }
     }
 
