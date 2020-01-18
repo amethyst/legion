@@ -20,7 +20,7 @@ Based on the [ecs_bench](https://github.com/lschmierer/ecs_bench) project.
 ## Getting Started
 
 ```rust
-use legion::*;
+use legion::prelude::*;
 
 // Define our entity data types
 #[derive(Clone, Copy, Debug, PartialEq)]
