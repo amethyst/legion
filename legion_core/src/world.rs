@@ -1161,8 +1161,6 @@ pub trait CloneMergeImpl {
         dst_data: *mut u8,
         num_components: usize,
     );
-
-    //TODO: should replace_mappings and result_mappings be owned by the impl?
 }
 
 #[derive(Error, Debug)]

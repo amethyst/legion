@@ -821,9 +821,7 @@ impl ArchetypeData {
                     // we can use the mapping to respawn entities as needed using the new data.
 
                     // We know how many entities will be appended to this list
-                    dst_entities.reserve(entities_to_write);
-                    let dst_entity_start_idx = dst_entities.len();
-                    let dst_entity_end_idx = dst_entities.len() + entities_to_write;
+                    dst_entities.reserve(dst_entities.len() + entities_to_write);
 
                     for src_entity in &src_chunk.entities[src_entity_start_idx..src_entity_end_idx]
                     {
@@ -886,8 +884,6 @@ impl ArchetypeData {
                             let dst_data =
                                 dst_component_writer.reserve_raw(entities_to_write).as_ptr();
 
-                            let dst_entity_start_idx =
-
                             // Delegate the clone operation to the provided CloneImpl
                             clone_impl.clone_components(
                                 src_world,
@@ -896,7 +892,7 @@ impl ArchetypeData {
                                 dst_resources,
                                 *src_type,
                                 &src_chunk.entities[src_entity_start_idx..src_entity_end_idx],
-                                &dst_entities[dst_entity_start_idx..dst_entity_end_idx],
+                                &dst_entities[src_entity_start_idx..src_entity_end_idx],
                                 src_data,
                                 dst_data,
                                 entities_to_write,
@@ -908,6 +904,7 @@ impl ArchetypeData {
             }
         }
     }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn clone_merge_single<C: crate::world::CloneMergeImpl>(
         &mut self,
