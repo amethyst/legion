@@ -946,6 +946,102 @@ impl World {
         }
     }
 
+    pub fn clone_merge_single<C: CloneMergeImpl>(
+        &mut self,
+        src_world: &World,
+        src_entity: Entity,
+        clone_impl: &C,
+        //replace_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
+        //mut result_mappings: Option<&mut std::collections::HashMap<Entity, Entity>>,
+    ) {
+        let span = span!(Level::INFO, "CloneMerging worlds", source = src_world.id().0, destination = ?self.id());
+        let _guard = span.enter();
+
+        let src_storage = unsafe { &(*src_world.storage.get()) };
+        let dst_storage = unsafe { &mut (*self.storage.get()) };
+
+        // Erase all entities that are referred to by value. The code following will update the location
+        // of all these entities to point to new, valid locations
+//        if let Some(replace_mappings) = replace_mappings {
+//            // First check that all the keys exist in the source world. We're assuming the source
+//            // data will be available later to replace the data we're about to delete
+//            for k in replace_mappings.keys() {
+//                if !src_world.entity_allocator.is_alive(*k) {
+//                    panic!("clone_merge assumes all entity_mapping keys exist in the source world");
+//                }
+//            }
+//
+//            // Delete all the data associated with keys in replace_mappings. This leaves the
+//            // associated entities in a dangling state, but we'll fix this later when we copy the
+//            // data over
+//            for v in replace_mappings.values() {
+//                if self.entity_allocator.is_alive(*v) {
+//                    let location = self
+//                        .entity_allocator
+//                        .get_location(v.index())
+//                        .expect("Failed to get location of live entity");
+//                    self.delete_location(location);
+//                } else {
+//                    panic!("clone_merge assumes all entity_mapping values exist in the destination world");
+//                }
+//            }
+//        }
+
+        if !src_world.entity_allocator.is_alive(src_entity) {
+            panic!("src_entity not alive");
+        }
+
+        let src_location = src_world.entity_allocator.get_location(src_entity.index()).unwrap();
+        let src_archetype = &src_storage.archetypes()[src_location.archetype()];
+
+
+        // Iterate all archetypes in the src world
+        //for src_archetype in src_storage.archetypes() {
+            let archetype_data = ArchetypeFilterData {
+                component_types: self.storage().component_types(),
+                tag_types: self.storage().tag_types(),
+            };
+
+            // Build the archetype that we will write into. The caller of this function provides an
+            // impl to do the clone, optionally transforming components from one type to another
+            let mut dst_archetype = ArchetypeDescription::default();
+            for (from_type_id, _from_meta) in src_archetype.description().components() {
+                let (into_type_id, into_meta) = clone_impl.map_component_type(*from_type_id);
+                dst_archetype.register_component_raw(into_type_id, into_meta);
+            }
+
+            // Find or create the archetype in the destination world
+            let matches = dst_archetype
+                .matches(archetype_data)
+                .matching_indices()
+                .next();
+
+            // If it doesn't exist, allocate it
+            let dst_archetype_index = if let Some(arch_index) = matches {
+                arch_index
+            } else {
+                dst_storage.alloc_archetype(dst_archetype).0
+            };
+
+            // Do the clone_merge for this archetype
+            dst_storage
+                .archetypes_mut()
+                .get_mut(dst_archetype_index)
+                .unwrap()
+                .clone_merge_single(
+                    &src_world,
+                    src_archetype,
+                    &src_location,
+                    dst_archetype_index,
+                    &mut self.entity_allocator,
+                    &self.resources,
+                    clone_impl,
+                    //replace_mappings,
+                    //&mut result_mappings,
+                );
+        //}
+    }
+
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<ArchetypeIndex>
     where
         T: for<'a> Filter<ArchetypeFilterData<'a>>,
@@ -1065,6 +1161,8 @@ pub trait CloneMergeImpl {
         dst_data: *mut u8,
         num_components: usize,
     );
+
+    //TODO: should replace_mappings and result_mappings be owned by the impl?
 }
 
 #[derive(Error, Debug)]
