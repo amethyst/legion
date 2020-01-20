@@ -1101,6 +1101,79 @@ impl ArchetypeData {
             })
     }
 
+    pub(crate) fn iter_data_slice<'a, T: Component
+    >(
+        &'a self
+    ) -> impl Iterator<Item = RefMap<&[T]>> + 'a {
+        self.chunk_sets
+            .iter()
+            .flat_map(move |set| {
+                set.chunks
+                    .iter()
+                    .map(move |chunk| {
+                        let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
+                        unsafe { c.data_slice::<T>() }
+                    })
+            })
+    }
+
+    pub(crate) fn iter_data_slice_mut<'a, T: Component
+    >(
+        &'a self
+    ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
+        self.chunk_sets
+            .iter()
+            .flat_map(move |set| {
+                set.chunks
+                    .iter()
+                    .map(move |chunk| {
+                        let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
+                        unsafe { c.data_slice_mut::<T>() }
+                    })
+            })
+    }
+
+//    pub(crate) fn enumerate_values<'a, T: Component
+//    >(
+//        &'a self,
+//        archetype_index: usize,
+//    ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a
+//    /*Vec<&mut T>*/ /*-> impl Iterator<Item = (Entity, EntityLocation)> + 'a*/ {
+//        /*let mut slices : Vec<RefMapMut<&mut [T]>> =*/ self.chunk_sets
+//            .iter()
+//            .flat_map(move |set| {
+//                set.chunks
+//                    .iter()
+//                    .map(move |chunk| {
+//                        let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
+//                        //let (borrow, slice) = c.data_slice_mut().deconstruct();
+//                        unsafe { c.data_slice_mut::<T>() }
+//                       // let (ptr, _element_size, count) = c.data_raw();
+//                        //ptr.map_into(|ptr| std::slice::from_raw_parts_mut(*ptr as *mut _ as *mut T, count))
+////
+//                        //let slice = c.data_slice_mut();
+//                        //slice.iter()
+//                        //let (x, y) = slice.deconstruct();
+//                        //y.iter()
+//                        //y
+//                    })
+//            })//.collect();
+//
+//        //let f = slices.iter_mut().flat_map(|x| x.iter_mut()).collect();
+//
+//
+//        //f
+////        let mut v = vec![];
+////        for s in slices.iter_mut() {
+////            for r in s.iter_mut() {
+////                v.push(r);
+////            }
+////        }
+//
+//
+//
+//    }
+
     fn push<F: FnMut(&mut Tags)>(&mut self, set: Chunkset, mut initialize: F) {
         initialize(&mut self.tags);
         self.chunk_sets.push(set);

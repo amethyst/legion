@@ -701,3 +701,155 @@ impl<'a, T: 'a, I: Iterator<Item = &'a mut T> + ExactSizeIterator> ExactSizeIter
     for TryRefIterMut<'a, T, I>
 {
 }
+
+
+
+
+
+
+
+
+
+
+
+
+#[derive(Debug)]
+pub struct RefMapSet<'a, T: 'a> {
+    #[allow(dead_code)]
+    // held for drop impl
+    borrow: Vec<Shared<'a>>,
+    value: T,
+}
+
+impl<'a, T: 'a> RefMapSet<'a, T> {
+    #[inline(always)]
+    pub fn new(borrow: Vec<Shared<'a>>, value: T) -> Self { Self { borrow, value } }
+
+    #[inline(always)]
+    pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapSet<'a, K> {
+        RefMapSet::new(self.borrow, f(&mut self.value))
+    }
+
+    /// Deconstructs this mapped borrow to its underlying borrow state and value.
+    ///
+    /// # Safety
+    ///
+    /// Ensure that you still follow all safety guidelines of this  mapped ref.
+    #[inline(always)]
+    pub unsafe fn deconstruct(self) -> (Vec<Shared<'a>>, T) { (self.borrow, self.value) }
+}
+
+impl<'a, T: 'a> Deref for RefMapSet<'a, T> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target { &self.value }
+}
+
+impl<'a, T: 'a> AsRef<T> for RefMapSet<'a, T> {
+    #[inline(always)]
+    fn as_ref(&self) -> &T { &self.value }
+}
+
+impl<'a, T: 'a> std::borrow::Borrow<T> for RefMapSet<'a, T> {
+    #[inline(always)]
+    fn borrow(&self) -> &T { &self.value }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+#[derive(Debug)]
+pub struct RefMapMutSet<'a, T: 'a> {
+    #[allow(dead_code)]
+    // held for drop impl
+    borrow: Vec<Exclusive<'a>>,
+    value: T,
+}
+
+impl<'a, T: 'a> RefMapMutSet<'a, T> {
+    #[inline(always)]
+    pub fn new(borrow: Vec<Exclusive<'a>>, value: T) -> Self { Self { borrow, value } }
+
+    #[inline(always)]
+    pub fn map_into<K: 'a, F: FnMut(&mut T) -> K>(mut self, mut f: F) -> RefMapMutSet<'a, K> {
+        RefMapMutSet {
+            value: f(&mut self.value),
+            borrow: self.borrow,
+        }
+    }
+
+    /// Deconstructs this mapped borrow to its underlying borrow state and value.
+    ///
+    /// # Safety
+    ///
+    /// Ensure that you still follow all safety guidelines of this mutable mapped ref.
+    #[inline(always)]
+    pub unsafe fn deconstruct(self) -> (Vec<Exclusive<'a>>, T) { (self.borrow, self.value) }
+}
+
+impl<'a, T: 'a> Deref for RefMapMutSet<'a, T> {
+    type Target = T;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target { &self.value }
+}
+
+impl<'a, T: 'a> DerefMut for RefMapMutSet<'a, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.value }
+}
+
+impl<'a, T: 'a> AsRef<T> for RefMapMutSet<'a, T> {
+    #[inline(always)]
+    fn as_ref(&self) -> &T { &self.value }
+}
+
+impl<'a, T: 'a> std::borrow::Borrow<T> for RefMapMutSet<'a, T> {
+    #[inline(always)]
+    fn borrow(&self) -> &T { &self.value }
+}
+
+
+
+
+
+//use crate::world::World;
+//use crate::storage::Component;
+//use crate::filter::EntityFilter;
+//use crate::filter::EntityFilterTuple;
+//use crate::filter::Passthrough;
+//
+//struct RefMapMutIter<'a, T : Component> {
+//    world: &'a World,
+//    filter: EntityFilterTuple<T, Passthrough, Passthrough>,
+//    phantom_data: std::marker::PhantomData<T>
+//}
+//
+//impl<'a, T : Component> RefMapMutIter<'a, T> {
+//    fn new(world: &'a World) -> Self {
+//        let filter = crate::filter::filter_fns::component::<T>().iter_archetype_indexes(self.world.storage());
+//    }
+//
+//    fn iter(&self) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
+//        self.filter.iter_archetype_indexes(self.world.storage()).flat_map(|archetype_index| {
+//            unsafe { self.world.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>() }
+//        })
+//    }
+//}
+
+//impl<'a, T : Component> Iterator for RefMapMutIter<'a, T> {
+//    type Item = T;
+//
+//    fn next(&mut self) -> Option<Self::Item> {
+//
+//    }
+//}

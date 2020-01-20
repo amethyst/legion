@@ -1,5 +1,9 @@
 use crate::borrow::Ref;
 use crate::borrow::RefMut;
+use crate::borrow::RefMap;
+use crate::borrow::RefMapMut;
+use crate::borrow::RefMapSet;
+use crate::borrow::RefMapMutSet;
 use crate::entity::BlockAllocator;
 use crate::entity::Entity;
 use crate::entity::EntityAllocator;
@@ -42,6 +46,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{info, span, trace, Level};
+use std::borrow::BorrowMut;
 
 static NEXT_UNIVERSE_ID: AtomicUsize = AtomicUsize::new(1);
 static NEXT_WORLD_ID: AtomicUsize = AtomicUsize::new(0);
@@ -715,6 +720,173 @@ impl World {
     pub fn get_component_mut<T: Component>(&mut self, entity: Entity) -> Option<RefMut<T>> {
         // safe because the &mut self ensures exclusivity
         unsafe { self.get_component_mut_unchecked(entity) }
+    }
+
+    //    pub fn get_all_components_mut<T: Component>(
+//        &mut self
+//    ) -> Vec<&mut T> {
+//        let values : Vec<&mut T> = vec![];
+//
+////        let filter = crate::filter::filter_fns::component::<T>();
+////        for archetype_index in filter.iter_archetype_indexes(self.storage()) {
+////            let archetype = self.storage().archetypes_mut().get_unchecked_mut(archetype_index);
+////            archetype.enumerate_entities()
+////        }
+//
+////        let values = vec![];
+////        for archetype in self.storage().archetypes() {
+////            if archetype.description().components()
+////        }
+//
+//        values
+//    }
+
+
+//    pub fn iter_data_slice_mut<'a, T: Component
+//    >(
+//        &'a self,
+//        archetype_index: usize,
+//    ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
+//        let filter = crate::filter::filter_fns::component::<T>();
+////        for archetype_index in filter.iter_archetype_indexes(self.storage()) {
+////            let archetype = self.storage().archetypes_mut().get_unchecked_mut(archetype_index);
+////            archetype.enumerate_entities()
+////        }
+//        let iter = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
+//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>() }
+//        });
+//    }
+
+//    pub fn get_all_components_mut<T: Component>(
+//        &mut self
+//    ) -> Vec<&mut T> {
+//        let filter = crate::filter::filter_fns::component::<T>();
+//        let x : Vec<_> = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
+//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>() }
+//        }).collect();
+//
+//
+//        let values : Vec<&mut T> = vec![];
+//
+//    //        let filter = crate::filter::filter_fns::component::<T>();
+//    //        for archetype_index in filter.iter_archetype_indexes(self.storage()) {
+//    //            let archetype = self.storage().archetypes_mut().get_unchecked_mut(archetype_index);
+//    //            archetype.enumerate_entities()
+//    //        }
+//
+//    //        let values = vec![];
+//    //        for archetype in self.storage().archetypes() {
+//    //            if archetype.description().components()
+//    //        }
+//
+//        values
+//    }
+
+//    pub fn iter_data_slice_mut<'a, T: Component
+//    >(
+//        &'a self,
+//        archetype_index: usize,
+//    ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
+//        let filter = crate::filter::filter_fns::component::<T>();
+//    //        for archetype_index in filter.iter_archetype_indexes(self.storage()) {
+//    //            let archetype = self.storage().archetypes_mut().get_unchecked_mut(archetype_index);
+//    //            archetype.enumerate_entities()
+//    //        }
+//        let iter = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
+//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>() }
+//        });
+//    }
+
+//    pub fn visit_data_slice_mut<
+//        'a : 'b, 'b,
+//        T: Component,
+//        F: FnMut(Vec<&'b mut T>)
+//    >(
+//        &'a self,
+//        mut f: F
+//    ) {
+//        let filter = crate::filter::filter_fns::component::<T>();
+//        let mut borrows : Vec<RefMapMut<&'a mut [T]>> = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
+//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>() }
+//        }).collect();
+//
+//        {
+//            let values : Vec<&'b mut T> = borrows.iter_mut().flat_map(|x| x.iter_mut()).collect();
+//            (f)(values);
+//        }
+//    }
+
+//    pub fn get_all_components_mut<
+//        'a,
+//        T: Component,
+//    >(
+//        &'a self
+//    ) -> (Vec<crate::borrow::Exclusive<'a>>, Vec<&'a mut T>)  {
+//        use crate::borrow::Exclusive;
+//        let filter = crate::filter::filter_fns::component::<T>();
+//        let mut tuples : Vec<(Exclusive<'a>, &'a mut [T])> = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
+//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>().map(|x| x.deconstruct()) }
+//        }).collect();
+//
+//
+//        let mut borrows = vec![];
+//        let mut refs = vec![];
+//        for (borrow, slice) in tuples {
+//            borrows.push(borrow);
+//            for r in slice {
+//                refs.push(r);
+//            }
+//        }
+//
+//        (borrows, refs)
+//    }
+
+    pub fn get_all_components<
+        'a,
+        T: Component,
+    >(
+        &'a self
+    ) -> RefMapSet<'a, Vec<&'a T>>  {
+        use crate::borrow::Exclusive;
+        let filter = crate::filter::filter_fns::component::<T>();
+
+        let mut borrows = vec![];
+        let mut refs = vec![];
+
+        filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
+            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice::<T>().map(|x| x.deconstruct()) }
+        }).for_each(|(borrow, slice)| {
+            borrows.push(borrow);
+            for r in slice {
+                refs.push(r);
+            }
+        });
+
+        RefMapSet::new(borrows, refs)
+    }
+
+    pub fn get_all_components_mut<
+        'a,
+        T: Component,
+    >(
+        &'a self
+    ) -> RefMapMutSet<'a, Vec<&'a mut T>>  {
+        use crate::borrow::Exclusive;
+        let filter = crate::filter::filter_fns::component::<T>();
+
+        let mut borrows = vec![];
+        let mut refs = vec![];
+
+        filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
+            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>().map(|x| x.deconstruct()) }
+        }).for_each(|(borrow, slice)| {
+            borrows.push(borrow);
+            for r in slice {
+                refs.push(r);
+            }
+        });
+
+        RefMapMutSet::new(borrows, refs)
     }
 
     /// Gets tag data for the given entity.
