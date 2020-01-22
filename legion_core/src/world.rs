@@ -1,9 +1,9 @@
 use crate::borrow::Ref;
-use crate::borrow::RefMut;
 use crate::borrow::RefMap;
 use crate::borrow::RefMapMut;
-use crate::borrow::RefMapSet;
 use crate::borrow::RefMapMutSet;
+use crate::borrow::RefMapSet;
+use crate::borrow::RefMut;
 use crate::entity::BlockAllocator;
 use crate::entity::Entity;
 use crate::entity::EntityAllocator;
@@ -31,6 +31,7 @@ use crate::storage::TagTypeId;
 use crate::storage::Tags;
 use crate::tuple::TupleEq;
 use parking_lot::Mutex;
+use std::borrow::BorrowMut;
 use std::cell::UnsafeCell;
 use std::iter::Enumerate;
 use std::iter::Fuse;
@@ -46,7 +47,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{info, span, trace, Level};
-use std::borrow::BorrowMut;
 
 static NEXT_UNIVERSE_ID: AtomicUsize = AtomicUsize::new(1);
 static NEXT_WORLD_ID: AtomicUsize = AtomicUsize::new(0);
@@ -722,169 +722,52 @@ impl World {
         unsafe { self.get_component_mut_unchecked(entity) }
     }
 
-    //    pub fn get_all_components_mut<T: Component>(
-//        &mut self
-//    ) -> Vec<&mut T> {
-//        let values : Vec<&mut T> = vec![];
-//
-////        let filter = crate::filter::filter_fns::component::<T>();
-////        for archetype_index in filter.iter_archetype_indexes(self.storage()) {
-////            let archetype = self.storage().archetypes_mut().get_unchecked_mut(archetype_index);
-////            archetype.enumerate_entities()
-////        }
-//
-////        let values = vec![];
-////        for archetype in self.storage().archetypes() {
-////            if archetype.description().components()
-////        }
-//
-//        values
-//    }
-
-
-//    pub fn iter_data_slice_mut<'a, T: Component
-//    >(
-//        &'a self,
-//        archetype_index: usize,
-//    ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
-//        let filter = crate::filter::filter_fns::component::<T>();
-////        for archetype_index in filter.iter_archetype_indexes(self.storage()) {
-////            let archetype = self.storage().archetypes_mut().get_unchecked_mut(archetype_index);
-////            archetype.enumerate_entities()
-////        }
-//        let iter = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
-//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>() }
-//        });
-//    }
-
-//    pub fn get_all_components_mut<T: Component>(
-//        &mut self
-//    ) -> Vec<&mut T> {
-//        let filter = crate::filter::filter_fns::component::<T>();
-//        let x : Vec<_> = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
-//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>() }
-//        }).collect();
-//
-//
-//        let values : Vec<&mut T> = vec![];
-//
-//    //        let filter = crate::filter::filter_fns::component::<T>();
-//    //        for archetype_index in filter.iter_archetype_indexes(self.storage()) {
-//    //            let archetype = self.storage().archetypes_mut().get_unchecked_mut(archetype_index);
-//    //            archetype.enumerate_entities()
-//    //        }
-//
-//    //        let values = vec![];
-//    //        for archetype in self.storage().archetypes() {
-//    //            if archetype.description().components()
-//    //        }
-//
-//        values
-//    }
-
-//    pub fn iter_data_slice_mut<'a, T: Component
-//    >(
-//        &'a self,
-//        archetype_index: usize,
-//    ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
-//        let filter = crate::filter::filter_fns::component::<T>();
-//    //        for archetype_index in filter.iter_archetype_indexes(self.storage()) {
-//    //            let archetype = self.storage().archetypes_mut().get_unchecked_mut(archetype_index);
-//    //            archetype.enumerate_entities()
-//    //        }
-//        let iter = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
-//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>() }
-//        });
-//    }
-
-//    pub fn visit_data_slice_mut<
-//        'a : 'b, 'b,
-//        T: Component,
-//        F: FnMut(Vec<&'b mut T>)
-//    >(
-//        &'a self,
-//        mut f: F
-//    ) {
-//        let filter = crate::filter::filter_fns::component::<T>();
-//        let mut borrows : Vec<RefMapMut<&'a mut [T]>> = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
-//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>() }
-//        }).collect();
-//
-//        {
-//            let values : Vec<&'b mut T> = borrows.iter_mut().flat_map(|x| x.iter_mut()).collect();
-//            (f)(values);
-//        }
-//    }
-
-//    pub fn get_all_components_mut<
-//        'a,
-//        T: Component,
-//    >(
-//        &'a self
-//    ) -> (Vec<crate::borrow::Exclusive<'a>>, Vec<&'a mut T>)  {
-//        use crate::borrow::Exclusive;
-//        let filter = crate::filter::filter_fns::component::<T>();
-//        let mut tuples : Vec<(Exclusive<'a>, &'a mut [T])> = filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
-//            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>().map(|x| x.deconstruct()) }
-//        }).collect();
-//
-//
-//        let mut borrows = vec![];
-//        let mut refs = vec![];
-//        for (borrow, slice) in tuples {
-//            borrows.push(borrow);
-//            for r in slice {
-//                refs.push(r);
-//            }
-//        }
-//
-//        (borrows, refs)
-//    }
-
-    pub fn get_all_components<
-        'a,
-        T: Component,
-    >(
-        &'a self
-    ) -> RefMapSet<'a, Vec<&'a T>>  {
-        use crate::borrow::Exclusive;
+    pub fn get_all_components<'a, T: Component>(&'a self) -> RefMapSet<'a, Vec<&'a T>> {
         let filter = crate::filter::filter_fns::component::<T>();
 
         let mut borrows = vec![];
         let mut refs = vec![];
 
-        filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
-            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice::<T>().map(|x| x.deconstruct()) }
-        }).for_each(|(borrow, slice)| {
-            borrows.push(borrow);
-            for r in slice {
-                refs.push(r);
-            }
-        });
+        unsafe {
+            filter
+                .iter_archetype_indexes(self.storage())
+                .flat_map(|archetype_index| {
+                    self.storage()
+                        .archetypes()
+                        .get_unchecked(archetype_index)
+                        .iter_data_slice::<T>()
+                })
+                .map(|x| x.deconstruct())
+                .for_each(|(borrow, slice)| {
+                    borrows.push(borrow);
+                    refs.extend(slice);
+                });
+        }
 
         RefMapSet::new(borrows, refs)
     }
 
-    pub fn get_all_components_mut<
-        'a,
-        T: Component,
-    >(
-        &'a self
-    ) -> RefMapMutSet<'a, Vec<&'a mut T>>  {
-        use crate::borrow::Exclusive;
+    pub fn get_all_components_mut<'a, T: Component>(&'a self) -> RefMapMutSet<'a, Vec<&'a mut T>> {
         let filter = crate::filter::filter_fns::component::<T>();
 
         let mut borrows = vec![];
         let mut refs = vec![];
 
-        filter.iter_archetype_indexes(self.storage()).flat_map(|archetype_index| {
-            unsafe { self.storage().archetypes().get_unchecked(archetype_index).iter_data_slice_mut::<T>().map(|x| x.deconstruct()) }
-        }).for_each(|(borrow, slice)| {
-            borrows.push(borrow);
-            for r in slice {
-                refs.push(r);
-            }
-        });
+        unsafe {
+            filter
+                .iter_archetype_indexes(self.storage())
+                .flat_map(|archetype_index| {
+                    self.storage()
+                        .archetypes()
+                        .get_unchecked(archetype_index)
+                        .iter_data_slice_mut::<T>()
+                })
+                .map(|x| x.deconstruct())
+                .for_each(|(borrow, slice)| {
+                    borrows.push(borrow);
+                    refs.extend(slice);
+                });
+        }
 
         RefMapMutSet::new(borrows, refs)
     }
@@ -1134,83 +1017,86 @@ impl World {
 
         // Erase all entities that are referred to by value. The code following will update the location
         // of all these entities to point to new, valid locations
-//        if let Some(replace_mappings) = replace_mappings {
-//            // First check that all the keys exist in the source world. We're assuming the source
-//            // data will be available later to replace the data we're about to delete
-//            for k in replace_mappings.keys() {
-//                if !src_world.entity_allocator.is_alive(*k) {
-//                    panic!("clone_merge assumes all entity_mapping keys exist in the source world");
-//                }
-//            }
-//
-//            // Delete all the data associated with keys in replace_mappings. This leaves the
-//            // associated entities in a dangling state, but we'll fix this later when we copy the
-//            // data over
-//            for v in replace_mappings.values() {
-//                if self.entity_allocator.is_alive(*v) {
-//                    let location = self
-//                        .entity_allocator
-//                        .get_location(v.index())
-//                        .expect("Failed to get location of live entity");
-//                    self.delete_location(location);
-//                } else {
-//                    panic!("clone_merge assumes all entity_mapping values exist in the destination world");
-//                }
-//            }
-//        }
+        //
+        // if let Some(replace_mappings) = replace_mappings {
+        //     // First check that all the keys exist in the source world. We're assuming the source
+        //     // data will be available later to replace the data we're about to delete
+        //     for k in replace_mappings.keys() {
+        //         if !src_world.entity_allocator.is_alive(*k) {
+        //             panic!("clone_merge assumes all entity_mapping keys exist in the source world");
+        //         }
+        //     }
+        //
+        //     // Delete all the data associated with keys in replace_mappings. This leaves the
+        //     // associated entities in a dangling state, but we'll fix this later when we copy the
+        //     // data over
+        //     for v in replace_mappings.values() {
+        //         if self.entity_allocator.is_alive(*v) {
+        //             let location = self
+        //                 .entity_allocator
+        //                 .get_location(v.index())
+        //                 .expect("Failed to get location of live entity");
+        //             self.delete_location(location);
+        //         } else {
+        //             panic!("clone_merge assumes all entity_mapping values exist in the destination world");
+        //         }
+        //     }
+        // }
 
         if !src_world.entity_allocator.is_alive(src_entity) {
             panic!("src_entity not alive");
         }
 
-        let src_location = src_world.entity_allocator.get_location(src_entity.index()).unwrap();
+        let src_location = src_world
+            .entity_allocator
+            .get_location(src_entity.index())
+            .unwrap();
         let src_archetype = &src_storage.archetypes()[src_location.archetype()];
-
 
         // Iterate all archetypes in the src world
         //for src_archetype in src_storage.archetypes() {
-            let archetype_data = ArchetypeFilterData {
-                component_types: self.storage().component_types(),
-                tag_types: self.storage().tag_types(),
-            };
+        let archetype_data = ArchetypeFilterData {
+            component_types: self.storage().component_types(),
+            tag_types: self.storage().tag_types(),
+        };
 
-            // Build the archetype that we will write into. The caller of this function provides an
-            // impl to do the clone, optionally transforming components from one type to another
-            let mut dst_archetype = ArchetypeDescription::default();
-            for (from_type_id, _from_meta) in src_archetype.description().components() {
-                let (into_type_id, into_meta) = clone_impl.map_component_type(*from_type_id);
-                dst_archetype.register_component_raw(into_type_id, into_meta);
-            }
+        // Build the archetype that we will write into. The caller of this function provides an
+        // impl to do the clone, optionally transforming components from one type to another
+        let mut dst_archetype = ArchetypeDescription::default();
+        for (from_type_id, _from_meta) in src_archetype.description().components() {
+            let (into_type_id, into_meta) = clone_impl.map_component_type(*from_type_id);
+            dst_archetype.register_component_raw(into_type_id, into_meta);
+        }
 
-            // Find or create the archetype in the destination world
-            let matches = dst_archetype
-                .matches(archetype_data)
-                .matching_indices()
-                .next();
+        // Find or create the archetype in the destination world
+        let matches = dst_archetype
+            .matches(archetype_data)
+            .matching_indices()
+            .next();
 
-            // If it doesn't exist, allocate it
-            let dst_archetype_index = if let Some(arch_index) = matches {
-                arch_index
-            } else {
-                dst_storage.alloc_archetype(dst_archetype).0
-            };
+        // If it doesn't exist, allocate it
+        let dst_archetype_index = if let Some(arch_index) = matches {
+            arch_index
+        } else {
+            dst_storage.alloc_archetype(dst_archetype).0
+        };
 
-            // Do the clone_merge for this archetype
-            dst_storage
-                .archetypes_mut()
-                .get_mut(dst_archetype_index)
-                .unwrap()
-                .clone_merge_single(
-                    &src_world,
-                    src_archetype,
-                    &src_location,
-                    dst_archetype_index,
-                    &mut self.entity_allocator,
-                    &self.resources,
-                    clone_impl,
-                    //replace_mappings,
-                    //&mut result_mappings,
-                );
+        // Do the clone_merge for this archetype
+        dst_storage
+            .archetypes_mut()
+            .get_mut(dst_archetype_index)
+            .unwrap()
+            .clone_merge_single(
+                &src_world,
+                src_archetype,
+                &src_location,
+                dst_archetype_index,
+                &mut self.entity_allocator,
+                &self.resources,
+                clone_impl,
+                //replace_mappings,
+                //&mut result_mappings,
+            );
         //}
     }
 
