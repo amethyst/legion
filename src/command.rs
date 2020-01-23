@@ -526,13 +526,10 @@ impl CommandBuffer {
         C: 'static + IntoComponentSource,
     {
         let components = components.into();
-        if components.len() > self.free_list.len() {
-            return Err(CommandError::EntityBlockFull);
-        }
 
         let mut entities = Vec::with_capacity(components.len());
         for _ in 0..components.len() {
-            entities.push(self.free_list.pop().ok_or(CommandError::EntityBlockFull)?);
+            entities.push(self.create_entity()?);
         }
 
         self.commands
