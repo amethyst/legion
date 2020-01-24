@@ -57,6 +57,7 @@ pub struct Universe {
 
 impl Universe {
     /// Creates a new `Universe`.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self {
             id: UniverseId(NEXT_UNIVERSE_ID.fetch_add(1, Ordering::SeqCst)),
@@ -144,7 +145,7 @@ impl World {
     /// # Examples
     ///
     /// ```
-    /// # use legion::prelude::*;
+    /// # use legion_core::prelude::*;
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
     /// # struct Position(f32);
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -189,7 +190,7 @@ impl World {
     /// Inserting entity tuples:
     ///
     /// ```
-    /// # use legion::prelude::*;
+    /// # use legion_core::prelude::*;
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
     /// # struct Position(f32);
     /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -208,17 +209,17 @@ impl World {
     /// ```
     #[inline]
     pub fn insert<T, C>(&mut self, tags: T, components: C) -> &[Entity]
-    where
-        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-        C: IntoComponentSource,
+        where
+            T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+            C: IntoComponentSource,
     {
         self.insert_impl(tags, components.into())
     }
 
     pub(crate) fn insert_impl<T, C>(&mut self, mut tags: T, mut components: C) -> &[Entity]
-    where
-        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-        C: ComponentSource,
+        where
+            T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+            C: ComponentSource,
     {
         let span = span!(Level::TRACE, "Inserting entities", world = self.id().0);
         let _guard = span.enter();
@@ -538,7 +539,7 @@ impl World {
         Ok(())
     }
 
-    /// Removes a component from an entity.
+    /// Removes
     ///
     /// # Notes
     /// This function is provided for bulk deleting components from an entity. This difference between this
@@ -571,7 +572,7 @@ impl World {
         }
 
         if self.get_tag::<T>(entity).is_some() {
-            self.remove_tag::<T>(entity);
+            self.remove_tag::<T>(entity)?;
         }
 
         trace!(
@@ -826,9 +827,9 @@ impl World {
     }
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<usize>
-    where
-        T: for<'a> Filter<ArchetypeFilterData<'a>>,
-        C: for<'a> Filter<ArchetypeFilterData<'a>>,
+        where
+            T: for<'a> Filter<ArchetypeFilterData<'a>>,
+            C: for<'a> Filter<ArchetypeFilterData<'a>>,
     {
         // search for an archetype with an exact match for the desired component layout
         let archetype_data = ArchetypeFilterData {
@@ -847,9 +848,9 @@ impl World {
     }
 
     fn create_archetype<T, C>(&mut self, tags: &T, components: &C) -> usize
-    where
-        T: TagLayout,
-        C: ComponentLayout,
+        where
+            T: TagLayout,
+            C: ComponentLayout,
     {
         let mut description = ArchetypeDescription::default();
         tags.tailor_archetype(&mut description);
@@ -860,9 +861,9 @@ impl World {
     }
 
     fn find_or_create_archetype<T, C>(&mut self, tags: &mut T, components: &mut C) -> usize
-    where
-        T: TagLayout,
-        C: ComponentLayout,
+        where
+            T: TagLayout,
+            C: ComponentLayout,
     {
         if let Some(i) = self.find_archetype(tags.get_filter(), components.get_filter()) {
             i
@@ -872,8 +873,8 @@ impl World {
     }
 
     fn find_chunk_set<T>(&self, archetype: usize, tags: &mut T) -> Option<usize>
-    where
-        T: for<'a> Filter<ChunksetFilterData<'a>>,
+        where
+            T: for<'a> Filter<ChunksetFilterData<'a>>,
     {
         // fetch the archetype, we can already assume that the archetype index is valid
         let archetype_data = unsafe { self.storage().archetypes().get_unchecked(archetype) };
@@ -891,8 +892,8 @@ impl World {
     }
 
     fn create_chunk_set<T>(&mut self, archetype: usize, tags: &T) -> usize
-    where
-        T: TagSet,
+        where
+            T: TagSet,
     {
         let archetype_data = unsafe {
             self.storage_mut()
@@ -903,8 +904,8 @@ impl World {
     }
 
     fn find_or_create_chunk<T>(&mut self, archetype: usize, tags: &mut T) -> usize
-    where
-        T: TagSet + for<'a> Filter<ChunksetFilterData<'a>>,
+        where
+            T: TagSet + for<'a> Filter<ChunksetFilterData<'a>>,
     {
         if let Some(i) = self.find_chunk_set(archetype, tags) {
             i
@@ -981,17 +982,17 @@ pub trait IntoComponentSource {
 
 /// A `ComponentSource` which can insert tuples of components representing each entity into a world.
 pub struct ComponentTupleSet<T, I>
-where
-    I: Iterator<Item = T>,
+    where
+        I: Iterator<Item = T>,
 {
     iter: Peekable<I>,
     filter: ComponentTupleFilter<T>,
 }
 
 impl<T, I> From<I> for ComponentTupleSet<T, I>
-where
-    I: Iterator<Item = T>,
-    ComponentTupleSet<T, I>: ComponentSource,
+    where
+        I: Iterator<Item = T>,
+        ComponentTupleSet<T, I>: ComponentSource,
 {
     fn from(iter: I) -> Self {
         ComponentTupleSet {
@@ -1004,9 +1005,9 @@ where
 }
 
 impl<I> IntoComponentSource for I
-where
-    I: IntoIterator,
-    ComponentTupleSet<I::Item, I::IntoIter>: ComponentSource,
+    where
+        I: IntoIterator,
+        ComponentTupleSet<I::Item, I::IntoIter>: ComponentSource,
 {
     type Source = ComponentTupleSet<I::Item, I::IntoIter>;
 
@@ -1026,7 +1027,7 @@ pub struct PreallocComponentSource<I: Iterator<Item = Entity> + FusedIterator, C
 }
 
 impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> IntoComponentSource
-    for PreallocComponentSource<I, C>
+for PreallocComponentSource<I, C>
 {
     type Source = Self;
 
@@ -1043,7 +1044,7 @@ impl<I: Iterator<Item = Entity>, C: ComponentSource> PreallocComponentSource<Fus
 }
 
 impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentLayout
-    for PreallocComponentSource<I, C>
+for PreallocComponentSource<I, C>
 {
     type Filter = C::Filter;
 
@@ -1055,7 +1056,7 @@ impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentLa
 }
 
 impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentSource
-    for PreallocComponentSource<I, C>
+for PreallocComponentSource<I, C>
 {
     fn is_empty(&mut self) -> bool { self.components.is_empty() }
 
@@ -1080,7 +1081,7 @@ struct ConcatIter<'a, T, A: Iterator<Item = T> + FusedIterator, B: Iterator<Item
 }
 
 impl<'a, T, A: Iterator<Item = T> + FusedIterator, B: Iterator<Item = T>> Iterator
-    for ConcatIter<'a, T, A, B>
+for ConcatIter<'a, T, A, B>
 {
     type Item = T;
 
@@ -1371,12 +1372,12 @@ impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicComponentLayout<'a> {
         Some(
             item.len() == (self.existing.len() + self.add.len() - self.remove.len())
                 && item.iter().all(|t| {
-                    // all types are not in remove
-                    !self.remove.contains(t)
+                // all types are not in remove
+                !self.remove.contains(t)
                     // any are either in existing or add
-                        && (self.existing.iter().any(|(x, _)| x == t)
-                            || self.add.iter().any(|(x, _)| x == t))
-                }),
+                    && (self.existing.iter().any(|(x, _)| x == t)
+                    || self.add.iter().any(|(x, _)| x == t))
+            }),
         )
     }
 }
@@ -1427,12 +1428,12 @@ impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
         Some(
             item.len() == (self.existing.len() + self.add.len() - self.remove.len())
                 && item.iter().all(|t| {
-                    // all types are not in remove
-                    !self.remove.contains(t)
+                // all types are not in remove
+                !self.remove.contains(t)
                     // any are either in existing or add
-                        && (self.existing.iter().any(|(x, _)| x == t)
-                            || self.add.iter().any(|(x, _, _)| x == t))
-                }),
+                    && (self.existing.iter().any(|(x, _)| x == t)
+                    || self.add.iter().any(|(x, _, _)| x == t))
+            }),
         )
     }
 }
@@ -1518,7 +1519,7 @@ mod tests {
     fn create_universe() {
         let _ = tracing_subscriber::fmt::try_init();
 
-        Universe::default();
+        Universe::new();
     }
 
     #[test]
@@ -1571,7 +1572,13 @@ mod tests {
         ];
 
         let entities = world.insert((), vec![(), ()]).to_vec();
-        world.insert_buffered(&entities, (), IntoComponentSource::into(components.clone()));
+        world.insert(
+            (),
+            PreallocComponentSource::new(
+                entities.iter().copied(),
+                IntoComponentSource::into(components.clone()),
+            ),
+        );
 
         for (i, e) in entities.iter().enumerate() {
             world.add_component(*e, Scale(2., 2., 2.)).unwrap();
@@ -1755,7 +1762,7 @@ mod tests {
     }
 
     #[test]
-    fn add_component() {
+    fn add_component() -> Result<(), EntityMutationError> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
@@ -1768,7 +1775,7 @@ mod tests {
         let entities = world.insert((Static,), components.clone()).to_vec();
 
         for (i, e) in entities.iter().enumerate() {
-            world.add_component(*e, Scale(2., 2., 2.)).unwrap();
+            world.add_component(*e, Scale(2., 2., 2.))?;
             assert_eq!(
                 components.get(i).unwrap().0,
                 *world.get_component(*e).unwrap()
@@ -1779,10 +1786,12 @@ mod tests {
             );
             assert_eq!(Scale(2., 2., 2.), *world.get_component(*e).unwrap());
         }
+
+        Ok(())
     }
 
     #[test]
-    fn remove_component() {
+    fn remove_component() -> Result<(), EntityMutationError> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
@@ -1795,17 +1804,19 @@ mod tests {
         let entities = world.insert((Static,), components.clone()).to_vec();
 
         for (i, e) in entities.iter().enumerate() {
-            world.remove_component::<Rot>(*e);
+            world.remove_component::<Rot>(*e)?;
             assert_eq!(
                 components.get(i).unwrap().0,
                 *world.get_component(*e).unwrap()
             );
             assert!(world.get_component::<Rot>(*e).is_none());
         }
+
+        Ok(())
     }
 
     #[test]
-    fn add_tag() {
+    fn add_tag() -> Result<(), EntityMutationError> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
@@ -1818,7 +1829,7 @@ mod tests {
         let entities = world.insert((Static,), components.clone()).to_vec();
 
         for (i, e) in entities.iter().enumerate() {
-            world.add_tag(*e, Model(2));
+            world.add_tag(*e, Model(2))?;
             assert_eq!(
                 components.get(i).unwrap().0,
                 *world.get_component(*e).unwrap()
@@ -1830,10 +1841,12 @@ mod tests {
             assert_eq!(Static, *world.get_tag(*e).unwrap());
             assert_eq!(Model(2), *world.get_tag(*e).unwrap());
         }
+
+        Ok(())
     }
 
     #[test]
-    fn remove_tag() {
+    fn remove_tag() -> Result<(), EntityMutationError> {
         let _ = tracing_subscriber::fmt::try_init();
 
         let mut world = create();
@@ -1846,7 +1859,7 @@ mod tests {
         let entities = world.insert((Static,), components.clone()).to_vec();
 
         for (i, e) in entities.iter().enumerate() {
-            world.remove_tag::<Static>(*e);
+            world.remove_tag::<Static>(*e)?;
             assert_eq!(
                 components.get(i).unwrap().0,
                 *world.get_component(*e).unwrap()
@@ -1857,41 +1870,7 @@ mod tests {
             );
             assert!(world.get_tag::<Static>(*e).is_none());
         }
-    }
-    #[test]
-    fn modify_tag() {
-        let _ = tracing_subscriber::fmt::try_init();
-
-        let mut world = create();
-
-        let components = vec![
-            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
-            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
-        ];
-
-        let entities = world
-            .insert((Static, Model(5)), components.clone())
-            .to_vec();
-
-        for (i, e) in entities.iter().enumerate() {
-            assert_eq!(
-                components.get(i).unwrap().0,
-                *world.get_component(*e).unwrap()
-            );
-            assert_eq!(
-                components.get(i).unwrap().1,
-                *world.get_component(*e).unwrap()
-            );
-            assert_eq!(Static, *world.get_tag(*e).unwrap());
-            assert_eq!(Model(5), *world.get_tag(*e).unwrap());
-        }
-        let entity = entities[0];
-        world.add_tag(entity, Model(3));
-        assert_eq!(Static, *world.get_tag(entity).unwrap());
-        assert_eq!(Model(3), *world.get_tag(entity).unwrap());
-        world.add_tag(entity, Static);
-        assert_eq!(Static, *world.get_tag(entity).unwrap());
-        assert_eq!(Model(3), *world.get_tag(entity).unwrap());
+        Ok(())
     }
 
     #[test]

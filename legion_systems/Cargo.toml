@@ -19,7 +19,7 @@ par-iter = ["rayon"]
 par-schedule = ["rayon", "crossbeam-queue"]
 
 [dependencies]
-legion-core = { path = "../legion_core" }
+legion-core = { path = "../legion_core", version = "0.2.1" }
 
 downcast-rs = "1.0"
 itertools = "0.8"
@@ -31,3 +31,6 @@ bit-set = "0.5"
 paste = "0.1"
 tracing = "0.1"
 fxhash = "0.2"
+
+[dev-dependencies]
+tracing-subscriber = "0.1.6"

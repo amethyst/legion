@@ -16,3 +16,14 @@ pub mod serialize;
 
 mod tuple;
 mod zip;
+
+pub mod prelude {
+    pub use crate::{
+        command::CommandBuffer,
+        entity::Entity,
+        event::Event,
+        filter::filter_fns::*,
+        query::{IntoQuery, Query, Read, Tagged, TryRead, TryWrite, Write},
+        world::{Universe, World},
+    };
+}

@@ -39,7 +39,8 @@ impl ResourceTypeId {
 /// struct TypeA(usize);
 /// struct TypeB(usize);
 ///
-/// use legion::prelude::*;
+/// use legion_core::prelude::*;
+/// use legion_systems::prelude::*;
 /// let mut resources = Resources::default();
 /// resources.insert(TypeA(55));
 /// resources.insert(TypeB(12));

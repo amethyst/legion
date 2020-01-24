@@ -805,7 +805,7 @@ where
     >,
 {
     name: SystemId,
-    resources: R,
+    _resources: PhantomData<R>,
     queries: AtomicRefCell<Q>,
     run_fn: AtomicRefCell<F>,
     archetypes: ArchetypeAccess,
@@ -851,16 +851,15 @@ where
         self.command_buffer.get(&world).map(|cmd| cmd.get_mut())
     }
 
-    fn run(&mut self, world: &World, resources: &Resources) {
+    unsafe fn run(&mut self, world: &World, resources: &Resources) {
         let span = span!(Level::INFO, "System", system = %self.name);
         let _guard = span.enter();
 
         debug!("Initializing");
-        let mut resources = unsafe { R::fetch_unchecked(resources) };
+        let mut resources = R::fetch_unchecked(resources);
         let mut queries = self.queries.get_mut();
-        let mut prepared_queries = unsafe { queries.prepare() };
-        let mut world_shim =
-            unsafe { SubWorld::new(world, &self.access.components, &self.archetypes) };
+        let mut prepared_queries = queries.prepare();
+        let mut world_shim = SubWorld::new(world, &self.access.components, &self.archetypes);
         let cmd = self
             .command_buffer
             .entry(world.id())
@@ -925,7 +924,8 @@ where
 /// as singular closures for a given system - providing queries which should be cached for that
 /// system, as well as resource access and other metadata.
 /// ```rust
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
+/// # use legion_systems::prelude::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -1120,7 +1120,7 @@ where
         Box::new(System {
             name: self.name,
             run_fn: AtomicRefCell::new(run_fn),
-            resources: self.resources.flatten(),
+            _resources: PhantomData::<<R as ConsFlatten>::Output>,
             queries: AtomicRefCell::new(self.queries.flatten()),
             archetypes: if self.access_all_archetypes {
                 ArchetypeAccess::All
@@ -1155,7 +1155,7 @@ where
         Box::new(System {
             name: self.name,
             run_fn: AtomicRefCell::new(run_fn),
-            resources: self.resources.flatten(),
+            _resources: PhantomData::<<R as ConsFlatten>::Output>,
             queries: AtomicRefCell::new(self.queries.flatten()),
             archetypes: if self.access_all_archetypes {
                 ArchetypeAccess::All
@@ -1175,8 +1175,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::*;
     use crate::schedule::*;
+    use legion_core::prelude::*;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
@@ -1207,8 +1207,10 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        world.resources.insert(TestResource(123));
-        world.resources.insert(TestResourceTwo(123));
+
+        let mut resources = Resources::default();
+        resources.insert(TestResource(123));
+        resources.insert(TestResourceTwo(123));
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -1291,7 +1293,7 @@ mod tests {
         let systems = vec![system_one, system_two, system_three, system_four];
 
         let mut executor = Executor::new(systems);
-        executor.execute(&mut world);
+        executor.execute(&mut world, &mut resources);
 
         assert_eq!(*(runs.lock().unwrap()), order);
     }
@@ -1302,7 +1304,9 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        world.resources.insert(TestResource(123));
+
+        let mut resources = Resources::default();
+        resources.insert(TestResource(123));
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -1334,7 +1338,7 @@ mod tests {
                 assert_eq!(components.len(), count);
             });
         system.prepare(&world);
-        system.run(&world);
+        unsafe { system.run(&world, &resources) };
     }
 
     #[test]
@@ -1343,7 +1347,9 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        world.resources.insert(TestResource(123));
+
+        let mut resources = Resources::default();
+        resources.insert(TestResource(123));
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -1368,7 +1374,7 @@ mod tests {
             });
 
         system.prepare(&world);
-        system.run(&world);
+        unsafe { system.run(&world, &resources) };
     }
 
     #[test]
@@ -1377,6 +1383,7 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
+        let resources = Resources::default();
 
         #[derive(Default, Clone, Copy)]
         pub struct Balls(u32);
@@ -1411,14 +1418,14 @@ mod tests {
             });
 
         system.prepare(&world);
-        system.run(&world);
+        unsafe { system.run(&world, &resources) };
 
         world
             .add_component(*(expected.keys().nth(0).unwrap()), Balls::default())
             .unwrap();
 
         system.prepare(&world);
-        system.run(&world);
+        unsafe { system.run(&world, &resources) };
     }
 
     #[test]
@@ -1427,6 +1434,7 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
+        let resources = Resources::default();
 
         #[derive(Default, Clone, Copy)]
         pub struct Balls(u32);
@@ -1462,12 +1470,15 @@ mod tests {
             });
 
         system.prepare(&world);
-        system.run(&world);
+        unsafe { system.run(&world, &resources) };
 
-        system.command_buffer_mut().write(&mut world);
+        system
+            .command_buffer_mut(world.id())
+            .unwrap()
+            .write(&mut world);
 
         system.prepare(&world);
-        system.run(&world);
+        unsafe { system.run(&world, &resources) };
     }
 
     #[test]
@@ -1481,7 +1492,9 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        world.resources.insert(AtomicRes::default());
+
+        let mut resources = Resources::default();
+        resources.insert(AtomicRes::default());
 
         let system1 = SystemBuilder::<()>::new("TestSystem1")
             .write_resource::<AtomicRes>()
@@ -1522,13 +1535,12 @@ mod tests {
         let mut executor = Executor::new(systems);
         pool.install(|| {
             for _ in 0..1000 {
-                executor.execute(&mut world);
+                executor.execute(&mut world, &mut resources);
             }
         });
 
         assert_eq!(
-            world
-                .resources
+            resources
                 .get::<AtomicRes>()
                 .unwrap()
                 .0
@@ -1549,7 +1561,9 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        world.resources.insert(AtomicRes::default());
+
+        let mut resources = Resources::default();
+        resources.insert(AtomicRes::default());
 
         let system1 = SystemBuilder::<()>::new("TestSystem1")
             .read_resource::<AtomicRes>()
@@ -1590,7 +1604,7 @@ mod tests {
         let mut executor = Executor::new(systems);
         pool.install(|| {
             for _ in 0..1000 {
-                executor.execute(&mut world);
+                executor.execute(&mut world, &mut resources);
             }
         });
     }
@@ -1723,7 +1737,7 @@ mod tests {
         let mut executor = Executor::new(systems);
         pool.install(|| {
             for _ in 0..1000 {
-                executor.execute(&mut world);
+                executor.execute(&mut world, &mut Resources::default());
             }
         });
     }

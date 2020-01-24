@@ -63,7 +63,7 @@ pub trait Runnable {
     fn writes(&self) -> (&[ResourceTypeId], &[ComponentTypeId]);
     fn prepare(&mut self, world: &World);
     fn accesses_archetypes(&self) -> &ArchetypeAccess;
-    fn run(&mut self, world: &World, resources: &Resources);
+    unsafe fn run(&mut self, world: &World, resources: &Resources);
     fn command_buffer_mut(&self, world: WorldId) -> Option<RefMut<CommandBuffer>>;
 }
 
@@ -289,8 +289,8 @@ impl Executor {
             || {
                 match self.systems.len() {
                     1 => {
-                        // safety: we have exlusive access to all systems here
-                        unsafe { self.systems[0].get_mut() }.run(world, resources);
+                        // safety: we have exlusive access to all systems, world and resources here
+                        unsafe { self.systems[0].get_mut().run(world, resources) };
                     }
                     _ => {
                         let systems = &mut self.systems;
@@ -432,7 +432,10 @@ impl Builder {
     /// Adds a thread local system to the schedule. This system will be executed on the main thread.
     pub fn add_thread_local<S: Into<Box<dyn Runnable>>>(self, system: S) -> Self {
         let mut system = system.into();
-        self.add_thread_local_fn(move |world, resources| system.run(world, resources))
+        self.add_thread_local_fn(move |world, resources| {
+            // safety: we have exclusive access to world and resources
+            unsafe { system.run(world, resources) }
+        })
     }
 
     /// Finalizes the builder into a `Schedule`.
@@ -463,11 +466,13 @@ pub enum Step {
 /// # Examples
 ///
 /// ```rust
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
+/// # use legion_systems::prelude::*;
 /// # let find_collisions = SystemBuilder::new("find_collisions").build(|_,_,_,_| {});
 /// # let calculate_acceleration = SystemBuilder::new("calculate_acceleration").build(|_,_,_,_| {});
 /// # let update_positions = SystemBuilder::new("update_positions").build(|_,_,_,_| {});
-/// # let mut world = World::new();
+/// let mut world = World::new();
+/// let mut resources = Resources::default();
 /// let mut schedule = Schedule::builder()
 ///     .add_system(find_collisions)
 ///     .flush()
@@ -475,7 +480,7 @@ pub enum Step {
 ///     .add_system(update_positions)
 ///     .build();
 ///
-/// schedule.execute(&mut world);
+/// schedule.execute(&mut world, &mut resources);
 /// ```
 pub struct Schedule {
     steps: Vec<Step>,
@@ -523,6 +528,7 @@ mod tests {
     use super::*;
     use crate::prelude::*;
     use itertools::sorted;
+    use legion_core::prelude::*;
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -533,7 +539,8 @@ mod tests {
         #[derive(Default)]
         struct Resource;
 
-        world.resources.insert(Resource);
+        let mut resources = Resources::default();
+        resources.insert(Resource);
 
         let order = Arc::new(Mutex::new(Vec::new()));
 
@@ -556,7 +563,7 @@ mod tests {
             .add_system(system_three)
             .build();
 
-        schedule.execute(&mut world);
+        schedule.execute(&mut world, &mut resources);
 
         let order = order.lock().unwrap();
         let sorted: Vec<usize> = sorted(order.clone()).collect();
@@ -567,12 +574,13 @@ mod tests {
     fn flush() {
         let universe = Universe::new();
         let mut world = universe.create_world();
+        let mut resources = Resources::default();
 
         #[derive(Clone, Copy, Debug, PartialEq)]
         struct TestComp(f32, f32, f32);
 
         let system_one = SystemBuilder::new("one").build(move |cmd, _, _, _| {
-            cmd.insert((), vec![(TestComp(0., 0., 0.),)]).unwrap();
+            cmd.insert((), vec![(TestComp(0., 0., 0.),)]);
         });
         let system_two = SystemBuilder::new("two")
             .with_query(Write::<TestComp>::query())
@@ -588,6 +596,6 @@ mod tests {
             .add_system(system_three)
             .build();
 
-        schedule.execute(&mut world);
+        schedule.execute(&mut world, &mut resources);
     }
 }

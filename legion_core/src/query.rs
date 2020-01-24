@@ -746,7 +746,7 @@ where
 /// Queries can be constructed from any `View` type, including tuples of `View`s.
 ///
 /// ```rust
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -763,7 +763,7 @@ where
 /// The view determines what data is accessed, and whether it is accessed mutably or not.
 ///
 /// ```rust
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -779,7 +779,7 @@ where
 /// types accessed by the view. However, additional filters can be specified if needed:
 ///
 /// ```rust
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -796,7 +796,7 @@ where
 /// Filters can be combined with bitwise operators:
 ///
 /// ```rust
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -815,7 +815,7 @@ where
 /// Filters can be iterated through to pull data out of a `World`:
 ///
 /// ```rust
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -840,7 +840,7 @@ where
 /// This allows you to run code for each tag value, or to retrieve a contiguous data slice.
 ///
 /// ```rust
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]

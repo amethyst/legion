@@ -20,10 +20,17 @@ par-schedule = ["legion-systems/par-schedule"]
 log = ["tracing/log", "tracing/log-always"]
 ffi = ["legion-core/ffi"]
 serialize = ["legion-core/serialize"]
+metrics = ["legion-core/metrics"]
+
+[workspace]
+members = [
+    "legion_core",
+    "legion_systems",
+]
 
 [dependencies]
-legion-core = { path = "legion_core" }
-legion-systems = { path = "legion_systems" }
+legion-core = { path = "legion_core", version = "0.2.1" }
+legion-systems = { path = "legion_systems", version = "0.2.1" }
 
 [dev-dependencies]
 legion = { path = ".", features = ["serialize"] }

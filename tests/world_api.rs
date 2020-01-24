@@ -260,15 +260,15 @@ fn mutate_add_component() {
     let query_without_scale = <(Read<Pos>, Read<Rot>)>::query();
     let query_with_scale = <(Read<Pos>, Read<Rot>, Read<Scale>)>::query();
 
-    assert_eq!(3, query_without_scale.iter(&mut world).count());
-    assert_eq!(0, query_with_scale.iter(&mut world).count());
+    assert_eq!(3, query_without_scale.iter(&world).count());
+    assert_eq!(0, query_with_scale.iter(&world).count());
 
     world
         .add_component(*entities.get(1).unwrap(), Scale(0.5, 0.5, 0.5))
         .unwrap();
 
-    assert_eq!(3, query_without_scale.iter(&mut world).count());
-    assert_eq!(1, query_with_scale.iter(&mut world).count());
+    assert_eq!(3, query_without_scale.iter(&world).count());
+    assert_eq!(1, query_with_scale.iter(&world).count());
 }
 
 #[test]
@@ -290,13 +290,15 @@ fn mutate_remove_component() {
     let query_without_rot = Read::<Pos>::query().filter(!component::<Rot>());
     let query_with_rot = <(Read<Pos>, Read<Rot>)>::query();
 
-    assert_eq!(0, query_without_rot.iter(&mut world).count());
-    assert_eq!(3, query_with_rot.iter(&mut world).count());
+    assert_eq!(0, query_without_rot.iter(&world).count());
+    assert_eq!(3, query_with_rot.iter(&world).count());
 
-    world.remove_component::<Rot>(*entities.get(1).unwrap());
+    world
+        .remove_component::<Rot>(*entities.get(1).unwrap())
+        .unwrap();
 
-    assert_eq!(1, query_without_rot.iter(&mut world).count());
-    assert_eq!(2, query_with_rot.iter(&mut world).count());
+    assert_eq!(1, query_without_rot.iter(&world).count());
+    assert_eq!(2, query_with_rot.iter(&world).count());
 }
 
 #[test]
@@ -318,13 +320,13 @@ fn mutate_add_tag() {
     let query_without_static = <(Read<Pos>, Read<Rot>)>::query();
     let query_with_static = <(Read<Pos>, Read<Rot>, Tagged<Static>)>::query();
 
-    assert_eq!(3, query_without_static.iter(&mut world).count());
-    assert_eq!(0, query_with_static.iter(&mut world).count());
+    assert_eq!(3, query_without_static.iter(&world).count());
+    assert_eq!(0, query_with_static.iter(&world).count());
 
-    world.add_tag(*entities.get(1).unwrap(), Static);
+    world.add_tag(*entities.get(1).unwrap(), Static).unwrap();
 
-    assert_eq!(3, query_without_static.iter(&mut world).count());
-    assert_eq!(1, query_with_static.iter(&mut world).count());
+    assert_eq!(3, query_without_static.iter(&world).count());
+    assert_eq!(1, query_with_static.iter(&world).count());
 }
 
 #[test]
@@ -346,13 +348,15 @@ fn mutate_remove_tag() {
     let query_without_static = <(Read<Pos>, Read<Rot>)>::query().filter(!tag::<Static>());
     let query_with_static = <(Read<Pos>, Read<Rot>, Tagged<Static>)>::query();
 
-    assert_eq!(0, query_without_static.iter(&mut world).count());
-    assert_eq!(3, query_with_static.iter(&mut world).count());
+    assert_eq!(0, query_without_static.iter(&world).count());
+    assert_eq!(3, query_with_static.iter(&world).count());
 
-    world.remove_tag::<Static>(*entities.get(1).unwrap());
+    world
+        .remove_tag::<Static>(*entities.get(1).unwrap())
+        .unwrap();
 
-    assert_eq!(1, query_without_static.iter(&mut world).count());
-    assert_eq!(2, query_with_static.iter(&mut world).count());
+    assert_eq!(1, query_without_static.iter(&world).count());
+    assert_eq!(2, query_with_static.iter(&world).count());
 }
 
 #[test]
@@ -368,7 +372,7 @@ fn mutate_change_tag_minimum_test() {
     let entities = world.insert(shared, components).to_vec();
 
     tracing::trace!("STARTING CHANGE");
-    world.add_tag(entities[0], Model(3));
+    world.add_tag(entities[0], Model(3)).unwrap();
     tracing::trace!("CHANGED\n");
 
     assert_eq!(*world.get_tag::<Model>(entities[0]).unwrap(), Model(3));
@@ -394,11 +398,11 @@ fn mutate_change_tag() {
     let query_model_3 = <(Read<Pos>, Read<Rot>)>::query().filter(tag_value(&Model(3)));
     let query_model_5 = <(Read<Pos>, Read<Rot>)>::query().filter(tag_value(&Model(5)));
 
-    assert_eq!(3, query_model_5.iter(&mut world).count());
-    assert_eq!(0, query_model_3.iter(&mut world).count());
+    assert_eq!(3, query_model_5.iter(&world).count());
+    assert_eq!(0, query_model_3.iter(&world).count());
 
     tracing::trace!("STARTING CHANGE");
-    world.add_tag(*entities.get(1).unwrap(), Model(3));
+    world.add_tag(*entities.get(1).unwrap(), Model(3)).unwrap();
     tracing::trace!("CHANGED\n");
 
     assert_eq!(
@@ -416,5 +420,5 @@ fn mutate_change_tag() {
         Model(3)
     );
 
-    assert_eq!(2, query_model_5.iter(&mut world).count());
+    assert_eq!(2, query_model_5.iter(&world).count());
 }

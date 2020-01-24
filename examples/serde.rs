@@ -75,12 +75,15 @@ impl<'de, 'a, T: for<'b> Deserialize<'b> + 'static> Visitor<'de>
                 Some((storage_ptr, storage_len)) => {
                     let storage_ptr = storage_ptr.as_ptr() as *mut T;
                     for idx in 0..storage_len {
-                        let element_ptr = unsafe { storage_ptr.offset(idx as isize) };
+                        let element_ptr = unsafe { storage_ptr.add(idx) };
 
-                        if let None = seq.next_element_seed(ComponentDeserializer {
-                            ptr: element_ptr,
-                            _marker: PhantomData,
-                        })? {
+                        if seq
+                            .next_element_seed(ComponentDeserializer {
+                                ptr: element_ptr,
+                                _marker: PhantomData,
+                            })?
+                            .is_none()
+                        {
                             panic!(
                                 "expected {} elements in chunk but only {} found",
                                 storage_len, idx
@@ -89,7 +92,7 @@ impl<'de, 'a, T: for<'b> Deserialize<'b> + 'static> Visitor<'de>
                     }
                 }
                 None => {
-                    if let Some(_) = seq.next_element::<IgnoredAny>()? {
+                    if seq.next_element::<IgnoredAny>()?.is_some() {
                         panic!("unexpected element when there was no storage space available");
                     } else {
                         // No more elements and no more storage - that's what we want!

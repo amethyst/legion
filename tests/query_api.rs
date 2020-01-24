@@ -64,7 +64,7 @@ fn query_try_read_entity_data() {
 
     let query = TryRead::<Rot>::query();
     let rots = query
-        .iter(&mut world)
+        .iter(&world)
         .map(|x| x.map(|x| *x))
         .collect::<Vec<_>>();
     assert_eq!(rots.iter().filter(|x| x.is_none()).count(), 1);
@@ -381,7 +381,7 @@ fn query_read_shared_data() {
     let query = Tagged::<Static>::query();
 
     let mut count = 0;
-    for marker in query.iter(&mut world) {
+    for marker in query.iter(&world) {
         assert_eq!(Static, *marker);
         count += 1;
     }

@@ -204,15 +204,15 @@ enum EntityCommand {
 /// Inserting an entity using the `EntityBuilder`:
 ///
 /// ```
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position(f32);
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Rotation(f32);
 /// # let universe = Universe::new();
 /// # let mut world = universe.create_world();
-/// let mut command_buffer = CommandBuffer::from_world(&mut world);
-/// command_buffer.create_entity()
+/// let mut command_buffer = CommandBuffer::new(&world);
+/// command_buffer.start_entity()
 ///     .with_component(Position(123.0))
 ///     .with_component(Rotation(456.0))
 ///     .build();
@@ -295,15 +295,15 @@ where
 /// Inserting an entity using the `CommandBuffer`:
 ///
 /// ```
-/// # use legion::prelude::*;
+/// # use legion_core::prelude::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position(f32);
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Rotation(f32);
 /// # let universe = Universe::new();
 /// # let mut world = universe.create_world();
-/// let mut command_buffer = CommandBuffer::from_world(&mut world);
-/// let entity = command_buffer.create_entity().unwrap();
+/// let mut command_buffer = CommandBuffer::new(&world);
+/// let entity = command_buffer.start_entity().build();
 ///
 /// command_buffer.add_component(entity, Position(123.0));
 /// command_buffer.delete(entity);
@@ -375,7 +375,7 @@ impl CommandBuffer {
     ///
     /// This function does *NOT* set the `CommandBuffer::custom_capacity` override.
     #[allow(clippy::comparison_chain)]
-    pub fn resize(&mut self) {
+    fn resize(&mut self) {
         let allocator = &self.entity_allocator;
         let free_list = &mut self.free_list;
         let capacity = self.preallocated_capacity;
@@ -396,9 +396,6 @@ impl CommandBuffer {
     ///
     /// Command flushes are performed in a FIFO manner, allowing for reliable, linear commands being
     /// executed in the order they were provided.
-    ///
-    /// This function also calls `CommandBuffer:resize`, performing any appropriate entity preallocation,
-    /// refilling the entity cache of any consumed entities.
     pub fn write(&mut self, world: &mut World) {
         let span = span!(Level::TRACE, "Draining command buffer");
         let _guard = span.enter();
@@ -421,7 +418,7 @@ impl CommandBuffer {
     }
 
     /// Creates an entity builder for constructing a new entity.
-    pub fn create_entity(&mut self) -> EntityBuilder<(), ()> {
+    pub fn start_entity(&mut self) -> EntityBuilder<(), ()> {
         EntityBuilder {
             cmd: self,
             tags: (),
@@ -563,7 +560,7 @@ mod tests {
     struct TestResource(pub i32);
 
     #[test]
-    fn create_entity_test() -> Result<(), CommandError> {
+    fn create_entity_test() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
@@ -576,9 +573,9 @@ mod tests {
         let components_len = components.len();
 
         //world.entity_allocator.get_block()
-        let mut command = CommandBuffer::from_world(&mut world);
-        let entity1 = command.create_entity()?;
-        let entity2 = command.create_entity()?;
+        let mut command = CommandBuffer::new(&world);
+        let entity1 = command.start_entity().build();
+        let entity2 = command.start_entity().build();
 
         command.add_component(entity1, Pos(1., 2., 3.));
         command.add_component(entity2, Pos(4., 5., 6.));
@@ -593,12 +590,10 @@ mod tests {
         }
 
         assert_eq!(components_len, count);
-
-        Ok(())
     }
 
     #[test]
-    fn simple_write_test() -> Result<(), CommandError> {
+    fn simple_write_test() {
         let _ = tracing_subscriber::fmt::try_init();
 
         let universe = Universe::new();
@@ -611,8 +606,8 @@ mod tests {
         let components_len = components.len();
 
         //world.entity_allocator.get_block()
-        let mut command = CommandBuffer::from_world(&mut world);
-        let _ = command.insert((), components)?;
+        let mut command = CommandBuffer::new(&world);
+        let _ = command.insert((), components);
 
         // Assert writing checks
         // TODO:
@@ -631,7 +626,5 @@ mod tests {
         }
 
         assert_eq!(components_len, count);
-
-        Ok(())
     }
 }
