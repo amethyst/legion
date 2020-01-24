@@ -1833,6 +1833,41 @@ mod tests {
             assert!(world.get_tag::<Static>(*e).is_none());
         }
     }
+    #[test]
+    fn modify_tag() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut world = create();
+
+        let components = vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ];
+
+        let entities = world
+            .insert((Static, Model(5)), components.clone())
+            .to_vec();
+
+        for (i, e) in entities.iter().enumerate() {
+            assert_eq!(
+                components.get(i).unwrap().0,
+                *world.get_component(*e).unwrap()
+            );
+            assert_eq!(
+                components.get(i).unwrap().1,
+                *world.get_component(*e).unwrap()
+            );
+            assert_eq!(Static, *world.get_tag(*e).unwrap());
+            assert_eq!(Model(5), *world.get_tag(*e).unwrap());
+        }
+        let entity = entities[0];
+        world.add_tag(entity, Model(3));
+        assert_eq!(Static, *world.get_tag(entity).unwrap());
+        assert_eq!(Model(3), *world.get_tag(entity).unwrap());
+        world.add_tag(entity, Static);
+        assert_eq!(Static, *world.get_tag(entity).unwrap());
+        assert_eq!(Model(3), *world.get_tag(entity).unwrap());
+    }
 
     #[test]
     fn add_component2() {
