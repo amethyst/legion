@@ -935,7 +935,7 @@ impl World {
             // data will be available later to replace the data we're about to delete
             for k in replace_mappings.keys() {
                 if !src_world.entity_allocator.is_alive(*k) {
-                    panic!("clone_merge assumes all entity_mapping keys exist in the source world");
+                    panic!("clone_merge assumes all replace_mapping keys exist in the source world");
                 }
             }
 
@@ -950,7 +950,7 @@ impl World {
                         .expect("Failed to get location of live entity");
                     self.delete_location(location);
                 } else {
-                    panic!("clone_merge assumes all entity_mapping values exist in the destination world");
+                    panic!("clone_merge assumes all replace_mapping values exist in the destination world");
                 }
             }
         }
@@ -1006,45 +1006,30 @@ impl World {
         src_world: &World,
         src_entity: Entity,
         clone_impl: &C,
-        //replace_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
-        //mut result_mappings: Option<&mut std::collections::HashMap<Entity, Entity>>,
-    ) {
-        let span = span!(Level::INFO, "CloneMerging worlds", source = src_world.id().0, destination = ?self.id());
+        replace_mapping: Option<Entity>
+    ) -> Entity {
+        let span = span!(Level::INFO, "CloneMergingSingle worlds", source = src_world.id().0, destination = ?self.id());
         let _guard = span.enter();
 
         let src_storage = unsafe { &(*src_world.storage.get()) };
         let dst_storage = unsafe { &mut (*self.storage.get()) };
 
-        // Erase all entities that are referred to by value. The code following will update the location
-        // of all these entities to point to new, valid locations
-        //
-        // if let Some(replace_mappings) = replace_mappings {
-        //     // First check that all the keys exist in the source world. We're assuming the source
-        //     // data will be available later to replace the data we're about to delete
-        //     for k in replace_mappings.keys() {
-        //         if !src_world.entity_allocator.is_alive(*k) {
-        //             panic!("clone_merge assumes all entity_mapping keys exist in the source world");
-        //         }
-        //     }
-        //
-        //     // Delete all the data associated with keys in replace_mappings. This leaves the
-        //     // associated entities in a dangling state, but we'll fix this later when we copy the
-        //     // data over
-        //     for v in replace_mappings.values() {
-        //         if self.entity_allocator.is_alive(*v) {
-        //             let location = self
-        //                 .entity_allocator
-        //                 .get_location(v.index())
-        //                 .expect("Failed to get location of live entity");
-        //             self.delete_location(location);
-        //         } else {
-        //             panic!("clone_merge assumes all entity_mapping values exist in the destination world");
-        //         }
-        //     }
-        // }
-
         if !src_world.entity_allocator.is_alive(src_entity) {
             panic!("src_entity not alive");
+        }
+
+        // Erase all entities that are referred to by value. The code following will update the location
+        // of all these entities to point to new, valid locations
+        if let Some(replace_mapping) = replace_mapping {
+            if self.entity_allocator.is_alive(replace_mapping) {
+                let location = self
+                    .entity_allocator
+                    .get_location(replace_mapping.index())
+                    .expect("Failed to get location of live entity");
+                self.delete_location(location);
+            } else {
+                panic!("clone_merge_single assumes entity_mapping exists in the destination world");
+            }
         }
 
         let src_location = src_world
@@ -1054,7 +1039,6 @@ impl World {
         let src_archetype = &src_storage.archetypes()[src_location.archetype()];
 
         // Iterate all archetypes in the src world
-        //for src_archetype in src_storage.archetypes() {
         let archetype_data = ArchetypeFilterData {
             component_types: self.storage().component_types(),
             tag_types: self.storage().tag_types(),
@@ -1094,10 +1078,8 @@ impl World {
                 &mut self.entity_allocator,
                 &self.resources,
                 clone_impl,
-                //replace_mappings,
-                //&mut result_mappings,
-            );
-        //}
+                replace_mapping,
+            )
     }
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<ArchetypeIndex>

@@ -915,14 +915,13 @@ impl ArchetypeData {
         dst_entity_allocator: &mut crate::entity::EntityAllocator,
         dst_resources: &crate::resource::Resources,
         clone_impl: &C,
-        //replace_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
-        //result_mappings: &mut Option<&mut std::collections::HashMap<Entity, Entity>>,
-    ) {
+        replace_mapping: Option<Entity>
+    ) -> Entity {
         // Iterate all the chunk sets within the source archetype
         let src_tags = &src_archetype.tags;
         let src_chunk_set_index = src_location.set();
         let src_chunk_set = &src_archetype.chunk_sets[src_chunk_set_index];
-        //for (src_chunk_set_index, src_chunk_set) in src_archetype.chunk_sets.iter().enumerate() {
+
         // Find or create the chunk set that matches the source chunk set
         let dst_chunk_set_index = self.find_chunk_set_by_tags(&src_tags, src_chunk_set_index);
         let dst_chunk_set_index = dst_chunk_set_index.unwrap_or_else(|| {
@@ -937,14 +936,10 @@ impl ArchetypeData {
             })
         });
 
-        // Iterate all the chunks within the source chunk set
+        // Get the source chunk
         let src_chunk_idx = src_location.chunk();
         let src_chunk = &src_chunk_set.chunks[src_chunk_idx];
-        //for (_src_chunk_idx, src_chunk) in src_chunk_set.chunks.iter().enumerate() {
-        // Copy the data from source to destination. Continuously find or create chunks as
-        // needed until we've copied all the data
-        //let mut entities_remaining = src_chunk.len();
-        //while entities_remaining > 0 {
+
         // Get or allocate a chunk.. since we could be transforming to a larger component size, it's possible
         // that even a brand-new, empty chunk won't be large enough to hold everything in the chunk we are copying from
         let dst_free_chunk_index = self.get_free_chunk(dst_chunk_set_index, 1);
@@ -963,52 +958,39 @@ impl ArchetypeData {
         let src_entity_start_idx = src_location.component();
         let src_entity_end_idx = src_entity_start_idx + 1;
 
-        // Copy all the entities to the destination chunk. The normal case is that we simply allocate
-        // new entities.
+        // Copy the entity to the destination chunk. The normal case is that we simply allocate
+        // a new entity.
         //
-        // We also allow end-user to specify a HashMap<Entity, Entity>. The key is an Entity from
-        // the source chunk and the value is an Entity from the destination chunk. Rather than appending
-        // data to the destination chunk, we will *replace* the data, according to the mapping. This
-        // is specifically intended for use with hot-reloading data. When some source data is changed,
-        // we can use the mapping to respawn entities as needed using the new data.
+        // We also allow end-user to specify a Option<Entity>. The src Entity from will *replace* the
+        // data of the given Entity
 
         // We know how many entities will be appended to this list
-        dst_entities.reserve(entities_to_write);
         let dst_entity_start_idx = dst_entities.len();
         let dst_entity_end_idx = dst_entities.len() + entities_to_write;
 
-        for src_entity in &src_chunk.entities[src_entity_start_idx..src_entity_end_idx] {
-            // The location of the next entity
-            let location = EntityLocation::new(
-                dst_archetype_index,
-                dst_chunk_set_index,
-                dst_free_chunk_index,
-                dst_entities.len(),
-            );
+        let src_entity = src_chunk.entities[src_entity_start_idx];
 
-            // // Determine if there is an entity we will be replacing
-            // let dst_entity = replace_mappings.and_then(|x| x.get(src_entity));
-            //
-            // // Determine the Entity to use for this element
-            // let dst_entity = if let Some(dst_entity) = dst_entity {
-            //     // We are replacing data
-            //     // Verify that the entity is alive.. this checks the index and version of the entity
-            //     //TODO: This check may not be needed in release mode since World::clone_merge checks it
-            //     assert!(dst_entity_allocator.is_alive(*dst_entity));
-            //     *dst_entity
-            // } else {
-            //     // We are appending data, allocate a new entity
-            //     dst_entity_allocator.create_entity()
-            // };
-            let dst_entity = dst_entity_allocator.create_entity();
+        // The location of the next entity
+        let location = EntityLocation::new(
+            dst_archetype_index,
+            dst_chunk_set_index,
+            dst_free_chunk_index,
+            dst_entities.len(),
+        );
 
-            dst_entity_allocator.set_location(dst_entity.index(), location);
-            dst_entities.push(dst_entity);
+        let dst_entity = if let Some(dst_entity) = replace_mapping {
+            // We are replacing data
+            // Verify that the entity is alive.. this checks the index and version of the entity
+            //TODO: This check may not be needed in release mode since World::clone_merge checks it
+            assert!(dst_entity_allocator.is_alive(dst_entity));
+            dst_entity
+        } else {
+            // We are appending data, allocate a new entity
+            dst_entity_allocator.create_entity()
+        };
 
-            // if let Some(result_mappings) = result_mappings {
-            //     result_mappings.insert(*src_entity, dst_entity);
-            // }
-        }
+        dst_entity_allocator.set_location(dst_entity.index(), location);
+        dst_entities.push(dst_entity);
 
         // Walk through each component type to copy the data from the source chunk to the destination chunk
         for (src_type, _) in src_archetype.description().components() {
@@ -1018,13 +1000,13 @@ impl ArchetypeData {
             // Create a writer that will insert the data into the destination chunk
             let mut dst_component_writer = dst_components
                 .get_mut(dst_type)
-                .expect("ComponentResourceSet missing in clone_merge")
+                .expect("ComponentResourceSet missing in clone_merge_single")
                 .writer();
 
             // Find the data in the source chunk
             let src_component_storage = src_chunk
                 .components(*src_type)
-                .expect("ComponentResourceSet missing in clone_merge");
+                .expect("ComponentResourceSet missing in clone_merge_single");
             let (src_component_chunk_data, src_element_size, _) = src_component_storage.data_raw();
 
             // Now copy the data
@@ -1051,6 +1033,8 @@ impl ArchetypeData {
                 );
             }
         }
+
+        dst_entity
     }
 
     /// Iterate all entities in existence by iterating across archetypes, chunk sets, and chunks
