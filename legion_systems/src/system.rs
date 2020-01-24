@@ -851,7 +851,7 @@ where
         self.command_buffer.get(&world).map(|cmd| cmd.get_mut())
     }
 
-    unsafe fn run(&mut self, world: &World, resources: &Resources) {
+    unsafe fn run_unsafe(&mut self, world: &World, resources: &Resources) {
         let span = span!(Level::INFO, "System", system = %self.name);
         let _guard = span.enter();
 
@@ -1338,7 +1338,7 @@ mod tests {
                 assert_eq!(components.len(), count);
             });
         system.prepare(&world);
-        unsafe { system.run(&world, &resources) };
+        system.run(&mut world, &mut resources);
     }
 
     #[test]
@@ -1374,7 +1374,7 @@ mod tests {
             });
 
         system.prepare(&world);
-        unsafe { system.run(&world, &resources) };
+        system.run(&mut world, &mut resources);
     }
 
     #[test]
@@ -1383,7 +1383,7 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        let resources = Resources::default();
+        let mut resources = Resources::default();
 
         #[derive(Default, Clone, Copy)]
         pub struct Balls(u32);
@@ -1418,14 +1418,14 @@ mod tests {
             });
 
         system.prepare(&world);
-        unsafe { system.run(&world, &resources) };
+        system.run(&mut world, &mut resources);
 
         world
             .add_component(*(expected.keys().nth(0).unwrap()), Balls::default())
             .unwrap();
 
         system.prepare(&world);
-        unsafe { system.run(&world, &resources) };
+        system.run(&mut world, &mut resources);
     }
 
     #[test]
@@ -1434,7 +1434,7 @@ mod tests {
 
         let universe = Universe::new();
         let mut world = universe.create_world();
-        let resources = Resources::default();
+        let mut resources = Resources::default();
 
         #[derive(Default, Clone, Copy)]
         pub struct Balls(u32);
@@ -1470,7 +1470,7 @@ mod tests {
             });
 
         system.prepare(&world);
-        unsafe { system.run(&world, &resources) };
+        system.run(&mut world, &mut resources);
 
         system
             .command_buffer_mut(world.id())
@@ -1478,7 +1478,7 @@ mod tests {
             .write(&mut world);
 
         system.prepare(&world);
-        unsafe { system.run(&world, &resources) };
+        system.run(&mut world, &mut resources);
     }
 
     #[test]

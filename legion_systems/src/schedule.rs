@@ -88,8 +88,7 @@ pub trait Runnable {
 
     /// Runs the system.
     fn run(&mut self, world: &mut World, resources: &mut Resources) {
-        // safety: world and resources are held exclusively
-        unsafe { self.run(world, resources) };
+        unsafe { self.run_unsafe(world, resources) };
     }
 }
 
@@ -392,7 +391,7 @@ impl Executor {
     #[cfg(feature = "par-schedule")]
     unsafe fn run_recursive(&self, i: usize, world: &World, resources: &Resources) {
         // safety: the caller ensures nothing else is accessing systems[i]
-        self.systems[i].get_mut().run(world, resources);
+        self.systems[i].get_mut().run_unsafe(world, resources);
 
         self.static_dependants[i].par_iter().for_each(|dep| {
             match self.awaiting[*dep].compare_exchange(
@@ -458,10 +457,7 @@ impl Builder {
     /// Adds a thread local system to the schedule. This system will be executed on the main thread.
     pub fn add_thread_local<S: Into<Box<dyn Runnable>>>(self, system: S) -> Self {
         let mut system = system.into();
-        self.add_thread_local_fn(move |world, resources| {
-            // safety: we have exclusive access to world and resources
-            unsafe { system.run(world, resources) }
-        })
+        self.add_thread_local_fn(move |world, resources| system.run(world, resources))
     }
 
     /// Finalizes the builder into a `Schedule`.
