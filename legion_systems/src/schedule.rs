@@ -58,13 +58,39 @@ impl ArchetypeAccess {
 
 /// Trait describing a schedulable type. This is implemented by `System`
 pub trait Runnable {
+    /// Gets the name of the system.
     fn name(&self) -> &SystemId;
+
+    /// Gets the resources and component types read by the system.
     fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]);
+
+    /// Gets the resources and component types written by the system.
     fn writes(&self) -> (&[ResourceTypeId], &[ComponentTypeId]);
+
+    /// Prepares the system for execution against a world.
     fn prepare(&mut self, world: &World);
+
+    /// Gets the set of archetypes the system will access when run,
+    /// as determined when the system was last prepared.
     fn accesses_archetypes(&self) -> &ArchetypeAccess;
-    unsafe fn run(&mut self, world: &World, resources: &Resources);
+
+    /// Runs the system.
+    ///
+    /// # Safety
+    ///
+    /// The shared references to world and resources may result in
+    /// unsound mutable aliasing if other code is accessing the same components or
+    /// resources as this system. Prefer to use `run` when possible.
+    unsafe fn run_unsafe(&mut self, world: &World, resources: &Resources);
+
+    /// Gets the system's command buffer.
     fn command_buffer_mut(&self, world: WorldId) -> Option<RefMut<CommandBuffer>>;
+
+    /// Runs the system.
+    fn run(&mut self, world: &mut World, resources: &mut Resources) {
+        // safety: world and resources are held exclusively
+        unsafe { self.run(world, resources) };
+    }
 }
 
 /// Executes a sequence of systems, potentially in parallel, and then commits their command buffers.
