@@ -41,7 +41,6 @@ jobs:
           - --no-default-features --release
           - --all-features
           - --no-default-features
-          - --no-default-features --features events
           - --no-default-features --features par-iter
           - --no-default-features --features par-schedule
           - --no-default-features --features metrics
