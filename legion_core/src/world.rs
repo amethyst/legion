@@ -209,17 +209,17 @@ impl World {
     /// ```
     #[inline]
     pub fn insert<T, C>(&mut self, tags: T, components: C) -> &[Entity]
-        where
-            T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-            C: IntoComponentSource,
+    where
+        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+        C: IntoComponentSource,
     {
         self.insert_impl(tags, components.into())
     }
 
     pub(crate) fn insert_impl<T, C>(&mut self, mut tags: T, mut components: C) -> &[Entity]
-        where
-            T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
-            C: ComponentSource,
+    where
+        T: TagSet + TagLayout + for<'a> Filter<ChunksetFilterData<'a>>,
+        C: ComponentSource,
     {
         let span = span!(Level::TRACE, "Inserting entities", world = self.id().0);
         let _guard = span.enter();
@@ -827,9 +827,9 @@ impl World {
     }
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<usize>
-        where
-            T: for<'a> Filter<ArchetypeFilterData<'a>>,
-            C: for<'a> Filter<ArchetypeFilterData<'a>>,
+    where
+        T: for<'a> Filter<ArchetypeFilterData<'a>>,
+        C: for<'a> Filter<ArchetypeFilterData<'a>>,
     {
         // search for an archetype with an exact match for the desired component layout
         let archetype_data = ArchetypeFilterData {
@@ -848,9 +848,9 @@ impl World {
     }
 
     fn create_archetype<T, C>(&mut self, tags: &T, components: &C) -> usize
-        where
-            T: TagLayout,
-            C: ComponentLayout,
+    where
+        T: TagLayout,
+        C: ComponentLayout,
     {
         let mut description = ArchetypeDescription::default();
         tags.tailor_archetype(&mut description);
@@ -861,9 +861,9 @@ impl World {
     }
 
     fn find_or_create_archetype<T, C>(&mut self, tags: &mut T, components: &mut C) -> usize
-        where
-            T: TagLayout,
-            C: ComponentLayout,
+    where
+        T: TagLayout,
+        C: ComponentLayout,
     {
         if let Some(i) = self.find_archetype(tags.get_filter(), components.get_filter()) {
             i
@@ -873,8 +873,8 @@ impl World {
     }
 
     fn find_chunk_set<T>(&self, archetype: usize, tags: &mut T) -> Option<usize>
-        where
-            T: for<'a> Filter<ChunksetFilterData<'a>>,
+    where
+        T: for<'a> Filter<ChunksetFilterData<'a>>,
     {
         // fetch the archetype, we can already assume that the archetype index is valid
         let archetype_data = unsafe { self.storage().archetypes().get_unchecked(archetype) };
@@ -892,8 +892,8 @@ impl World {
     }
 
     fn create_chunk_set<T>(&mut self, archetype: usize, tags: &T) -> usize
-        where
-            T: TagSet,
+    where
+        T: TagSet,
     {
         let archetype_data = unsafe {
             self.storage_mut()
@@ -904,8 +904,8 @@ impl World {
     }
 
     fn find_or_create_chunk<T>(&mut self, archetype: usize, tags: &mut T) -> usize
-        where
-            T: TagSet + for<'a> Filter<ChunksetFilterData<'a>>,
+    where
+        T: TagSet + for<'a> Filter<ChunksetFilterData<'a>>,
     {
         if let Some(i) = self.find_chunk_set(archetype, tags) {
             i
@@ -982,17 +982,17 @@ pub trait IntoComponentSource {
 
 /// A `ComponentSource` which can insert tuples of components representing each entity into a world.
 pub struct ComponentTupleSet<T, I>
-    where
-        I: Iterator<Item = T>,
+where
+    I: Iterator<Item = T>,
 {
     iter: Peekable<I>,
     filter: ComponentTupleFilter<T>,
 }
 
 impl<T, I> From<I> for ComponentTupleSet<T, I>
-    where
-        I: Iterator<Item = T>,
-        ComponentTupleSet<T, I>: ComponentSource,
+where
+    I: Iterator<Item = T>,
+    ComponentTupleSet<T, I>: ComponentSource,
 {
     fn from(iter: I) -> Self {
         ComponentTupleSet {
@@ -1005,9 +1005,9 @@ impl<T, I> From<I> for ComponentTupleSet<T, I>
 }
 
 impl<I> IntoComponentSource for I
-    where
-        I: IntoIterator,
-        ComponentTupleSet<I::Item, I::IntoIter>: ComponentSource,
+where
+    I: IntoIterator,
+    ComponentTupleSet<I::Item, I::IntoIter>: ComponentSource,
 {
     type Source = ComponentTupleSet<I::Item, I::IntoIter>;
 
@@ -1027,7 +1027,7 @@ pub struct PreallocComponentSource<I: Iterator<Item = Entity> + FusedIterator, C
 }
 
 impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> IntoComponentSource
-for PreallocComponentSource<I, C>
+    for PreallocComponentSource<I, C>
 {
     type Source = Self;
 
@@ -1044,7 +1044,7 @@ impl<I: Iterator<Item = Entity>, C: ComponentSource> PreallocComponentSource<Fus
 }
 
 impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentLayout
-for PreallocComponentSource<I, C>
+    for PreallocComponentSource<I, C>
 {
     type Filter = C::Filter;
 
@@ -1056,7 +1056,7 @@ for PreallocComponentSource<I, C>
 }
 
 impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentSource
-for PreallocComponentSource<I, C>
+    for PreallocComponentSource<I, C>
 {
     fn is_empty(&mut self) -> bool { self.components.is_empty() }
 
@@ -1081,7 +1081,7 @@ struct ConcatIter<'a, T, A: Iterator<Item = T> + FusedIterator, B: Iterator<Item
 }
 
 impl<'a, T, A: Iterator<Item = T> + FusedIterator, B: Iterator<Item = T>> Iterator
-for ConcatIter<'a, T, A, B>
+    for ConcatIter<'a, T, A, B>
 {
     type Item = T;
 
@@ -1372,12 +1372,12 @@ impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicComponentLayout<'a> {
         Some(
             item.len() == (self.existing.len() + self.add.len() - self.remove.len())
                 && item.iter().all(|t| {
-                // all types are not in remove
-                !self.remove.contains(t)
+                    // all types are not in remove
+                    !self.remove.contains(t)
                     // any are either in existing or add
                     && (self.existing.iter().any(|(x, _)| x == t)
                     || self.add.iter().any(|(x, _)| x == t))
-            }),
+                }),
         )
     }
 }
@@ -1428,12 +1428,12 @@ impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
         Some(
             item.len() == (self.existing.len() + self.add.len() - self.remove.len())
                 && item.iter().all(|t| {
-                // all types are not in remove
-                !self.remove.contains(t)
+                    // all types are not in remove
+                    !self.remove.contains(t)
                     // any are either in existing or add
                     && (self.existing.iter().any(|(x, _)| x == t)
                     || self.add.iter().any(|(x, _, _)| x == t))
-            }),
+                }),
         )
     }
 }
