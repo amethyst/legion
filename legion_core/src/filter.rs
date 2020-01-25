@@ -794,6 +794,12 @@ impl_and_filter!(A => a, B => b, C => c);
 impl_and_filter!(A => a, B => b, C => c, D => d);
 impl_and_filter!(A => a, B => b, C => c, D => d, E => e);
 impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
+impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g);
+impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h);
+impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i);
+impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j);
+impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k);
+impl_and_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l);
 
 /// A filter which requires that any filter within `T` match.
 #[derive(Debug, Clone)]
@@ -889,6 +895,12 @@ impl_or_filter!(A => a, B => b, C => c);
 impl_or_filter!(A => a, B => b, C => c, D => d);
 impl_or_filter!(A => a, B => b, C => c, D => d, E => e);
 impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f);
+impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g);
+impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h);
+impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i);
+impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j);
+impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k);
+impl_or_filter!(A => a, B => b, C => c, D => d, E => e, F => f, G => g, H => h, I => i, J => j, K => k, L => l);
 
 /// A filter qhich requires that all chunks contain entity data components of type `T`.
 #[derive(Debug)]

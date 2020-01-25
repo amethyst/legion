@@ -231,20 +231,6 @@ pub use legion_core::*;
 pub use legion_systems as systems;
 
 pub mod prelude {
-    // pub use crate::systems::{
-    //     bit_set::BitSet,
-    //     resource::{ResourceSet, Resources},
-    //     schedule::{Executor, Runnable, Schedulable, Schedule},
-    //     System, SystemBuilder,
-    // };
-    pub use legion_systems::prelude::*;
-    // pub use crate::{
-    //     command::CommandBuffer,
-    //     entity::Entity,
-    //     event::Event,
-    //     filter::filter_fns::*,
-    //     query::{IntoQuery, Query, Read, Tagged, TryRead, TryWrite, Write},
-    //     world::{Universe, World},
-    // };
     pub use legion_core::prelude::*;
+    pub use legion_systems::prelude::*;
 }

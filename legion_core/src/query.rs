@@ -449,6 +449,12 @@ impl_view_tuple!(A, B, C);
 impl_view_tuple!(A, B, C, D);
 impl_view_tuple!(A, B, C, D, E);
 impl_view_tuple!(A, B, C, D, E, F);
+impl_view_tuple!(A, B, C, D, E, F, G);
+impl_view_tuple!(A, B, C, D, E, F, G, H);
+impl_view_tuple!(A, B, C, D, E, F, G, H, I);
+impl_view_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
 
 /// A type-safe view of a chunk of entities all of the same data layout.
 pub struct Chunk<'a, V: for<'b> View<'b>> {
