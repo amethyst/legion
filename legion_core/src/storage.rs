@@ -225,8 +225,8 @@ impl Storage {
         let desc = archetype.description();
         self.component_types
             .0
-            .push(desc.components.iter().map(|(t, _)| *t));
-        self.tag_types.0.push(desc.tags.iter().map(|(t, _)| *t));
+            .push(desc.components.iter().map(|&(t, _)| t));
+        self.tag_types.0.push(desc.tags.iter().map(|&(t, _)| t));
 
         let index = ArchetypeIndex(self.archetypes.len());
         let archetype_data = ArchetypeFilterData {
@@ -470,7 +470,7 @@ pub struct Tags(pub(crate) SmallVec<[(TagTypeId, TagStorage); 3]>);
 
 impl Tags {
     fn new(mut data: SmallVec<[(TagTypeId, TagStorage); 3]>) -> Self {
-        data.sort_by_key(|(t, _)| *t);
+        data.sort_by_key(|&(t, _)| t);
         Self(data)
     }
 
@@ -484,7 +484,7 @@ impl Tags {
     #[inline]
     pub fn get(&self, type_id: TagTypeId) -> Option<&TagStorage> {
         self.0
-            .binary_search_by_key(&type_id, |(t, _)| *t)
+            .binary_search_by_key(&type_id, |&(t, _)| t)
             .ok()
             .map(|i| unsafe { &self.0.get_unchecked(i).1 })
     }
@@ -493,22 +493,22 @@ impl Tags {
     #[inline]
     pub fn get_mut(&mut self, type_id: TagTypeId) -> Option<&mut TagStorage> {
         self.0
-            .binary_search_by_key(&type_id, |(t, _)| *t)
+            .binary_search_by_key(&type_id, |&(t, _)| t)
             .ok()
             .map(move |i| unsafe { &mut self.0.get_unchecked_mut(i).1 })
     }
 
-    pub(crate) fn tag_set(&self, set_index: SetIndex) -> DynamicTagSet {
+    pub(crate) fn tag_set(&self, SetIndex(index): SetIndex) -> DynamicTagSet {
         let mut tags = DynamicTagSet { tags: Vec::new() };
 
         unsafe {
-            for (type_id, storage) in self.0.iter() {
+            for &(type_id, ref storage) in self.0.iter() {
                 let (ptr, element_size, count) = storage.data_raw();
-                debug_assert!(*set_index < count, "set index out of bounds");
+                debug_assert!(index < count, "set index out of bounds");
                 tags.push(
-                    *type_id,
+                    type_id,
                     *storage.element(),
-                    NonNull::new(ptr.as_ptr().add(element_size * *set_index)).unwrap(),
+                    NonNull::new(ptr.as_ptr().add(element_size * index)).unwrap(),
                 );
             }
         }
@@ -546,7 +546,7 @@ impl DynamicTagSet {
             .tags
             .iter()
             .enumerate()
-            .find(|(_, (t, _, _))| *t == type_id)
+            .find(|(_, &(t, _, _))| t == type_id)
         {
             let (_, meta, ptr) = self.tags.remove(i);
             unsafe {
@@ -565,8 +565,8 @@ impl DynamicTagSet {
 
 impl TagSet for DynamicTagSet {
     fn write_tags(&self, tags: &mut Tags) {
-        for (type_id, meta, ptr) in self.tags.iter() {
-            let storage = tags.get_mut(*type_id).unwrap();
+        for &(type_id, ref meta, ptr) in self.tags.iter() {
+            let storage = tags.get_mut(type_id).unwrap();
             unsafe {
                 if meta.drop_fn.is_some() && !meta.is_zero_sized() {
                     // clone the value into temp storage then move it into the chunk
@@ -621,7 +621,7 @@ impl ArchetypeData {
         let tags = desc
             .tags
             .iter()
-            .map(|(type_id, meta)| (*type_id, TagStorage::new(*meta)))
+            .map(|&(type_id, meta)| (type_id, TagStorage::new(meta)))
             .collect();
 
         // create component data layout
@@ -637,12 +637,12 @@ impl ArchetypeData {
         );
         let mut data_capacity = 0usize;
         let mut component_data_offsets = Vec::new();
-        for (type_id, meta) in desc.components.iter() {
+        for &(type_id, meta) in desc.components.iter() {
             data_capacity = align_up(
                 align_up(data_capacity, COMPONENT_STORAGE_ALIGNMENT),
                 meta.align,
             );
-            component_data_offsets.push((*type_id, data_capacity, *meta));
+            component_data_offsets.push((type_id, data_capacity, meta));
             data_capacity += meta.size * entity_capacity;
         }
         let data_alignment =
@@ -700,10 +700,10 @@ impl ArchetypeData {
             let mut set_match = None;
             for self_index in 0..self.chunk_sets.len() {
                 let mut matches = true;
-                for (type_id, tags) in self.tags.0.iter() {
+                for &(type_id, ref tags) in self.tags.0.iter() {
                     unsafe {
                         let (self_tag_ptr, size, _) = tags.data_raw();
-                        let (other_tag_ptr, _, _) = other_tags.get(*type_id).unwrap().data_raw();
+                        let (other_tag_ptr, _, _) = other_tags.get(type_id).unwrap().data_raw();
 
                         if !tags.element().equals(
                             self_tag_ptr.as_ptr().add(self_index * size),
@@ -730,10 +730,10 @@ impl ArchetypeData {
             } else {
                 // if we did not find a match, clone the tags and move the set
                 self.push(set, |self_tags| {
-                    for (type_id, other_tags) in other_tags.0.iter() {
+                    for &(type_id, ref other_tags) in other_tags.0.iter() {
                         unsafe {
                             let (src, _, _) = other_tags.data_raw();
-                            let dst = self_tags.get_mut(*type_id).unwrap().alloc_ptr();
+                            let dst = self_tags.get_mut(type_id).unwrap().alloc_ptr();
                             other_tags.element().clone(src.as_ptr(), dst);
                         }
                     }
@@ -760,9 +760,9 @@ impl ArchetypeData {
                             .entities()
                             .iter()
                             .enumerate()
-                            .map(move |(entity_index, entity)| {
+                            .map(move |(entity_index, &entity)| {
                                 (
-                                    *entity,
+                                    entity,
                                     EntityLocation::new(
                                         archetype_index,
                                         SetIndex(set_index),
@@ -920,9 +920,9 @@ impl ComponentStorageLayout {
         let storage_info = self
             .data_layout
             .iter()
-            .map(|(ty, _, meta)| {
+            .map(|&(ty, _, ref meta)| {
                 (
-                    *ty,
+                    ty,
                     ComponentResourceSet {
                         ptr: AtomicRefCell::new(meta.align as *mut u8),
                         capacity: self.capacity,
@@ -942,7 +942,7 @@ impl ComponentStorageLayout {
             component_offsets: self
                 .data_layout
                 .iter()
-                .map(|(ty, offset, _)| (*ty, *offset))
+                .map(|&(ty, offset, _)| (ty, offset))
                 .collect(),
             component_layout: self.alloc_layout,
             component_info: UnsafeCell::new(Components::new(storage_info)),
@@ -1175,7 +1175,7 @@ pub struct Components(SmallVec<[(ComponentTypeId, ComponentResourceSet); 5]>);
 
 impl Components {
     pub(crate) fn new(mut data: SmallVec<[(ComponentTypeId, ComponentResourceSet); 5]>) -> Self {
-        data.sort_by_key(|(t, _)| *t);
+        data.sort_by_key(|&(t, _)| t);
         Self(data)
     }
 
@@ -1183,7 +1183,7 @@ impl Components {
     #[inline]
     pub fn get(&self, type_id: ComponentTypeId) -> Option<&ComponentResourceSet> {
         self.0
-            .binary_search_by_key(&type_id, |(t, _)| *t)
+            .binary_search_by_key(&type_id, |&(t, _)| t)
             .ok()
             .map(|i| unsafe { &self.0.get_unchecked(i).1 })
     }
@@ -1192,7 +1192,7 @@ impl Components {
     #[inline]
     pub fn get_mut(&mut self, type_id: ComponentTypeId) -> Option<&mut ComponentResourceSet> {
         self.0
-            .binary_search_by_key(&type_id, |(t, _)| *t)
+            .binary_search_by_key(&type_id, |&(t, _)| t)
             .ok()
             .map(move |i| unsafe { &mut self.0.get_unchecked_mut(i).1 })
     }
@@ -1230,10 +1230,10 @@ impl<'a> StorageWriter<'a> {
 impl<'a> Drop for StorageWriter<'a> {
     fn drop(&mut self) {
         self.storage.update_count_gauge();
-        for entity in self.storage.entities.iter().skip(self.initial_count) {
+        for &entity in self.storage.entities.iter().skip(self.initial_count) {
             self.storage
                 .subscribers
-                .send(Event::EntityInserted(*entity, self.storage.id()));
+                .send(Event::EntityInserted(entity, self.storage.id()));
         }
     }
 }
@@ -1411,8 +1411,8 @@ impl ComponentStorage {
 
             // update accessor pointers
             for (type_id, component) in (&mut *self.component_info.get()).iter_mut() {
-                let offset = self.component_offsets.get(type_id).unwrap();
-                *component.ptr.get_mut() = ptr.add(*offset);
+                let &offset = self.component_offsets.get(type_id).unwrap();
+                *component.ptr.get_mut() = ptr.add(offset);
             }
         }
 
@@ -1539,7 +1539,7 @@ impl ComponentResourceSet {
     /// This call will panic if borrowing rules are broken.
     pub unsafe fn data_slice<T>(&self) -> RefMap<&[T]> {
         let (ptr, _size, count) = self.data_raw();
-        ptr.map_into(|ptr| std::slice::from_raw_parts(*ptr as *const _ as *const T, count))
+        ptr.map_into(|&ptr| std::slice::from_raw_parts(ptr as *const _ as *const T, count))
     }
 
     /// Gets a mutable reference to the slice of components.
@@ -1557,7 +1557,7 @@ impl ComponentResourceSet {
     /// It will happen in 50000 years if you do 10000 mutations a millisecond.
     pub unsafe fn data_slice_mut<T>(&self) -> RefMapMut<&mut [T]> {
         let (ptr, _size, count) = self.data_raw_mut();
-        ptr.map_into(|ptr| std::slice::from_raw_parts_mut(*ptr as *mut _ as *mut T, count))
+        ptr.map_into(|&mut ptr| std::slice::from_raw_parts_mut(ptr as *mut _ as *mut T, count))
     }
 
     /// Creates a writer for pushing components into or removing from the vec.
