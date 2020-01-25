@@ -7,6 +7,7 @@ pub mod entity;
 pub mod event;
 pub mod filter;
 pub mod iterator;
+pub mod index;
 pub mod query;
 pub mod storage;
 pub mod world;
