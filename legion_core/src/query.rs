@@ -395,6 +395,10 @@ macro_rules! impl_view_tuple {
 
         impl<$( $ty: ReadOnly ),* > ReadOnly for ($( $ty, )*) {}
 
+        impl<$( $ty: ViewElement ),*> ViewElement for ($( $ty, )*) {
+            type Component = ($( $ty::Component ),*);
+        }
+
         impl<'a, $( $ty: ViewElement + View<'a> ),* > View<'a> for ($( $ty, )*) {
             type Iter = crate::zip::Zip<($( $ty::Iter, )*)>;
 
