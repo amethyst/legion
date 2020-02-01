@@ -855,9 +855,9 @@ impl World {
         }
     }
 
-    /// Merge this world with another, copying all appropriate archetypes, tags entities and components
-    /// into this world.
-    pub fn merge(&mut self, world: World) {
+    /// Move entities from a world to this world, copying all appropriate archetypes,
+    /// tags entities and components into this world.
+    pub fn move_from(&mut self, world: World) {
         let span =
             span!(Level::INFO, "Merging worlds", source = world.id().0, destination = ?self.id());
         let _guard = span.enter();
@@ -883,7 +883,7 @@ impl World {
                     self.storage_mut()
                         .archetype_mut(arch_index)
                         .unwrap()
-                        .merge(archetype);
+                        .move_from(archetype);
                     arch_index
                 } else {
                     // archetype does not already exist, append
@@ -2177,7 +2177,7 @@ mod tests {
     }
 
     #[test]
-    fn merge() {
+    fn move_from() {
         let universe = Universe::new();
         let mut a = universe.create_world();
         let mut b = universe.create_world();
@@ -2198,7 +2198,7 @@ mod tests {
             ],
         )[0];
 
-        b.merge(a);
+        b.move_from(a);
 
         assert_eq!(*b.get_component::<Pos>(entity_b).unwrap(), Pos(7., 8., 9.));
         assert_eq!(*b.get_component::<Pos>(entity_a).unwrap(), Pos(1., 2., 3.));

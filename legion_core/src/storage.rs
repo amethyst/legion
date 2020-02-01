@@ -726,7 +726,7 @@ impl ArchetypeData {
         set_match
     }
 
-    pub(crate) fn merge(&mut self, mut other: ArchetypeData) {
+    pub(crate) fn move_from(&mut self, mut other: ArchetypeData) {
         let other_tags = &other.tags;
         for (other_index, mut set) in other.chunk_sets.drain(..).enumerate() {
             let mut set_match = self.find_chunk_set_by_tags(&other_tags, other_index);
