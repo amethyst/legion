@@ -840,7 +840,7 @@ impl ArchetypeData {
                         let dst_entity = if let Some(dst_entity) = dst_entity {
                             // We are replacing data
                             // Verify that the entity is alive.. this checks the index and version of the entity
-                            //TODO: This check may not be needed in release mode since World::clone_merge checks it
+                            //TODO: This check may not be needed in release mode since World::clone_from checks it
                             assert!(dst_entity_allocator.is_alive(*dst_entity));
                             *dst_entity
                         } else {
@@ -864,13 +864,13 @@ impl ArchetypeData {
                         // Create a writer that will insert the data into the destination chunk
                         let mut dst_component_writer = dst_components
                             .get_mut(dst_type)
-                            .expect("ComponentResourceSet missing in clone_merge")
+                            .expect("ComponentResourceSet missing in clone_from")
                             .writer();
 
                         // Find the data in the source chunk
                         let src_component_storage = src_chunk
                             .components(*src_type)
-                            .expect("ComponentResourceSet missing in clone_merge");
+                            .expect("ComponentResourceSet missing in clone_from");
                         let (src_component_chunk_data, src_element_size, _) =
                             src_component_storage.data_raw();
 
@@ -981,7 +981,7 @@ impl ArchetypeData {
         let dst_entity = if let Some(dst_entity) = replace_mapping {
             // We are replacing data
             // Verify that the entity is alive.. this checks the index and version of the entity
-            //TODO: This check may not be needed in release mode since World::clone_merge checks it
+            //TODO: This check may not be needed in release mode since World::clone_from checks it
             assert!(dst_entity_allocator.is_alive(dst_entity));
             dst_entity
         } else {
@@ -1000,13 +1000,13 @@ impl ArchetypeData {
             // Create a writer that will insert the data into the destination chunk
             let mut dst_component_writer = dst_components
                 .get_mut(dst_type)
-                .expect("ComponentResourceSet missing in clone_merge_single")
+                .expect("ComponentResourceSet missing in clone_from_single")
                 .writer();
 
             // Find the data in the source chunk
             let src_component_storage = src_chunk
                 .components(*src_type)
-                .expect("ComponentResourceSet missing in clone_merge_single");
+                .expect("ComponentResourceSet missing in clone_from_single");
             let (src_component_chunk_data, src_element_size, _) = src_component_storage.data_raw();
 
             // Now copy the data
