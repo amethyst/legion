@@ -757,7 +757,7 @@ impl ArchetypeData {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn clone_merge<C: crate::world::CloneMergeImpl>(
+    pub(crate) fn clone_from<C: crate::world::CloneImpl>(
         &mut self,
         src_world: &crate::world::World,
         src_archetype: &ArchetypeData,
@@ -906,7 +906,7 @@ impl ArchetypeData {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn clone_merge_single<C: crate::world::CloneMergeImpl>(
+    pub(crate) fn clone_from_single<C: crate::world::CloneImpl>(
         &mut self,
         src_world: &crate::world::World,
         src_archetype: &ArchetypeData,

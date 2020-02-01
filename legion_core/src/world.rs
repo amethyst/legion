@@ -915,7 +915,7 @@ impl World {
     /// world and the value must exist in the destination world. All entities in the destination
     /// world referenced by this map will be deleted, and the entities copied over will be assigned
     /// the same entity. If these constraints are not met, this function will panic.
-    pub fn clone_merge<C: CloneMergeImpl>(
+    pub fn clone_from<C: CloneImpl>(
         &mut self,
         src_world: &World,
         clone_impl: &C,
@@ -988,7 +988,7 @@ impl World {
                 .archetypes_mut()
                 .get_mut(dst_archetype_index)
                 .unwrap()
-                .clone_merge(
+                .clone_from(
                     &src_world,
                     src_archetype,
                     dst_archetype_index,
@@ -1001,7 +1001,7 @@ impl World {
         }
     }
 
-    pub fn clone_merge_single<C: CloneMergeImpl>(
+    pub fn clone_from_single<C: CloneImpl>(
         &mut self,
         src_world: &World,
         src_entity: Entity,
@@ -1070,7 +1070,7 @@ impl World {
             .archetypes_mut()
             .get_mut(dst_archetype_index)
             .unwrap()
-            .clone_merge_single(
+            .clone_from_single(
                 &src_world,
                 src_archetype,
                 &src_location,
@@ -1174,7 +1174,7 @@ impl Default for World {
 
 /// Describes how to handle a clone_merge. Allows the user to transform components from one type
 /// to another and provide their own implementation for cloning/transforming
-pub trait CloneMergeImpl {
+pub trait CloneImpl {
     /// When a component of the provided `component_type` is encountered, we will transfer data
     /// from it into the returned component type. For a basic clone implementation, this function
     /// should return the same type as was passed into it
