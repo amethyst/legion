@@ -489,29 +489,34 @@ impl World {
             remove_tags,
         );
 
-        // Safety Note:
-        // It is only safe for us to have 2 &mut references to storage here because
-        // we know we are only going to be modifying two chunks that are at different
-        // indexes.
-
         // fetch entity's chunk
         let current_chunk = unsafe { &mut *self.storage.get() }
             .chunk_mut(location)
-            .unwrap();
+            .unwrap() as *mut ComponentStorage;
 
         // fetch target chunk
-        let archetype = unsafe { &mut *self.storage.get() }
-            .archetype_mut(target_arch_index)
-            .unwrap();
-        let target_chunk_index = archetype.get_free_chunk(target_chunkset_index, 1);
-        let target_chunk = unsafe {
-            archetype
-                .chunkset_unchecked_mut(target_chunkset_index)
-                .chunk_unchecked_mut(target_chunk_index)
+        let (target_chunk_index, target_chunk) = {
+            let archetype = unsafe { &mut *self.storage.get() }
+                .archetype_mut(target_arch_index)
+                .unwrap();
+            let target_chunk_index = archetype.get_free_chunk(target_chunkset_index, 1);
+            let target_chunk = unsafe {
+                archetype
+                    .chunkset_unchecked_mut(target_chunkset_index)
+                    .chunk_unchecked_mut(target_chunk_index)
+            };
+            (target_chunk_index, target_chunk as *mut ComponentStorage)
         };
 
+        // Safety Note:
+        // It is only safe for us to have 2 &mut references into storage here because
+        // we know we are only going to be modifying two chunks that are at different
+        // indexes.
+
         // move existing data over into new chunk
-        if let Some(swapped) = current_chunk.move_entity(target_chunk, location.component()) {
+        if let Some(swapped) =
+            unsafe { (*current_chunk).move_entity(&mut *target_chunk, location.component()) }
+        {
             // update location of any entity that was moved into the previous location
             self.entity_locations.set(swapped, location);
         }
@@ -523,11 +528,11 @@ impl World {
                 target_arch_index,
                 target_chunkset_index,
                 target_chunk_index,
-                ComponentIndex(target_chunk.len() - 1),
+                unsafe { ComponentIndex((*target_chunk).len() - 1) },
             ),
         );
 
-        target_chunk
+        unsafe { &mut *target_chunk }
     }
 
     /// Adds a component to an entity, or sets its value if the component is
