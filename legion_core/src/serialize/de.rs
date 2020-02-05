@@ -306,11 +306,11 @@ impl<'de, 'a, 'b, WD: WorldDeserializer> DeserializeSeed<'de> for TagsDeserializ
             world_tag_storages
         };
 
-        let num_world_values = world_tag_storages.iter().map(|ts| ts.len()).nth(0);
+        let num_world_values = world_tag_storages.iter().map(|ts| ts.len()).next();
         let num_tag_values = deserialized_tags
             .iter()
             .map(|ts| ts.len())
-            .nth(0)
+            .next()
             .unwrap_or(0);
         let mut chunksets_to_add = Vec::new();
         for i in 0..num_tag_values {

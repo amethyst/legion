@@ -85,7 +85,7 @@ fn get_shared() {
     ];
 
     let mut entities: Vec<Entity> = Vec::new();
-    for e in world.insert(shared, components.clone()) {
+    for e in world.insert(shared, components) {
         entities.push(*e);
     }
 
@@ -121,7 +121,7 @@ fn delete() {
     ];
 
     let mut entities: Vec<Entity> = Vec::new();
-    for e in world.insert(shared, components.clone()) {
+    for e in world.insert(shared, components) {
         entities.push(*e);
     }
 

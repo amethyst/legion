@@ -1,6 +1,8 @@
 use parking_lot::{Mutex, RwLock, RwLockWriteGuard};
 use std::fmt::Display;
 use std::num::Wrapping;
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 pub type EntityIndex = u32;
@@ -59,6 +61,46 @@ impl EntityLocation {
     pub fn component(&self) -> usize { self.component_index }
 }
 
+pub(crate) struct Locations {
+    blocks: Vec<Option<Vec<EntityLocation>>>,
+}
+
+impl Locations {
+    pub fn new() -> Self { Locations { blocks: Vec::new() } }
+
+    fn index(entity: EntityIndex) -> (usize, usize) {
+        let block = entity as usize / BlockAllocator::BLOCK_SIZE;
+        let index = entity as usize - block * BlockAllocator::BLOCK_SIZE;
+        (block, index)
+    }
+
+    pub fn get(&self, entity: Entity) -> Option<EntityLocation> {
+        let (block, index) = Locations::index(entity.index());
+        self.blocks
+            .get(block)
+            .map(|b| b.as_ref())
+            .flatten()
+            .map(|b| b[index])
+    }
+
+    pub fn set(&mut self, entity: Entity, location: EntityLocation) {
+        let (block_index, index) = Locations::index(entity.index());
+        if self.blocks.len() <= block_index {
+            let fill = block_index - self.blocks.len() + 1;
+            self.blocks.extend((0..fill).map(|_| None));
+        }
+
+        let block_opt = &mut self.blocks[block_index];
+        let block = block_opt.get_or_insert_with(|| {
+            std::iter::repeat(EntityLocation::new(0, 0, 0, 0))
+                .take(BlockAllocator::BLOCK_SIZE)
+                .collect()
+        });
+
+        block[index] = location;
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct BlockAllocator {
     allocated: usize,
@@ -94,7 +136,6 @@ pub struct EntityBlock {
     len: usize,
     versions: Vec<EntityVersion>,
     free: Vec<EntityIndex>,
-    locations: Vec<EntityLocation>,
 }
 
 impl EntityBlock {
@@ -104,9 +145,6 @@ impl EntityBlock {
             len,
             versions: Vec::with_capacity(len),
             free: Vec::new(),
-            locations: std::iter::repeat(EntityLocation::new(0, 0, 0, 0))
-                .take(len)
-                .collect(),
         }
     }
 
@@ -138,45 +176,80 @@ impl EntityBlock {
         }
     }
 
-    pub fn free(&mut self, entity: Entity) -> Option<EntityLocation> {
+    pub fn free(&mut self, entity: Entity) -> bool {
         if let Some(true) = self.is_alive(entity) {
             let i = self.index(entity.index);
             self.versions[i] += Wrapping(1);
             self.free.push(entity.index);
-            self.get_location(entity.index)
+            true
         } else {
-            None
+            false
         }
-    }
-
-    pub fn set_location(&mut self, entity: EntityIndex, location: EntityLocation) {
-        assert!(entity >= self.start);
-        let index = (entity - self.start) as usize;
-        *self.locations.get_mut(index).unwrap() = location;
-    }
-
-    pub fn get_location(&self, entity: EntityIndex) -> Option<EntityLocation> {
-        if entity < self.start {
-            return None;
-        }
-
-        let index = (entity - self.start) as usize;
-        self.locations.get(index).copied()
     }
 }
 
+#[derive(Debug)]
+struct Blocks {
+    blocks: Vec<Option<EntityBlock>>,
+}
+
+impl Blocks {
+    fn new() -> Self { Self { blocks: Vec::new() } }
+
+    pub fn index(entity: EntityIndex) -> usize { entity as usize / BlockAllocator::BLOCK_SIZE }
+
+    fn find(&self, entity: EntityIndex) -> Option<&EntityBlock> {
+        let i = Blocks::index(entity);
+        self.blocks.get(i).map(|b| b.as_ref()).flatten()
+    }
+
+    fn find_mut(&mut self, entity: EntityIndex) -> Option<&mut EntityBlock> {
+        let i = Blocks::index(entity);
+        self.blocks.get_mut(i).map(|b| b.as_mut()).flatten()
+    }
+
+    fn push(&mut self, block: EntityBlock) -> usize {
+        let i = Blocks::index(block.start);
+        if self.blocks.len() > i {
+            self.blocks[i] = Some(block);
+        } else {
+            let fill = i - self.blocks.len();
+            self.blocks.extend((0..fill).map(|_| None));
+            self.blocks.push(Some(block));
+        }
+        i
+    }
+
+    fn append(&mut self, other: &mut Blocks) {
+        for block in other.blocks.drain(..) {
+            if let Some(block) = block {
+                self.push(block);
+            }
+        }
+    }
+}
+
+impl Deref for Blocks {
+    type Target = [Option<EntityBlock>];
+    fn deref(&self) -> &Self::Target { self.blocks.deref() }
+}
+
+impl DerefMut for Blocks {
+    fn deref_mut(&mut self) -> &mut Self::Target { self.blocks.deref_mut() }
+}
+
 /// Manages the allocation and deletion of `Entity` IDs within a world.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct EntityAllocator {
     allocator: Arc<Mutex<BlockAllocator>>,
-    blocks: Arc<RwLock<Vec<EntityBlock>>>,
+    blocks: RwLock<Blocks>,
 }
 
 impl EntityAllocator {
     pub(crate) fn new(allocator: Arc<Mutex<BlockAllocator>>) -> Self {
         EntityAllocator {
             allocator,
-            blocks: Arc::new(RwLock::new(Vec::new())),
+            blocks: RwLock::new(Blocks::new()),
         }
     }
 
@@ -184,9 +257,9 @@ impl EntityAllocator {
     pub fn is_alive(&self, entity: Entity) -> bool {
         self.blocks
             .read()
-            .iter()
-            .filter_map(|b| b.is_alive(entity))
-            .nth(0)
+            .find(entity.index())
+            .map(|b| b.is_alive(entity))
+            .flatten()
             .unwrap_or(false)
     }
 
@@ -198,47 +271,37 @@ impl EntityAllocator {
         CreateEntityIter {
             blocks: self.blocks.write(),
             allocator: &self.allocator,
+            current_block: None,
         }
     }
 
-    pub(crate) fn delete_entity(&self, entity: Entity) -> Option<EntityLocation> {
-        self.blocks.write().iter_mut().find_map(|b| b.free(entity))
-    }
-
-    pub(crate) fn set_location(&self, entity: EntityIndex, location: EntityLocation) {
+    pub(crate) fn delete_entity(&self, entity: Entity) -> bool {
         self.blocks
             .write()
-            .iter_mut()
-            .rev()
-            .find(|b| b.in_range(entity))
-            .unwrap()
-            .set_location(entity, location);
-    }
-
-    pub(crate) fn get_location(&self, entity: EntityIndex) -> Option<EntityLocation> {
-        self.blocks
-            .read()
-            .iter()
-            .find(|b| b.in_range(entity))
-            .and_then(|b| b.get_location(entity))
+            .find_mut(entity.index())
+            .map(|b| b.free(entity))
+            .unwrap_or(false)
     }
 
     pub(crate) fn merge(&self, other: EntityAllocator) {
         assert!(Arc::ptr_eq(&self.allocator, &other.allocator));
-        self.blocks.write().append(&mut other.blocks.write());
+        self.blocks.write().append(&mut *other.blocks.write());
     }
 }
 
 impl Drop for EntityAllocator {
     fn drop(&mut self) {
-        for block in self.blocks.write().drain(..) {
-            self.allocator.lock().free(block);
+        for block in self.blocks.write().blocks.drain(..) {
+            if let Some(block) = block {
+                self.allocator.lock().free(block);
+            }
         }
     }
 }
 
 pub struct CreateEntityIter<'a> {
-    blocks: RwLockWriteGuard<'a, Vec<EntityBlock>>,
+    current_block: Option<usize>,
+    blocks: RwLockWriteGuard<'a, Blocks>,
     allocator: &'a Mutex<BlockAllocator>,
 }
 
@@ -246,20 +309,33 @@ impl<'a> Iterator for CreateEntityIter<'a> {
     type Item = Entity;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(entity) = self
+        // try and allocate from the block we last used
+        if let Some(block) = self.current_block {
+            if let Some(entity) = self.blocks[block].as_mut().unwrap().allocate() {
+                return Some(entity);
+            }
+        }
+
+        // search for a block with spare entities
+        for (i, allocated) in self
             .blocks
             .iter_mut()
+            .enumerate()
             .rev()
-            .filter_map(|b| b.allocate())
-            .nth(0)
+            .filter(|(_, b)| b.is_some())
+            .map(|(i, b)| (i, b.as_mut().unwrap().allocate()))
         {
-            Some(entity)
-        } else {
-            let mut block = self.allocator.lock().allocate();
-            let entity = block.allocate().unwrap();
-            self.blocks.push(block);
-            Some(entity)
+            if let Some(entity) = allocated {
+                self.current_block = Some(i);
+                return Some(entity);
+            }
         }
+
+        // allocate a new block
+        let mut block = self.allocator.lock().allocate();
+        let entity = block.allocate().unwrap();
+        self.current_block = Some(self.blocks.push(block));
+        Some(entity)
     }
 }
 
@@ -334,7 +410,7 @@ mod tests {
         let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = allocator.create_entity();
 
-        assert_eq!(true, allocator.delete_entity(entity).is_some());
+        assert_eq!(true, allocator.delete_entity(entity));
     }
 
     #[test]
@@ -343,7 +419,7 @@ mod tests {
         let entity = allocator.create_entity();
         allocator.delete_entity(entity);
 
-        assert_eq!(None, allocator.delete_entity(entity));
+        assert_eq!(false, allocator.delete_entity(entity));
     }
 
     #[test]
@@ -351,14 +427,14 @@ mod tests {
         let allocator = EntityAllocator::new(Arc::from(Mutex::new(BlockAllocator::new())));
         let entity = Entity::new(10 as EntityIndex, Wrapping(10));
 
-        assert_eq!(None, allocator.delete_entity(entity));
+        assert_eq!(false, allocator.delete_entity(entity));
     }
 
     #[test]
     fn multiple_allocators_unique_ids() {
         let blocks = Arc::from(Mutex::new(BlockAllocator::new()));
         let allocator_a = EntityAllocator::new(blocks.clone());
-        let allocator_b = EntityAllocator::new(blocks.clone());
+        let allocator_b = EntityAllocator::new(blocks);
 
         let mut entities_a = HashSet::<Entity>::default();
         let mut entities_b = HashSet::<Entity>::default();

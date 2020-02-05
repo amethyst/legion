@@ -585,7 +585,7 @@ mod tests {
         let query = Read::<Pos>::query();
 
         let mut count = 0;
-        for _ in query.iter_entities(&mut world) {
+        for _ in query.iter_entities(&world) {
             count += 1;
         }
 

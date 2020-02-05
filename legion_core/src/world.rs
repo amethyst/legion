@@ -4,6 +4,7 @@ use crate::entity::BlockAllocator;
 use crate::entity::Entity;
 use crate::entity::EntityAllocator;
 use crate::entity::EntityLocation;
+use crate::entity::Locations;
 use crate::event::Event;
 use crate::filter::ArchetypeFilterData;
 use crate::filter::ChunksetFilterData;
@@ -96,6 +97,7 @@ pub struct World {
     id: WorldId,
     storage: UnsafeCell<Storage>,
     pub(crate) entity_allocator: Arc<EntityAllocator>,
+    entity_locations: Locations,
     defrag_progress: usize,
     command_buffer_size: usize,
     pub(crate) allocation_buffer: Vec<Entity>,
@@ -124,6 +126,7 @@ impl World {
             id,
             storage: UnsafeCell::new(Storage::new(id)),
             entity_allocator: Arc::new(allocator),
+            entity_locations: Locations::new(),
             defrag_progress: 0,
             command_buffer_size: Self::DEFAULT_COMMAND_BUFFER_SIZE,
             allocation_buffer: Vec::with_capacity(Self::DEFAULT_COMMAND_BUFFER_SIZE),
@@ -176,7 +179,7 @@ impl World {
 
     pub fn get_entity_location(&self, entity: Entity) -> Option<EntityLocation> {
         if self.is_alive(entity) {
-            self.entity_allocator.get_location(entity.index())
+            self.entity_locations.get(entity)
         } else {
             None
         }
@@ -231,6 +234,7 @@ impl World {
         let chunk_set_index = self.find_or_create_chunk(archetype_index, &mut tags);
 
         self.allocation_buffer.clear();
+        self.allocation_buffer.reserve(components.len());
 
         // insert components into chunks
         while !components.is_empty() {
@@ -257,7 +261,7 @@ impl World {
             for (i, e) in added {
                 let location =
                     EntityLocation::new(archetype_index, chunk_set_index, chunk_index, i);
-                self.entity_allocator.set_location(e.index(), location);
+                self.entity_locations.set(*e, location);
                 self.allocation_buffer.push(*e);
             }
         }
@@ -275,8 +279,9 @@ impl World {
             return false;
         }
 
-        if let Some(location) = self.entity_allocator.delete_entity(entity) {
+        if self.entity_allocator.delete_entity(entity) {
             // find entity's chunk
+            let location = self.entity_locations.get(entity).unwrap();
             let chunk = self
                 .storage_mut()
                 .archetypes_mut()
@@ -291,8 +296,7 @@ impl World {
             // swap remove with last entity in chunk
             if let Some(swapped) = chunk.swap_remove(location.component(), true) {
                 // record swapped entity's new location
-                self.entity_allocator
-                    .set_location(swapped.index(), location);
+                self.entity_locations.set(swapped, location);
             }
 
             trace!(world = self.id().0, ?entity, "Deleted entity");
@@ -388,10 +392,7 @@ impl World {
         add_tags: &[(TagTypeId, TagMeta, NonNull<u8>)],
         remove_tags: &[TagTypeId],
     ) -> &mut ComponentStorage {
-        let location = self
-            .entity_allocator
-            .get_location(entity.index())
-            .expect("entity not found");
+        let location = self.entity_locations.get(entity).expect("entity not found");
 
         // find or create the target chunk
         let (target_arch_index, target_chunkset_index) = self.find_chunk_with_delta(
@@ -434,13 +435,12 @@ impl World {
         // move existing data over into new chunk
         if let Some(swapped) = current_chunk.move_entity(target_chunk, location.component()) {
             // update location of any entity that was moved into the previous location
-            self.entity_allocator
-                .set_location(swapped.index(), location);
+            self.entity_locations.set(swapped, location);
         }
 
         // record the entity's new location
-        self.entity_allocator.set_location(
-            entity.index(),
+        self.entity_locations.set(
+            entity,
             EntityLocation::new(
                 target_arch_index,
                 target_chunkset_index,
@@ -628,7 +628,7 @@ impl World {
             return None;
         }
 
-        let location = self.entity_allocator.get_location(entity.index())?;
+        let location = self.entity_locations.get(entity)?;
         let archetype = self.storage().archetypes().get(location.archetype())?;
         let chunk = archetype
             .chunksets()
@@ -646,7 +646,7 @@ impl World {
     }
 
     fn get_component_storage(&self, entity: Entity) -> Option<&ComponentStorage> {
-        let location = self.entity_allocator.get_location(entity.index())?;
+        let location = self.entity_locations.get(entity)?;
         let archetype = self.storage().archetypes().get(location.archetype())?;
         Some(
             archetype
@@ -699,7 +699,7 @@ impl World {
             return None;
         }
 
-        let location = self.entity_allocator.get_location(entity.index())?;
+        let location = self.entity_locations.get(entity)?;
         let archetype = self.storage().archetypes().get(location.archetype())?;
         let chunk = archetype
             .chunksets()
@@ -737,7 +737,7 @@ impl World {
             return None;
         }
 
-        let location = self.entity_allocator.get_location(entity.index())?;
+        let location = self.entity_locations.get(entity)?;
         let archetype = self.storage().archetypes().get(location.archetype())?;
         let tags = archetype.tags().get(TagTypeId::of::<T>())?;
 
@@ -770,7 +770,7 @@ impl World {
             // defragment the next archetype
             let complete =
                 (&mut archetypes[self.defrag_progress]).defrag(&mut budget, |e, location| {
-                    self.entity_allocator.set_location(e.index(), location);
+                    self.entity_locations.set(e, location);
                 });
             if complete {
                 // increment the index, looping it once we get to the end
@@ -821,7 +821,7 @@ impl World {
             // update entity locations
             let archetype = &unsafe { &*self.storage.get() }.archetypes()[target_archetype];
             for (entity, location) in archetype.enumerate_entities(target_archetype) {
-                self.entity_allocator.set_location(entity.index(), location);
+                self.entity_locations.set(entity, location);
             }
         }
     }

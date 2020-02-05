@@ -404,7 +404,7 @@ impl<'a> Filter<ArchetypeFilterData<'a>> for ArchetypeDescription {
     }
 }
 
-const MAX_CHUNK_SIZE: usize = 16 * 1024;
+const MAX_CHUNK_SIZE: usize = 16 * 1024 * 10;
 const COMPONENT_STORAGE_ALIGNMENT: usize = 64;
 
 /// Unique ID of an archetype.
@@ -1380,7 +1380,7 @@ pub struct ComponentResourceSet {
 
 impl ComponentResourceSet {
     /// Gets the version of the component slice.
-    pub fn version(&self) -> u64 { unsafe { (*self.version.get()) } }
+    pub fn version(&self) -> u64 { unsafe { *self.version.get() } }
 
     /// Gets a raw pointer to the start of the component slice.
     ///

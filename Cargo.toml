@@ -57,3 +57,7 @@ harness = false
 [[bench]]
 name = "transform"
 harness = false
+
+[[bench]]
+name = "insertion"
+harness = false

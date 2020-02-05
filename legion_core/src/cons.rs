@@ -121,6 +121,7 @@ mod tests {
 
     #[test]
     fn cons_macro() {
+        #![allow(clippy::unit_cmp)]
         assert_eq!(cons!(), ());
         assert_eq!(cons!(1), (1, ()));
         assert_eq!(cons!(1, 2, 3, 4), (1, (2, (3, (4, ())))));
@@ -146,6 +147,7 @@ mod tests {
 
     #[test]
     fn cons_flatten() {
+        #![allow(clippy::unit_cmp)]
         assert_eq!(().flatten(), ());
         assert_eq!((1, ()).flatten(), 1);
         assert_eq!(cons!(1, 2, 3, 4, 5).flatten(), (1, 2, 3, 4, 5));
