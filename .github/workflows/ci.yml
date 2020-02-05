@@ -29,6 +29,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --all
   
   check-features:
     name: Features
@@ -64,7 +65,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: test
-          args: ${{ matrix.features }}
+          args: --all ${{ matrix.features }}
 
   fmt:
     name: Rustfmt
@@ -96,4 +97,4 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
+          args: --all -- -D warnings
