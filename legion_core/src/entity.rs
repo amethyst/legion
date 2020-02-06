@@ -1,3 +1,7 @@
+use crate::index::ArchetypeIndex;
+use crate::index::ChunkIndex;
+use crate::index::ComponentIndex;
+use crate::index::SetIndex;
 use parking_lot::{Mutex, RwLock, RwLockWriteGuard};
 use std::fmt::Display;
 use std::num::Wrapping;
@@ -31,18 +35,18 @@ impl Display for Entity {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct EntityLocation {
-    archetype_index: usize,
-    set_index: usize,
-    chunk_index: usize,
-    component_index: usize,
+    archetype_index: ArchetypeIndex,
+    set_index: SetIndex,
+    chunk_index: ChunkIndex,
+    component_index: ComponentIndex,
 }
 
 impl EntityLocation {
     pub(crate) fn new(
-        archetype_index: usize,
-        set_index: usize,
-        chunk_index: usize,
-        component_index: usize,
+        archetype_index: ArchetypeIndex,
+        set_index: SetIndex,
+        chunk_index: ChunkIndex,
+        component_index: ComponentIndex,
     ) -> Self {
         EntityLocation {
             archetype_index,
@@ -52,13 +56,13 @@ impl EntityLocation {
         }
     }
 
-    pub fn archetype(&self) -> usize { self.archetype_index }
+    pub fn archetype(&self) -> ArchetypeIndex { self.archetype_index }
 
-    pub fn set(&self) -> usize { self.set_index }
+    pub fn set(&self) -> SetIndex { self.set_index }
 
-    pub fn chunk(&self) -> usize { self.chunk_index }
+    pub fn chunk(&self) -> ChunkIndex { self.chunk_index }
 
-    pub fn component(&self) -> usize { self.component_index }
+    pub fn component(&self) -> ComponentIndex { self.component_index }
 }
 
 pub(crate) struct Locations {
@@ -92,9 +96,14 @@ impl Locations {
 
         let block_opt = &mut self.blocks[block_index];
         let block = block_opt.get_or_insert_with(|| {
-            std::iter::repeat(EntityLocation::new(0, 0, 0, 0))
-                .take(BlockAllocator::BLOCK_SIZE)
-                .collect()
+            std::iter::repeat(EntityLocation::new(
+                ArchetypeIndex(0),
+                SetIndex(0),
+                ChunkIndex(0),
+                ComponentIndex(0),
+            ))
+            .take(BlockAllocator::BLOCK_SIZE)
+            .collect()
         });
 
         block[index] = location;

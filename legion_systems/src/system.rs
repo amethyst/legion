@@ -9,6 +9,7 @@ use legion_core::command::CommandBuffer;
 use legion_core::cons::{ConsAppend, ConsFlatten};
 use legion_core::entity::Entity;
 use legion_core::filter::EntityFilter;
+use legion_core::index::ArchetypeIndex;
 use legion_core::query::ReadOnly;
 use legion_core::query::{ChunkDataIter, ChunkEntityIter, ChunkViewIter, Query, Read, View, Write};
 use legion_core::storage::Tag;
@@ -559,7 +560,7 @@ macro_rules! impl_queryset_tuple {
 
                     $(
                         let storage = world.storage();
-                        $ty.filter.iter_archetype_indexes(storage).for_each(|id| { bitset.insert(id); });
+                        $ty.filter.iter_archetype_indexes(storage).for_each(|ArchetypeIndex(id)| { bitset.insert(id); });
                     )*
                 }
                 unsafe fn prepare(&mut self) -> Self::Queries {
@@ -585,9 +586,11 @@ where
     type Queries = SystemQuery<AV, AF>;
     fn filter_archetypes(&mut self, world: &World, bitset: &mut BitSet) {
         let storage = world.storage();
-        self.filter.iter_archetype_indexes(storage).for_each(|id| {
-            bitset.insert(id);
-        });
+        self.filter
+            .iter_archetype_indexes(storage)
+            .for_each(|ArchetypeIndex(id)| {
+                bitset.insert(id);
+            });
     }
     unsafe fn prepare(&mut self) -> Self::Queries { SystemQuery::<AV, AF>::new(self) }
 }
@@ -653,7 +656,7 @@ impl SubWorld {
         unsafe {
             if let Some(archetypes) = self.archetypes {
                 if let Some(location) = (*self.world).get_entity_location(entity) {
-                    return (*archetypes).contains(location.archetype());
+                    return (*archetypes).contains(*location.archetype());
                 }
             }
         }

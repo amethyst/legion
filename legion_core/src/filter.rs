@@ -1,3 +1,6 @@
+use crate::index::ArchetypeIndex;
+use crate::index::ChunkIndex;
+use crate::index::SetIndex;
 use crate::iterator::FissileZip;
 use crate::iterator::SliceVecIter;
 use crate::storage::ArchetypeData;
@@ -364,12 +367,12 @@ pub struct FilterArchIter<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> {
 }
 
 impl<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> Iterator for FilterArchIter<'a, 'b, F> {
-    type Item = usize;
+    type Item = ArchetypeIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((i, data)) = self.archetypes.next() {
             if self.filter.is_match(&data).is_pass() {
-                return Some(i);
+                return Some(ArchetypeIndex(i));
             }
         }
 
@@ -384,12 +387,12 @@ pub struct FilterChunkIter<'a, 'b, F: Filter<ChunksetFilterData<'a>>> {
 }
 
 impl<'a, 'b, F: Filter<ChunksetFilterData<'a>>> Iterator for FilterChunkIter<'a, 'b, F> {
-    type Item = usize;
+    type Item = SetIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((i, data)) = self.chunks.next() {
             if self.filter.is_match(&data).is_pass() {
-                return Some(i);
+                return Some(SetIndex(i));
             }
         }
 
@@ -414,14 +417,14 @@ pub struct FilterEntityIter<
 impl<'a, 'b, Arch: Filter<ArchetypeFilterData<'a>>, Chunk: Filter<ChunksetFilterData<'a>>> Iterator
     for FilterEntityIter<'a, 'b, Arch, Chunk>
 {
-    type Item = (ArchetypeId, usize);
+    type Item = (ArchetypeId, ChunkIndex);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if let Some((arch_id, ref mut chunks)) = self.chunks {
                 for (chunk_index, chunk_data) in chunks {
                     if self.chunk_filter.is_match(&chunk_data).is_pass() {
-                        return Some((arch_id, chunk_index));
+                        return Some((arch_id, ChunkIndex(chunk_index)));
                     }
                 }
             }

@@ -6,6 +6,7 @@ pub mod cons;
 pub mod entity;
 pub mod event;
 pub mod filter;
+pub mod index;
 pub mod iterator;
 pub mod query;
 pub mod storage;
