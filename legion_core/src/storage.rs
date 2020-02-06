@@ -724,11 +724,13 @@ impl ArchetypeData {
             if let Some(chunk_set) = set_match {
                 // if we found a match, move the chunks into the set
                 let target = &mut self.chunk_sets[chunk_set];
-                for chunk in set.drain(..) {
+                for mut chunk in set.drain(..) {
+                    chunk.mark_modified();
                     target.push(chunk);
                 }
             } else {
                 // if we did not find a match, clone the tags and move the set
+                set.mark_modified();
                 self.push(set, |self_tags| {
                     for &(type_id, ref other_tags) in other_tags.0.iter() {
                         unsafe {
@@ -1018,6 +1020,12 @@ impl Chunkset {
         }
     }
 
+    fn mark_modified(&mut self) {
+        for chunk in self.chunks.iter_mut() {
+            chunk.mark_modified();
+        }
+    }
+
     pub(crate) fn drain<R: RangeBounds<usize>>(
         &mut self,
         range: R,
@@ -1273,6 +1281,17 @@ impl ComponentStorage {
         unsafe { &*self.component_info.get() }.get(component_type)
     }
 
+    /// Increments all component versions, forcing the chunk to be seen as modified for all queries.
+    fn mark_modified(&mut self) {
+        unsafe {
+            let components = &mut *self.component_info.get();
+            for (_, component) in components.iter_mut() {
+                // touch each slice mutably to increment its version
+                let _ = component.data_raw_mut();
+            }
+        }
+    }
+
     /// Removes an entity from the chunk by swapping it with the last entry.
     ///
     /// Returns the ID of the entity which was swapped into the removed entity's position.
@@ -1327,8 +1346,8 @@ impl ComponentStorage {
         for (comp_type, accessor) in self_components.iter_mut() {
             if let Some(target_accessor) = target_components.get_mut(*comp_type) {
                 // move the component into the target chunk
-                let (ptr, element_size, _) = accessor.data_raw();
                 unsafe {
+                    let (ptr, element_size, _) = accessor.data_raw();
                     let component = ptr.add(element_size * *index);
                     target_accessor
                         .writer()
@@ -1498,12 +1517,10 @@ impl ComponentResourceSet {
     ///
     /// # Safety
     ///
-    /// Access to the component data within the slice is runtime borrow checked.
-    /// This call will panic if borrowing rules are broken.
-    pub fn data_raw(&self) -> (Ref<*mut u8>, usize, usize) {
-        (self.ptr.get(), self.element_size, unsafe {
-            *self.count.get()
-        })
+    /// Access to the component data within the slice is runtime borrow checked in debug builds.
+    /// This call will panic if borrowing rules are broken in debug, and is undefined behavior in release.
+    pub unsafe fn data_raw(&self) -> (Ref<*mut u8>, usize, usize) {
+        (self.ptr.get(), self.element_size, *self.count.get())
     }
 
     /// Gets a raw pointer to the start of the component slice.
@@ -1512,21 +1529,19 @@ impl ComponentResourceSet {
     ///
     /// # Safety
     ///
-    /// Access to the component data within the slice is runtime borrow checked.
-    /// This call will panic if borrowing rules are broken.
+    /// Access to the component data within the slice is runtime borrow checked in debug builds.
+    /// This call will panic if borrowing rules are broken in debug, and is undefined behavior in release.
     ///
     /// # Panics
     ///
     /// Will panic when an internal u64 counter overflows.
     /// It will happen in 50000 years if you do 10000 mutations a millisecond.
-    pub fn data_raw_mut(&self) -> (RefMut<*mut u8>, usize, usize) {
+    pub unsafe fn data_raw_mut(&self) -> (RefMut<*mut u8>, usize, usize) {
         // this version increment is not thread safe
         // - but the pointer `get_mut` ensures exclusive access at runtime
         let ptr = self.ptr.get_mut();
-        unsafe {
-            *self.version.get() = next_version();
-        };
-        (ptr, self.element_size, unsafe { *self.count.get() })
+        *self.version.get() = next_version();
+        (ptr, self.element_size, *self.count.get())
     }
 
     /// Gets a shared reference to the slice of components.
