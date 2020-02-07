@@ -422,3 +422,24 @@ fn mutate_change_tag() {
 
     assert_eq!(2, query_model_5.iter(&world).count());
 }
+
+// This test repeatedly creates a world with new entities and drops it, reproducing
+// https://github.com/TomGillen/legion/issues/92
+#[test]
+fn lots_of_deletes() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+
+    for _ in 0..10000 {
+        let shared = (Model(5),);
+        let components = vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ];
+
+        let mut world = universe.create_world();
+        world.insert(shared, components).to_vec();
+    }
+}
