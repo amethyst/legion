@@ -301,7 +301,19 @@ impl EntityAllocator {
 impl Drop for EntityAllocator {
     fn drop(&mut self) {
         for block in self.blocks.write().blocks.drain(..) {
-            if let Some(block) = block {
+            if let Some(mut block) = block {
+                // If any entity in the block is in an allocated state, clear
+                // and repopulate the free list. This forces all entities into an
+                // unallocated state. Bump versions of all entity indexes to
+                // ensure that we don't reuse the same entity.
+                if block.free.len() < block.versions.len() {
+                    block.free.clear();
+                    for (i, version) in block.versions.iter_mut().enumerate() {
+                        *version += Wrapping(1);
+                        block.free.push(i as u32 + block.start);
+                    }
+                }
+
                 self.allocator.lock().free(block);
             }
         }
