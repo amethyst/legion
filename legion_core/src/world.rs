@@ -925,7 +925,7 @@ pub trait ComponentSource: ComponentLayout {
     /// Determines if this component source has any more entity data to write.
     fn is_empty(&mut self) -> bool;
 
-    /// Retreives the nubmer of entities in this component source.
+    /// Retrieves the nubmer of entities in this component source.
     fn len(&self) -> usize;
 
     /// Writes as many components as possible into a chunk.

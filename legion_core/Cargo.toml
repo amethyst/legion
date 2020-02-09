@@ -14,7 +14,6 @@ edition = "2018"
 travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
-default = ["par-iter", "par-schedule", "ffi"]
 par-iter = ["rayon"]
 par-schedule = ["rayon", "crossbeam-queue"]
 ffi = []
