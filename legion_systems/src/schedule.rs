@@ -483,7 +483,7 @@ pub enum Step {
     /// A thread local function.
     ThreadLocalFn(Box<dyn FnMut(&mut World, &mut Resources)>),
     /// A thread local system
-    ThreadLocalSystem(Box<dyn Runnable>)
+    ThreadLocalSystem(Box<dyn Runnable>),
 }
 
 /// A schedule of systems for execution.
@@ -529,10 +529,10 @@ impl Schedule {
                     waiting_flush
                         .drain(..)
                         .for_each(|e| e.flush_command_buffers(world));
-                    thread_local_systems
-                        .drain(..)
-                        .for_each(|system| system.command_buffer_mut(world.id()).unwrap().write(world));
-                },
+                    thread_local_systems.drain(..).for_each(|system| {
+                        system.command_buffer_mut(world.id()).unwrap().write(world)
+                    });
+                }
                 Step::ThreadLocalFn(function) => function(world, resources),
                 Step::ThreadLocalSystem(system) => {
                     system.run(world, resources);
@@ -652,14 +652,12 @@ mod tests {
 
             let system_one = SystemBuilder::new("one").build_thread_local(move |cmd, _, _, _| {
                 let mut entity = entity.lock().unwrap();
-                *entity = Some(cmd.insert((), vec![(TestComp(0.0, 0.0, 0.0), )])[0]);
+                *entity = Some(cmd.insert((), vec![(TestComp(0.0, 0.0, 0.0),)])[0]);
 
                 println!("asddsadsd");
             });
 
-            let mut schedule = Schedule::builder()
-                .add_thread_local(system_one)
-                .build();
+            let mut schedule = Schedule::builder().add_thread_local(system_one).build();
 
             schedule.execute(&mut world, &mut resources);
         }
