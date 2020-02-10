@@ -118,6 +118,7 @@ unsafe impl Send for SystemBox {}
 unsafe impl Sync for SystemBox {}
 
 impl SystemBox {
+    #[cfg(feature = "par-schedule")]
     unsafe fn get(&self) -> &dyn Schedulable { std::ops::Deref::deref(&*self.0.get()) }
 
     #[allow(clippy::mut_from_ref)]
@@ -134,7 +135,10 @@ impl Executor {
     #[cfg(not(feature = "par-schedule"))]
     pub fn new(systems: Vec<Box<dyn Schedulable>>) -> Self {
         Self {
-            systems: UnsafeCell::new(systems),
+            systems: systems
+                .into_iter()
+                .map(|s| SystemBox(UnsafeCell::new(s)))
+                .collect(),
         }
     }
 
@@ -295,7 +299,7 @@ impl Executor {
     /// Only enabled with par-schedule is disabled
     #[cfg(not(feature = "par-schedule"))]
     pub fn run_systems(&mut self, world: &mut World, resources: &mut Resources) {
-        systems.iter_mut().for_each(|system| {
+        self.systems.iter_mut().for_each(|system| {
             let system = unsafe { system.get_mut() };
             system.run(world, resources);
         });
