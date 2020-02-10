@@ -38,6 +38,7 @@ jobs:
     strategy:
       matrix:
         features:
+          - --manifest-path=example/Cargo.toml
           - --all-features --release
           - --no-default-features --release
           - --all-features

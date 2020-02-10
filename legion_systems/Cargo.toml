@@ -14,11 +14,11 @@ edition = "2018"
 travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
-par-iter = ["rayon"]
+par-iter = ["rayon", "legion-core/par-iter"]
 par-schedule = ["rayon", "crossbeam-queue"]
 
 [dependencies]
-legion-core = { path = "../legion_core", version = "0.2.1" }
+legion-core = { path = "../legion_core", version = "0.2.1", default-features = false }
 
 downcast-rs = "1.0"
 itertools = "0.8"

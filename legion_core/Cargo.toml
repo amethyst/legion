@@ -15,7 +15,6 @@ travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
 par-iter = ["rayon"]
-par-schedule = ["rayon", "crossbeam-queue"]
 ffi = []
 serialize = ["serde"]
 
