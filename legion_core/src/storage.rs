@@ -751,7 +751,7 @@ impl ArchetypeData {
         self.chunk_sets.iter().flat_map(move |set| {
             set.chunks
                 .iter()
-                .flat_map(move |chunk| chunk.entities().iter().map(|e| *e))
+                .flat_map(move |chunk| chunk.entities().iter().copied())
         })
     }
 
