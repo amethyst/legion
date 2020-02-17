@@ -746,7 +746,26 @@ impl ArchetypeData {
         self.tags.validate(self.chunk_sets.len());
     }
 
-    pub(crate) fn enumerate_entities<'a>(
+    /// Iterate all entities in existence by iterating across archetypes, chunk sets, and chunks
+    pub(crate) fn iter_entities<'a>(&'a self) -> impl Iterator<Item = Entity> + 'a {
+        self.chunk_sets
+            .iter()
+            .enumerate()
+            .flat_map(move |(_set_index, set)| {
+                set.chunks
+                    .iter()
+                    .enumerate()
+                    .flat_map(move |(_chunk_index, chunk)| {
+                        chunk
+                            .entities()
+                            .iter()
+                            .enumerate()
+                            .map(move |(_entity_index, entity)| *entity)
+                    })
+            })
+    }
+
+    pub(crate) fn iter_entity_locations<'a>(
         &'a self,
         archetype_index: ArchetypeIndex,
     ) -> impl Iterator<Item = (Entity, EntityLocation)> + 'a {
