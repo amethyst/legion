@@ -912,7 +912,7 @@ impl ArchetypeData {
         dst_archetype_index: usize,
         dst_entity_allocator: &crate::entity::EntityAllocator,
         clone_impl: &C,
-        replace_mapping: Option<Entity>
+        replace_mapping: Option<Entity>,
     ) -> Entity {
         // Iterate all the chunk sets within the source archetype
         let src_tags = &src_archetype.tags;
