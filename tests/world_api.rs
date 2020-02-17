@@ -111,6 +111,26 @@ fn get_shared_wrong_type() {
 }
 
 #[test]
+fn get_all_components() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5));
+
+    world.insert(shared, vec![(Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3))]);
+
+    world.insert(shared, vec![(Pos(1., 2., 3.),)]);
+
+    assert_eq!(2, world.get_all_components::<Pos>().len());
+    assert_eq!(1, world.get_all_components::<Rot>().len());
+
+    assert_eq!(2, world.get_all_components_mut::<Pos>().len());
+    assert_eq!(1, world.get_all_components_mut::<Rot>().len());
+}
+
+#[test]
 fn delete() {
     let _ = tracing_subscriber::fmt::try_init();
 

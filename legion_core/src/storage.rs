@@ -1214,6 +1214,28 @@ impl ArchetypeData {
     ) -> &mut Chunkset {
         self.chunksets_mut().get_unchecked_mut(index)
     }
+
+    pub(crate) fn iter_data_slice<'a, T: Component>(
+        &'a self,
+    ) -> impl Iterator<Item = RefMap<&[T]>> + 'a {
+        self.chunk_sets.iter().flat_map(move |set| {
+            set.chunks.iter().map(move |chunk| {
+                let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
+                unsafe { c.data_slice::<T>() }
+            })
+        })
+    }
+
+    pub(crate) fn iter_data_slice_mut<'a, T: Component>(
+        &'a self,
+    ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
+        self.chunk_sets.iter().flat_map(move |set| {
+            set.chunks.iter().map(move |chunk| {
+                let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
+                unsafe { c.data_slice_mut::<T>() }
+            })
+        })
+    }
 }
 
 fn align_up(addr: usize, align: usize) -> usize { (addr + (align - 1)) & align.wrapping_neg() }
