@@ -42,6 +42,7 @@ uuid = { version = "0.8", features = ["v4"] }
 tracing = "0.1"
 itertools = "0.8"
 rayon = "1.2"
+crossbeam-channel = "0.4.0"
 
 [[bench]]
 name = "benchmarks"
