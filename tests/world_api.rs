@@ -1,4 +1,5 @@
 use legion::prelude::*;
+use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Pos(f32, f32, f32);
@@ -442,4 +443,33 @@ fn lots_of_deletes() {
         let mut world = universe.create_world();
         world.insert(shared, components).to_vec();
     }
+}
+
+#[test]
+fn iter_entities() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    let shared = (Model(5),);
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    // Insert the data and store resulting entities in a HashSet
+    let mut entities = HashSet::new();
+    for entity in world.insert(shared, components) {
+        entities.insert(*entity);
+    }
+
+    // Verify that all entities in iter_entities() are included
+    for entity in world.iter_entities() {
+        assert!(entities.remove(&entity));
+    }
+
+    // Verify that no extra entities are included
+    assert!(entities.is_empty());
 }
