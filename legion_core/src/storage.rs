@@ -19,7 +19,6 @@ use crate::world::TagSet;
 use crate::world::WorldId;
 use derivative::Derivative;
 use fxhash::FxHashMap;
-use smallvec::Drain;
 use smallvec::SmallVec;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
@@ -30,8 +29,6 @@ use std::ops::Deref;
 use std::ops::DerefMut;
 use std::ops::RangeBounds;
 use std::ptr::NonNull;
-use std::slice::Iter;
-use std::slice::IterMut;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -1205,11 +1202,19 @@ impl Components {
             .map(move |i| unsafe { &mut self.0.get_unchecked_mut(i).1 })
     }
 
-    fn iter(&mut self) -> Iter<(ComponentTypeId, ComponentResourceSet)> { self.0.iter() }
+    fn iter(&mut self) -> impl Iterator<Item = &(ComponentTypeId, ComponentResourceSet)> + '_ {
+        self.0.iter()
+    }
 
-    fn iter_mut(&mut self) -> IterMut<(ComponentTypeId, ComponentResourceSet)> { self.0.iter_mut() }
+    fn iter_mut(
+        &mut self,
+    ) -> impl Iterator<Item = &mut (ComponentTypeId, ComponentResourceSet)> + '_ {
+        self.0.iter_mut()
+    }
 
-    fn drain(&mut self) -> Drain<(ComponentTypeId, ComponentResourceSet)> { self.0.drain() }
+    fn drain(&mut self) -> impl Iterator<Item = (ComponentTypeId, ComponentResourceSet)> + '_ {
+        self.0.drain(..)
+    }
 }
 
 /// Stores a chunk of entities and their component data of a specific data layout.
