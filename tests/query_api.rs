@@ -587,3 +587,58 @@ fn query_iter_chunks_tag() {
         }
     }
 }
+
+#[cfg(all(target_arch = "wasm32", not(features = "par-iter")))]
+mod wasm {
+    use wasm_bindgen_test::*;
+
+    #[wasm_bindgen_test]
+    fn uery_iter_chunks_tag() { super::query_iter_chunks_tag() }
+
+    #[wasm_bindgen_test]
+    fn query_read_entity_data() { super::query_read_entity_data() }
+
+    #[wasm_bindgen_test]
+    fn query_try_read_entity_data() { super::query_try_read_entity_data() }
+
+    #[wasm_bindgen_test]
+    fn query_try_write_entity_data() { super::query_try_write_entity_data() }
+
+    #[wasm_bindgen_test]
+    fn query_cached_read_entity_data() { super::query_cached_read_entity_data() }
+
+    #[cfg(feature = "par-iter")]
+    #[wasm_bindgen_test]
+    fn query_read_entity_data_par() { super::query_read_entity_data_par() }
+
+    #[wasm_bindgen_test]
+    fn query_read_entity_data_tuple() { super::query_read_entity_data_tuple() }
+
+    #[wasm_bindgen_test]
+    fn query_write_entity_data() { super::query_write_entity_data() }
+
+    #[wasm_bindgen_test]
+    fn query_write_entity_data_tuple() { super::query_write_entity_data_tuple() }
+
+    #[wasm_bindgen_test]
+    fn query_mixed_entity_data_tuple() { super::query_mixed_entity_data_tuple() }
+
+    #[cfg(feature = "par-iter")]
+    #[wasm_bindgen_test]
+    fn query_partial_match() { super::query_partial_match() }
+
+    #[wasm_bindgen_test]
+    fn query_read_shared_data() { super::query_read_shared_data() }
+
+    #[wasm_bindgen_test]
+    fn query_on_changed_first() { super::query_on_changed_first() }
+
+    #[wasm_bindgen_test]
+    fn query_on_changed_no_changes() { super::query_on_changed_no_changes() }
+
+    #[wasm_bindgen_test]
+    fn query_on_changed_self_changes() { super::query_on_changed_self_changes() }
+
+    #[wasm_bindgen_test]
+    fn query_try_with_changed_filter() { super::query_try_with_changed_filter() }
+}

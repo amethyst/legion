@@ -443,3 +443,56 @@ fn lots_of_deletes() {
         world.insert(shared, components).to_vec();
     }
 }
+
+#[cfg(all(target_arch = "wasm32", not(features = "par-iter")))]
+mod wasm {
+    use wasm_bindgen_test::*;
+
+    #[wasm_bindgen_test]
+    fn insert() { super::insert() }
+
+    #[wasm_bindgen_test]
+    fn get_component() { super::get_component() }
+
+    #[wasm_bindgen_test]
+    fn get_component_wrong_type() { super::get_component_wrong_type() }
+
+    #[wasm_bindgen_test]
+    fn get_shared() { super::get_shared() }
+
+    #[wasm_bindgen_test]
+    fn get_shared_wrong_type() { super::get_shared_wrong_type() }
+
+    #[wasm_bindgen_test]
+    fn delete() { super::delete() }
+
+    #[wasm_bindgen_test]
+    fn delete_last() { super::delete_last() }
+
+    #[wasm_bindgen_test]
+    fn delete_first() { super::delete_first() }
+
+    #[wasm_bindgen_test]
+    fn merge() { super::merge() }
+
+    #[wasm_bindgen_test]
+    fn mutate_add_component() { super::mutate_add_component() }
+
+    #[wasm_bindgen_test]
+    fn mutate_remove_component() { super::mutate_remove_component() }
+
+    #[wasm_bindgen_test]
+    fn mutate_add_tag() { super::mutate_add_tag() }
+
+    #[wasm_bindgen_test]
+    fn mutate_remove_tag() { super::mutate_remove_tag() }
+
+    #[wasm_bindgen_test]
+    fn mutate_change_tag_minimum_test() { super::mutate_change_tag_minimum_test() }
+
+    #[wasm_bindgen_test]
+    fn mutate_change_tag() { super::mutate_change_tag() }
+
+    #[wasm_bindgen_test]
+    fn lots_of_deletes() { super::lots_of_deletes() }
+}

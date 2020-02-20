@@ -548,7 +548,7 @@ impl Drop for CommandBuffer {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::prelude::*;
 

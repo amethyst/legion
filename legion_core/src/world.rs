@@ -1458,7 +1458,7 @@ impl<'a, 'b> Filter<ChunksetFilterData<'b>> for DynamicTagLayout<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
 
     #[derive(Clone, Copy, Debug, PartialEq)]

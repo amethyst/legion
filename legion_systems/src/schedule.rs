@@ -550,7 +550,7 @@ impl From<Vec<Step>> for Schedule {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::prelude::*;
     use itertools::sorted;
