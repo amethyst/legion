@@ -587,3 +587,22 @@ fn query_iter_chunks_tag() {
         }
     }
 }
+
+#[test]
+fn query_iter_tag() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    world.insert((Static, Model(0)), vec![(0u32,)]);
+    world.insert((Static, Model(1)), vec![(1u32,)]);
+    world.insert((Static, Model(2)), vec![(2u32,)]);
+
+    let query = <(Tagged<Static>, Tagged<Model>, Read<u32>)>::query();
+
+    for (s, m, c) in query.iter(&world) {
+        assert_eq!(&Static, s);
+        assert_eq!(&Model(*c), m);
+    }
+}
