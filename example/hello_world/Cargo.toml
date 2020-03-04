@@ -6,4 +6,4 @@ edition = "2018"
 
 [dependencies]
 legion = { path = "../.." }
-tracing-subscriber = "0.1.6"
+tracing-subscriber = "0.2"
