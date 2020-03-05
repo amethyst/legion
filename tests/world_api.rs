@@ -137,6 +137,45 @@ fn delete() {
 }
 
 #[test]
+fn delete_all() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5));
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let mut entities: Vec<Entity> = Vec::new();
+    for e in world.insert(shared, components) {
+        entities.push(*e);
+    }
+
+    // Check that the entity allocator knows about the entities
+    for e in entities.iter() {
+        assert_eq!(true, world.is_alive(*e));
+    }
+
+    // Check that the entities are in storage
+    let query = <(Read<Pos>, Read<Rot>)>::query();
+    assert_eq!(2, query.iter(&world).count());
+
+    world.delete_all();
+
+    // Check that the entity allocator no longer knows about the entities
+    for e in entities.iter() {
+        assert_eq!(false, world.is_alive(*e));
+    }
+
+    // Check that the entities are removed from storage
+    let query = <(Read<Pos>, Read<Rot>)>::query();
+    assert_eq!(0, query.iter(&world).count());
+}
+
+#[test]
 fn delete_last() {
     let _ = tracing_subscriber::fmt::try_init();
 

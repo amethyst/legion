@@ -301,6 +301,15 @@ impl World {
         }
     }
 
+    /// Delete all entity data. This leaves subscriptions and the command buffer intact.
+    pub fn delete_all(&mut self) {
+        for archetype in self.storage_mut().archetypes_mut() {
+            archetype.delete_all();
+        }
+
+        self.entity_allocator.delete_all_entities();
+    }
+
     fn find_chunk_with_delta(
         &mut self,
         source_location: EntityLocation,

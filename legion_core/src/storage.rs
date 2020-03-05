@@ -660,6 +660,13 @@ impl ArchetypeData {
         }
     }
 
+    pub(crate) fn delete_all(&mut self) {
+        for set in &mut self.chunk_sets {
+            // Clearing the chunk will Drop all the data
+            set.chunks.clear();
+        }
+    }
+
     pub(crate) fn subscribe(&mut self, subscriber: Subscriber) {
         self.subscribers.push(subscriber.clone());
 
