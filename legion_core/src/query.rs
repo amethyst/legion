@@ -54,6 +54,7 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
         archetype: &'a ArchetypeData,
         chunk: &'a ComponentStorage,
         chunk_index: ChunkIndex,
+        set_index: SetIndex,
     ) -> Self::Iter;
 
     /// Validates that the view does not break any component borrowing rules.
@@ -128,7 +129,12 @@ impl<'a, T: Component> DefaultFilter for Read<T> {
 impl<'a, T: Component> View<'a> for Read<T> {
     type Iter = RefIter<'a, T, Iter<'a, T>>;
 
-    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: ChunkIndex) -> Self::Iter {
+    fn fetch(
+        _: &'a ArchetypeData,
+        chunk: &'a ComponentStorage,
+        _: ChunkIndex,
+        _: SetIndex,
+    ) -> Self::Iter {
         let (slice_borrow, slice) = unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())
@@ -180,7 +186,12 @@ impl<'a, T: Component> DefaultFilter for TryRead<T> {
 impl<'a, T: Component> View<'a> for TryRead<T> {
     type Iter = TryRefIter<'a, T, Iter<'a, T>>;
 
-    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: ChunkIndex) -> Self::Iter {
+    fn fetch(
+        _: &'a ArchetypeData,
+        chunk: &'a ComponentStorage,
+        _: ChunkIndex,
+        _: SetIndex,
+    ) -> Self::Iter {
         unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())
@@ -227,7 +238,12 @@ impl<'a, T: Component> View<'a> for Write<T> {
     type Iter = RefIterMut<'a, T, IterMut<'a, T>>;
 
     #[inline]
-    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: ChunkIndex) -> Self::Iter {
+    fn fetch(
+        _: &'a ArchetypeData,
+        chunk: &'a ComponentStorage,
+        _: ChunkIndex,
+        _: SetIndex,
+    ) -> Self::Iter {
         let (slice_borrow, slice) = unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())
@@ -282,7 +298,12 @@ impl<'a, T: Component> DefaultFilter for TryWrite<T> {
 impl<'a, T: Component> View<'a> for TryWrite<T> {
     type Iter = TryRefIterMut<'a, T, IterMut<'a, T>>;
 
-    fn fetch(_: &'a ArchetypeData, chunk: &'a ComponentStorage, _: ChunkIndex) -> Self::Iter {
+    fn fetch(
+        _: &'a ArchetypeData,
+        chunk: &'a ComponentStorage,
+        _: ChunkIndex,
+        _: SetIndex,
+    ) -> Self::Iter {
         unsafe {
             chunk
                 .components(ComponentTypeId::of::<T>())
@@ -337,7 +358,8 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
     fn fetch(
         archetype: &'a ArchetypeData,
         chunk: &'a ComponentStorage,
-        ChunkIndex(chunk_index): ChunkIndex,
+        _: ChunkIndex,
+        SetIndex(set_index): SetIndex,
     ) -> Self::Iter {
         let data = unsafe {
             archetype
@@ -350,7 +372,7 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
                     )
                 })
                 .data_slice::<T>()
-                .get_unchecked(chunk_index)
+                .get_unchecked(set_index)
         };
         std::iter::repeat(data).take(chunk.len())
     }
@@ -409,8 +431,9 @@ macro_rules! impl_view_tuple {
                 archetype: &'a ArchetypeData,
                 chunk: &'a ComponentStorage,
                 chunk_index: ChunkIndex,
+                set_index: SetIndex,
             ) -> Self::Iter {
-                crate::zip::multizip(($( $ty::fetch(archetype.clone(), chunk.clone(), chunk_index), )*))
+                crate::zip::multizip(($( $ty::fetch(archetype.clone(), chunk.clone(), chunk_index, set_index), )*))
             }
 
             fn validate() -> bool {
@@ -493,7 +516,12 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
     /// Get an iterator of all data contained within the chunk.
     #[inline]
     pub fn iter(&mut self) -> <V as View<'a>>::Iter {
-        V::fetch(self.archetype, self.components, self.chunk_index)
+        V::fetch(
+            self.archetype,
+            self.components,
+            self.chunk_index,
+            self.set_index,
+        )
     }
 
     /// Get an iterator of all data and entity IDs contained within the chunk.
@@ -501,7 +529,12 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
     pub fn iter_entities_mut(&mut self) -> ZipEntities<'a, V> {
         ZipEntities {
             entities: self.entities(),
-            data: V::fetch(self.archetype, self.components, self.chunk_index),
+            data: V::fetch(
+                self.archetype,
+                self.components,
+                self.chunk_index,
+                self.set_index,
+            ),
             index: 0,
             view: PhantomData,
         }

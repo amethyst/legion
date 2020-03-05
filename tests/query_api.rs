@@ -588,57 +588,113 @@ fn query_iter_chunks_tag() {
     }
 }
 
+#[test]
+fn query_iter_tag() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    world.insert((Static, Model(0)), vec![(0u32,)]);
+    world.insert((Static, Model(1)), vec![(1u32,)]);
+    world.insert((Static, Model(2)), vec![(2u32,)]);
+
+    let query = <(Tagged<Static>, Tagged<Model>, Read<u32>)>::query();
+
+    for (s, m, c) in query.iter(&world) {
+        assert_eq!(&Static, s);
+        assert_eq!(&Model(*c), m);
+    }
+}
+
 #[cfg(all(target_arch = "wasm32", not(features = "par-iter")))]
 mod wasm {
     use wasm_bindgen_test::*;
 
     #[wasm_bindgen_test]
-    fn uery_iter_chunks_tag() { super::query_iter_chunks_tag() }
+    fn uery_iter_chunks_tag() {
+        super::query_iter_chunks_tag()
+    }
 
     #[wasm_bindgen_test]
-    fn query_read_entity_data() { super::query_read_entity_data() }
+    fn query_read_entity_data() {
+        super::query_read_entity_data()
+    }
 
     #[wasm_bindgen_test]
-    fn query_try_read_entity_data() { super::query_try_read_entity_data() }
+    fn query_try_read_entity_data() {
+        super::query_try_read_entity_data()
+    }
 
     #[wasm_bindgen_test]
-    fn query_try_write_entity_data() { super::query_try_write_entity_data() }
+    fn query_try_write_entity_data() {
+        super::query_try_write_entity_data()
+    }
 
     #[wasm_bindgen_test]
-    fn query_cached_read_entity_data() { super::query_cached_read_entity_data() }
-
-    #[cfg(feature = "par-iter")]
-    #[wasm_bindgen_test]
-    fn query_read_entity_data_par() { super::query_read_entity_data_par() }
-
-    #[wasm_bindgen_test]
-    fn query_read_entity_data_tuple() { super::query_read_entity_data_tuple() }
-
-    #[wasm_bindgen_test]
-    fn query_write_entity_data() { super::query_write_entity_data() }
-
-    #[wasm_bindgen_test]
-    fn query_write_entity_data_tuple() { super::query_write_entity_data_tuple() }
-
-    #[wasm_bindgen_test]
-    fn query_mixed_entity_data_tuple() { super::query_mixed_entity_data_tuple() }
+    fn query_cached_read_entity_data() {
+        super::query_cached_read_entity_data()
+    }
 
     #[cfg(feature = "par-iter")]
     #[wasm_bindgen_test]
-    fn query_partial_match() { super::query_partial_match() }
+    fn query_read_entity_data_par() {
+        super::query_read_entity_data_par()
+    }
 
     #[wasm_bindgen_test]
-    fn query_read_shared_data() { super::query_read_shared_data() }
+    fn query_read_entity_data_tuple() {
+        super::query_read_entity_data_tuple()
+    }
 
     #[wasm_bindgen_test]
-    fn query_on_changed_first() { super::query_on_changed_first() }
+    fn query_write_entity_data() {
+        super::query_write_entity_data()
+    }
 
     #[wasm_bindgen_test]
-    fn query_on_changed_no_changes() { super::query_on_changed_no_changes() }
+    fn query_write_entity_data_tuple() {
+        super::query_write_entity_data_tuple()
+    }
 
     #[wasm_bindgen_test]
-    fn query_on_changed_self_changes() { super::query_on_changed_self_changes() }
+    fn query_mixed_entity_data_tuple() {
+        super::query_mixed_entity_data_tuple()
+    }
+
+    #[cfg(feature = "par-iter")]
+    #[wasm_bindgen_test]
+    fn query_partial_match() {
+        super::query_partial_match()
+    }
 
     #[wasm_bindgen_test]
-    fn query_try_with_changed_filter() { super::query_try_with_changed_filter() }
+    fn query_read_shared_data() {
+        super::query_read_shared_data()
+    }
+
+    #[wasm_bindgen_test]
+    fn query_on_changed_first() {
+        super::query_on_changed_first()
+    }
+
+    #[wasm_bindgen_test]
+    fn query_on_changed_no_changes() {
+        super::query_on_changed_no_changes()
+    }
+
+    #[wasm_bindgen_test]
+    fn query_on_changed_self_changes() {
+        super::query_on_changed_self_changes()
+    }
+
+    #[wasm_bindgen_test]
+    fn query_try_with_changed_filter() {
+        super::query_try_with_changed_filter()
+    }
+
+    #[wasm_bindgen_test]
+    fn query_iter_tag() {
+        super::query_iter_tag()
+    }
 }

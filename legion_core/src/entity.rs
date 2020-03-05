@@ -292,14 +292,7 @@ impl EntityAllocator {
             .unwrap_or(false)
     }
 
-    pub(crate) fn merge(&self, other: EntityAllocator) {
-        assert!(Arc::ptr_eq(&self.allocator, &other.allocator));
-        self.blocks.write().append(&mut *other.blocks.write());
-    }
-}
-
-impl Drop for EntityAllocator {
-    fn drop(&mut self) {
+    pub(crate) fn delete_all_entities(&self) {
         for block in self.blocks.write().blocks.drain(..) {
             if let Some(mut block) = block {
                 // If any entity in the block is in an allocated state, clear
@@ -318,6 +311,15 @@ impl Drop for EntityAllocator {
             }
         }
     }
+
+    pub(crate) fn merge(&self, other: EntityAllocator) {
+        assert!(Arc::ptr_eq(&self.allocator, &other.allocator));
+        self.blocks.write().append(&mut *other.blocks.write());
+    }
+}
+
+impl Drop for EntityAllocator {
+    fn drop(&mut self) { self.delete_all_entities(); }
 }
 
 pub struct CreateEntityIter<'a> {

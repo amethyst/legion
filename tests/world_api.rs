@@ -1,4 +1,5 @@
 use legion::prelude::*;
+use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Pos(f32, f32, f32);
@@ -133,6 +134,45 @@ fn delete() {
         world.delete(*e);
         assert_eq!(false, world.is_alive(*e));
     }
+}
+
+#[test]
+fn delete_all() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    let shared = (Static, Model(5));
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    let mut entities: Vec<Entity> = Vec::new();
+    for e in world.insert(shared, components) {
+        entities.push(*e);
+    }
+
+    // Check that the entity allocator knows about the entities
+    for e in entities.iter() {
+        assert_eq!(true, world.is_alive(*e));
+    }
+
+    // Check that the entities are in storage
+    let query = <(Read<Pos>, Read<Rot>)>::query();
+    assert_eq!(2, query.iter(&world).count());
+
+    world.delete_all();
+
+    // Check that the entity allocator no longer knows about the entities
+    for e in entities.iter() {
+        assert_eq!(false, world.is_alive(*e));
+    }
+
+    // Check that the entities are removed from storage
+    let query = <(Read<Pos>, Read<Rot>)>::query();
+    assert_eq!(0, query.iter(&world).count());
 }
 
 #[test]
@@ -379,6 +419,42 @@ fn mutate_change_tag_minimum_test() {
 }
 
 #[test]
+fn delete_entities_on_drop() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    let (tx, rx) = crossbeam_channel::unbounded::<legion::event::Event>();
+
+    let shared = (Model(5),);
+    let components = vec![(Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3))];
+
+    // Insert the data and store resulting entities in a HashSet
+    let mut entities = HashSet::new();
+    for entity in world.insert(shared, components) {
+        entities.insert(*entity);
+    }
+
+    world.subscribe(tx, legion::filter::filter_fns::any());
+
+    //ManuallyDrop::drop(&mut world);
+    std::mem::drop(world);
+
+    for e in rx.try_recv() {
+        match e {
+            legion::event::Event::EntityRemoved(entity, _chunk_id) => {
+                assert!(entities.remove(&entity));
+            }
+            _ => {}
+        }
+    }
+
+    // Verify that no extra entities are included
+    assert!(entities.is_empty());
+}
+
+#[test]
 #[allow(clippy::suspicious_map)]
 fn mutate_change_tag() {
     let _ = tracing_subscriber::fmt::try_init();
@@ -444,55 +520,121 @@ fn lots_of_deletes() {
     }
 }
 
+#[test]
+fn iter_entities() {
+    let _ = tracing_subscriber::fmt::try_init();
+
+    let universe = Universe::new();
+    let mut world = universe.create_world();
+
+    let shared = (Model(5),);
+    let components = vec![
+        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+    ];
+
+    // Insert the data and store resulting entities in a HashSet
+    let mut entities = HashSet::new();
+    for entity in world.insert(shared, components) {
+        entities.insert(*entity);
+    }
+
+    // Verify that all entities in iter_entities() are included
+    for entity in world.iter_entities() {
+        assert!(entities.remove(&entity));
+    }
+
+    // Verify that no extra entities are included
+    assert!(entities.is_empty());
+}
+
 #[cfg(all(target_arch = "wasm32", not(features = "par-iter")))]
 mod wasm {
     use wasm_bindgen_test::*;
 
     #[wasm_bindgen_test]
-    fn insert() { super::insert() }
+    fn insert() {
+        super::insert()
+    }
 
     #[wasm_bindgen_test]
-    fn get_component() { super::get_component() }
+    fn get_component() {
+        super::get_component()
+    }
 
     #[wasm_bindgen_test]
-    fn get_component_wrong_type() { super::get_component_wrong_type() }
+    fn get_component_wrong_type() {
+        super::get_component_wrong_type()
+    }
 
     #[wasm_bindgen_test]
-    fn get_shared() { super::get_shared() }
+    fn get_shared() {
+        super::get_shared()
+    }
 
     #[wasm_bindgen_test]
-    fn get_shared_wrong_type() { super::get_shared_wrong_type() }
+    fn get_shared_wrong_type() {
+        super::get_shared_wrong_type()
+    }
 
     #[wasm_bindgen_test]
-    fn delete() { super::delete() }
+    fn delete() {
+        super::delete()
+    }
 
     #[wasm_bindgen_test]
-    fn delete_last() { super::delete_last() }
+    fn delete_last() {
+        super::delete_last()
+    }
 
     #[wasm_bindgen_test]
-    fn delete_first() { super::delete_first() }
+    fn delete_first() {
+        super::delete_first()
+    }
 
     #[wasm_bindgen_test]
-    fn merge() { super::merge() }
+    fn merge() {
+        super::merge()
+    }
 
     #[wasm_bindgen_test]
-    fn mutate_add_component() { super::mutate_add_component() }
+    fn mutate_add_component() {
+        super::mutate_add_component()
+    }
 
     #[wasm_bindgen_test]
-    fn mutate_remove_component() { super::mutate_remove_component() }
+    fn mutate_remove_component() {
+        super::mutate_remove_component()
+    }
 
     #[wasm_bindgen_test]
-    fn mutate_add_tag() { super::mutate_add_tag() }
+    fn mutate_add_tag() {
+        super::mutate_add_tag()
+    }
 
     #[wasm_bindgen_test]
-    fn mutate_remove_tag() { super::mutate_remove_tag() }
+    fn mutate_remove_tag() {
+        super::mutate_remove_tag()
+    }
 
     #[wasm_bindgen_test]
-    fn mutate_change_tag_minimum_test() { super::mutate_change_tag_minimum_test() }
+    fn mutate_change_tag_minimum_test() {
+        super::mutate_change_tag_minimum_test()
+    }
 
     #[wasm_bindgen_test]
-    fn mutate_change_tag() { super::mutate_change_tag() }
+    fn mutate_change_tag() {
+        super::mutate_change_tag()
+    }
 
     #[wasm_bindgen_test]
-    fn lots_of_deletes() { super::lots_of_deletes() }
+    fn lots_of_deletes() {
+        super::lots_of_deletes()
+    }
+
+    #[wasm_bindgen_test]
+    fn iter_entities() {
+        super::iter_entities()
+    }
 }
