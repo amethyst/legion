@@ -457,9 +457,9 @@ impl ArchetypeId {
         ArchetypeId(world_id, index)
     }
 
-    fn index(self) -> ArchetypeIndex { self.1 }
+    pub fn index(self) -> ArchetypeIndex { self.1 }
 
-    fn world(self) -> WorldId { self.0 }
+    pub fn world(self) -> WorldId { self.0 }
 }
 
 /// Contains all of the tags attached to the entities in each chunk.
