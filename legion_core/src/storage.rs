@@ -697,7 +697,11 @@ impl ArchetypeData {
     /// Gets the unique ID of this archetype.
     pub fn id(&self) -> ArchetypeId { self.id }
 
-    fn find_chunk_set_by_tags(&self, other_tags: &Tags, other_set_index: SetIndex) -> Option<SetIndex> {
+    fn find_chunk_set_by_tags(
+        &self,
+        other_tags: &Tags,
+        other_set_index: SetIndex,
+    ) -> Option<SetIndex> {
         // search for a matching chunk set
         let mut set_match = None;
         for self_set_index in 0..self.chunk_sets.len() {
@@ -812,7 +816,8 @@ impl ArchetypeData {
 
                     // Find the region of memory we will be reading from in the source chunk
                     let src_entity_start_idx = ComponentIndex(src_chunk.len() - entities_remaining);
-                    let src_entity_end_idx = ComponentIndex(src_entity_start_idx.0 + entities_to_write);
+                    let src_entity_end_idx =
+                        ComponentIndex(src_entity_start_idx.0 + entities_to_write);
 
                     // Copy all the entities to the destination chunk. The normal case is that we simply allocate
                     // new entities.
@@ -826,7 +831,8 @@ impl ArchetypeData {
                     // We know how many entities will be appended to this list
                     dst_entities.reserve(dst_entities.len() + entities_to_write);
 
-                    for src_entity in &src_chunk.entities[src_entity_start_idx.0..src_entity_end_idx.0]
+                    for src_entity in
+                        &src_chunk.entities[src_entity_start_idx.0..src_entity_end_idx.0]
                     {
                         // The location of the next entity
                         let location = EntityLocation::new(
@@ -1013,7 +1019,8 @@ impl ArchetypeData {
 
             // Now copy the data
             unsafe {
-                let (src_component_chunk_data, src_element_size, _) = src_component_storage.data_raw();
+                let (src_component_chunk_data, src_element_size, _) =
+                    src_component_storage.data_raw();
 
                 // offset to the first entity we want to copy from the source chunk
                 let src_data =

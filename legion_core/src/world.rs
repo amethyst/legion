@@ -318,10 +318,7 @@ impl World {
 
     fn delete_location(&mut self, location: EntityLocation) {
         // find entity's chunk
-        let chunk = self
-            .storage_mut()
-            .chunk_mut(location)
-            .unwrap();
+        let chunk = self.storage_mut().chunk_mut(location).unwrap();
 
         // swap remove with last entity in chunk
         if let Some(swapped) = chunk.swap_remove(location.component(), true) {
@@ -1031,10 +1028,7 @@ impl World {
             }
         }
 
-        let src_location = src_world
-            .entity_locations
-            .get(src_entity)
-            .unwrap();
+        let src_location = src_world.entity_locations.get(src_entity).unwrap();
         let src_archetype = &src_storage.archetypes()[src_location.archetype()];
 
         // Iterate all archetypes in the src world
