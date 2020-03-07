@@ -959,26 +959,12 @@ impl World {
                 tag_types: self.storage().tag_types(),
             };
 
-            // Build the archetype that we will write into. The caller of this function provides an
-            // impl to do the clone, optionally transforming components from one type to another
-            let mut dst_archetype = ArchetypeDescription::default();
-            for (from_type_id, _from_meta) in src_archetype.description().components() {
-                let (into_type_id, into_meta) = clone_impl.map_component_type(*from_type_id);
-                dst_archetype.register_component_raw(into_type_id, into_meta);
-            }
-
-            // Find or create the archetype in the destination world
-            let matches = dst_archetype
-                .matches(archetype_data)
-                .matching_indices()
-                .next();
-
-            // If it doesn't exist, allocate it
-            let dst_archetype_index = if let Some(arch_index) = matches {
-                ArchetypeIndex(arch_index)
-            } else {
-                dst_storage.alloc_archetype(dst_archetype).0
-            };
+            let dst_archetype_index = World::find_or_create_archetype_for_clone_move(
+                clone_impl,
+                src_archetype.description(),
+                archetype_data,
+                dst_storage,
+            );
 
             // Do the clone_from for this archetype
             dst_storage
@@ -1037,10 +1023,39 @@ impl World {
             tag_types: self.storage().tag_types(),
         };
 
+        let dst_archetype_index = World::find_or_create_archetype_for_clone_move(
+            clone_impl,
+            src_archetype.description(),
+            archetype_data,
+            dst_storage,
+        );
+
+        // Do the clone_from for this archetype
+        dst_storage
+            .archetype_mut(dst_archetype_index)
+            .unwrap()
+            .clone_from_single(
+                &src_world,
+                src_archetype,
+                &src_location,
+                dst_archetype_index,
+                &mut self.entity_allocator,
+                &mut self.entity_locations,
+                clone_impl,
+                replace_mapping,
+            )
+    }
+
+    fn find_or_create_archetype_for_clone_move<C: CloneImpl>(
+        clone_impl: &C,
+        src_archetype_description: &ArchetypeDescription,
+        archetype_data: ArchetypeFilterData,
+        dst_storage: &mut Storage,
+    ) -> ArchetypeIndex {
         // Build the archetype that we will write into. The caller of this function provides an
         // impl to do the clone, optionally transforming components from one type to another
         let mut dst_archetype = ArchetypeDescription::default();
-        for (from_type_id, _from_meta) in src_archetype.description().components() {
+        for (from_type_id, _from_meta) in src_archetype_description.components() {
             let (into_type_id, into_meta) = clone_impl.map_component_type(*from_type_id);
             dst_archetype.register_component_raw(into_type_id, into_meta);
         }
@@ -1058,20 +1073,7 @@ impl World {
             dst_storage.alloc_archetype(dst_archetype).0
         };
 
-        // Do the clone_from for this archetype
-        dst_storage
-            .archetype_mut(dst_archetype_index)
-            .unwrap()
-            .clone_from_single(
-                &src_world,
-                src_archetype,
-                &src_location,
-                dst_archetype_index,
-                &mut self.entity_allocator,
-                &mut self.entity_locations,
-                clone_impl,
-                replace_mapping,
-            )
+        dst_archetype_index
     }
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<ArchetypeIndex>

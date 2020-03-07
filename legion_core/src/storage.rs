@@ -731,11 +731,31 @@ impl ArchetypeData {
         set_match
     }
 
+    pub(crate) fn find_or_create_chunk_set_by_tags(
+        &mut self,
+        src_tags: &Tags,
+        src_chunk_set_index: SetIndex,
+    ) -> SetIndex {
+        let dst_chunk_set_index = self.find_chunk_set_by_tags(src_tags, src_chunk_set_index);
+        let dst_chunk_set_index = dst_chunk_set_index.unwrap_or_else(|| {
+            self.alloc_chunk_set(|self_tags| {
+                for (type_id, other_tags) in src_tags.0.iter() {
+                    unsafe {
+                        let (src, _, _) = other_tags.data_raw();
+                        let dst = self_tags.get_mut(*type_id).unwrap().alloc_ptr();
+                        other_tags.element().clone(src.as_ptr(), dst);
+                    }
+                }
+            })
+        });
+        dst_chunk_set_index
+    }
+
     pub(crate) fn move_from(&mut self, mut other: ArchetypeData) {
         let other_tags = &other.tags;
         for (other_index, mut set) in other.chunk_sets.drain(..).enumerate() {
             let other_index = SetIndex(other_index);
-            let mut set_match = self.find_chunk_set_by_tags(&other_tags, other_index);
+            let set_match = self.find_chunk_set_by_tags(&other_tags, other_index);
 
             if let Some(chunk_set) = set_match {
                 // if we found a match, move the chunks into the set
@@ -778,19 +798,8 @@ impl ArchetypeData {
         let src_tags = &src_archetype.tags;
         for (src_chunk_set_index, src_chunk_set) in src_archetype.chunk_sets.iter().enumerate() {
             let src_chunk_set_index = SetIndex(src_chunk_set_index);
-            // Find or create the chunk set that matches the source chunk set
-            let dst_chunk_set_index = self.find_chunk_set_by_tags(&src_tags, src_chunk_set_index);
-            let dst_chunk_set_index = dst_chunk_set_index.unwrap_or_else(|| {
-                self.alloc_chunk_set(|self_tags| {
-                    for (type_id, other_tags) in src_tags.0.iter() {
-                        unsafe {
-                            let (src, _, _) = other_tags.data_raw();
-                            let dst = self_tags.get_mut(*type_id).unwrap().alloc_ptr();
-                            other_tags.element().clone(src.as_ptr(), dst);
-                        }
-                    }
-                })
-            });
+            let dst_chunk_set_index =
+                self.find_or_create_chunk_set_by_tags(src_tags, src_chunk_set_index);
 
             // Iterate all the chunks within the source chunk set
             for (_src_chunk_idx, src_chunk) in src_chunk_set.chunks.iter().enumerate() {
@@ -812,7 +821,6 @@ impl ArchetypeData {
                     // Prepare to write to the chunk storage
                     let mut writer = dst_chunk.writer();
                     let (dst_entities, dst_components) = writer.get();
-                    let dst_components = unsafe { &mut *dst_components.get() };
 
                     // Find the region of memory we will be reading from in the source chunk
                     let src_entity_start_idx = ComponentIndex(src_chunk.len() - entities_remaining);
@@ -834,6 +842,9 @@ impl ArchetypeData {
                     for src_entity in
                         &src_chunk.entities[src_entity_start_idx.0..src_entity_end_idx.0]
                     {
+                        // Determine if there is an entity we will be replacing
+                        let dst_entity = replace_mappings.and_then(|x| x.get(src_entity));
+
                         // The location of the next entity
                         let location = EntityLocation::new(
                             dst_archetype_index,
@@ -841,9 +852,6 @@ impl ArchetypeData {
                             dst_free_chunk_index,
                             ComponentIndex(dst_entities.len()),
                         );
-
-                        // Determine if there is an entity we will be replacing
-                        let dst_entity = replace_mappings.and_then(|x| x.get(src_entity));
 
                         // Determine the Entity to use for this element
                         let dst_entity = if let Some(dst_entity) = dst_entity {
@@ -865,49 +873,18 @@ impl ArchetypeData {
                         }
                     }
 
-                    // Walk through each component type to copy the data from the source chunk to the destination chunk
-                    for (src_type, _) in src_archetype.description().components() {
-                        // Look up what type we should transform the data into (can be the same type, meaning it should be cloned)
-                        let (dst_type, _) = clone_impl.map_component_type(*src_type);
+                    ArchetypeData::clone_components(
+                        src_world,
+                        clone_impl,
+                        src_chunk,
+                        entities_to_write,
+                        &dst_entities,
+                        dst_components,
+                        src_entity_start_idx,
+                        src_entity_end_idx,
+                        src_archetype,
+                    );
 
-                        // Create a writer that will insert the data into the destination chunk
-                        let mut dst_component_writer = dst_components
-                            .get_mut(dst_type)
-                            .expect("ComponentResourceSet missing in clone_from")
-                            .writer();
-
-                        // Find the data in the source chunk
-                        let src_component_storage = src_chunk
-                            .components(*src_type)
-                            .expect("ComponentResourceSet missing in clone_from");
-
-                        // Now copy the data
-                        unsafe {
-                            let (src_component_chunk_data, src_element_size, _) =
-                                src_component_storage.data_raw();
-
-                            // offset to the first entity we want to copy from the source chunk
-                            let src_data = src_component_chunk_data
-                                .add(src_element_size * src_entity_start_idx.0);
-
-                            // allocate the space we need in the destination chunk
-                            let dst_data =
-                                dst_component_writer.reserve_raw(entities_to_write).as_ptr();
-
-                            // Delegate the clone operation to the provided CloneImpl
-                            clone_impl.clone_components(
-                                src_world,
-                                src_chunk,
-                                src_entity_start_idx..src_entity_end_idx,
-                                *src_type,
-                                &src_chunk.entities[src_entity_start_idx.0..src_entity_end_idx.0],
-                                &dst_entities[src_entity_start_idx.0..src_entity_end_idx.0],
-                                src_data,
-                                dst_data,
-                                entities_to_write,
-                            );
-                        }
-                    }
                     entities_remaining -= entities_to_write;
                 }
             }
@@ -926,24 +903,14 @@ impl ArchetypeData {
         clone_impl: &C,
         replace_mapping: Option<Entity>,
     ) -> Entity {
-        // Iterate all the chunk sets within the source archetype
+        // We are reading from a specific chunk set within the source archetype
         let src_tags = &src_archetype.tags;
         let src_chunk_set_index = src_location.set();
         let src_chunk_set = &src_archetype.chunk_sets[src_chunk_set_index];
 
         // Find or create the chunk set that matches the source chunk set
-        let dst_chunk_set_index = self.find_chunk_set_by_tags(&src_tags, src_chunk_set_index);
-        let dst_chunk_set_index = dst_chunk_set_index.unwrap_or_else(|| {
-            self.alloc_chunk_set(|self_tags| {
-                for (type_id, other_tags) in src_tags.0.iter() {
-                    unsafe {
-                        let (src, _, _) = other_tags.data_raw();
-                        let dst = self_tags.get_mut(*type_id).unwrap().alloc_ptr();
-                        other_tags.element().clone(src.as_ptr(), dst);
-                    }
-                }
-            })
-        });
+        let dst_chunk_set_index =
+            self.find_or_create_chunk_set_by_tags(src_tags, src_chunk_set_index);
 
         // Get the source chunk
         let src_chunk_idx = src_location.chunk();
@@ -961,7 +928,6 @@ impl ArchetypeData {
         // Prepare to write to the chunk storage
         let mut writer = dst_chunk.writer();
         let (dst_entities, dst_components) = writer.get();
-        let dst_components = unsafe { &mut *dst_components.get() };
 
         // Find the region of memory we will be reading from in the source chunk
         let src_entity_start_idx = src_location.component();
@@ -972,12 +938,6 @@ impl ArchetypeData {
         //
         // We also allow end-user to specify a Option<Entity>. The src Entity from will *replace* the
         // data of the given Entity
-
-        // We know how many entities will be appended to this list
-        let dst_entity_start_idx = ComponentIndex(dst_entities.len());
-        let dst_entity_end_idx = ComponentIndex(dst_entities.len() + entities_to_write);
-
-        let src_entity = src_chunk.entities[src_entity_start_idx];
 
         // The location of the next entity
         let location = EntityLocation::new(
@@ -1001,21 +961,50 @@ impl ArchetypeData {
         dst_entity_locations.set(dst_entity, location);
         dst_entities.push(dst_entity);
 
-        // Walk through each component type to copy the data from the source chunk to the destination chunk
+        ArchetypeData::clone_components(
+            src_world,
+            clone_impl,
+            src_chunk,
+            entities_to_write,
+            &dst_entities,
+            dst_components,
+            src_entity_start_idx,
+            src_entity_end_idx,
+            src_archetype,
+        );
+
+        dst_entity
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn clone_components<C: crate::world::CloneImpl>(
+        src_world: &crate::world::World,
+        clone_impl: &C,
+        src_chunk: &ComponentStorage,
+        entities_to_write: usize,
+        dst_entities: &[Entity],
+        dst_components: &UnsafeCell<Components>,
+        src_entity_start_idx: ComponentIndex,
+        src_entity_end_idx: ComponentIndex,
+        src_archetype: &ArchetypeData,
+    ) {
         for (src_type, _) in src_archetype.description().components() {
+            //let (_, dst_components) = writer.get();
+            let dst_components = unsafe { &mut *dst_components.get() };
+
             // Look up what type we should transform the data into (can be the same type, meaning it should be cloned)
             let (dst_type, _) = clone_impl.map_component_type(*src_type);
 
             // Create a writer that will insert the data into the destination chunk
             let mut dst_component_writer = dst_components
                 .get_mut(dst_type)
-                .expect("ComponentResourceSet missing in clone_from_single")
+                .expect("ComponentResourceSet missing in clone_from")
                 .writer();
 
             // Find the data in the source chunk
             let src_component_storage = src_chunk
                 .components(*src_type)
-                .expect("ComponentResourceSet missing in clone_from_single");
+                .expect("ComponentResourceSet missing in clone_from");
 
             // Now copy the data
             unsafe {
@@ -1036,15 +1025,13 @@ impl ArchetypeData {
                     src_entity_start_idx..src_entity_end_idx,
                     *src_type,
                     &src_chunk.entities[src_entity_start_idx.0..src_entity_end_idx.0],
-                    &dst_entities[dst_entity_start_idx.0..dst_entity_end_idx.0],
+                    &dst_entities[src_entity_start_idx.0..src_entity_end_idx.0],
                     src_data,
                     dst_data,
                     entities_to_write,
                 );
             }
         }
-
-        dst_entity
     }
 
     /// Iterate all entities in existence by iterating across archetypes, chunk sets, and chunks
@@ -1085,28 +1072,6 @@ impl ArchetypeData {
                             })
                     })
             })
-    }
-
-    pub(crate) fn iter_data_slice<'a, T: Component>(
-        &'a self,
-    ) -> impl Iterator<Item = RefMap<&[T]>> + 'a {
-        self.chunk_sets.iter().flat_map(move |set| {
-            set.chunks.iter().map(move |chunk| {
-                let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
-                unsafe { c.data_slice::<T>() }
-            })
-        })
-    }
-
-    pub(crate) fn iter_data_slice_mut<'a, T: Component>(
-        &'a self,
-    ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
-        self.chunk_sets.iter().flat_map(move |set| {
-            set.chunks.iter().map(move |chunk| {
-                let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
-                unsafe { c.data_slice_mut::<T>() }
-            })
-        })
     }
 
     fn push<F: FnMut(&mut Tags)>(&mut self, set: Chunkset, mut initialize: F) {
@@ -1231,6 +1196,28 @@ impl ArchetypeData {
         SetIndex(index): SetIndex,
     ) -> &mut Chunkset {
         self.chunksets_mut().get_unchecked_mut(index)
+    }
+
+    pub(crate) fn iter_data_slice<'a, T: Component>(
+        &'a self,
+    ) -> impl Iterator<Item = RefMap<&[T]>> + 'a {
+        self.chunk_sets.iter().flat_map(move |set| {
+            set.chunks.iter().map(move |chunk| {
+                let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
+                unsafe { c.data_slice::<T>() }
+            })
+        })
+    }
+
+    pub(crate) fn iter_data_slice_mut<'a, T: Component>(
+        &'a self,
+    ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
+        self.chunk_sets.iter().flat_map(move |set| {
+            set.chunks.iter().map(move |chunk| {
+                let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
+                unsafe { c.data_slice_mut::<T>() }
+            })
+        })
     }
 }
 
