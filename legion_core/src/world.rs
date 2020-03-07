@@ -734,7 +734,7 @@ impl World {
                 .flat_map(|archetype_index| {
                     self.storage()
                         .archetypes()
-                        .get_unchecked(archetype_index)
+                        .get_unchecked(archetype_index.0)
                         .iter_data_slice::<T>()
                 })
                 .map(|x| x.deconstruct())
@@ -759,7 +759,7 @@ impl World {
                 .flat_map(|archetype_index| {
                     self.storage()
                         .archetypes()
-                        .get_unchecked(archetype_index)
+                        .get_unchecked(archetype_index.0)
                         .iter_data_slice_mut::<T>()
                 })
                 .map(|x| x.deconstruct())
@@ -799,9 +799,9 @@ impl World {
         if !self.is_alive(entity) {
             return None;
         }
-        let location = self.entity_allocator.get_location(entity.index());
+        let location = self.entity_locations.get(entity);
         let archetype = location
-            .map(|location| self.storage().archetypes().get(location.archetype()))
+            .map(|location| self.storage().archetype(location.archetype()))
             .unwrap_or(None);
         archetype.map(|archetype| archetype.description().components())
     }
@@ -811,9 +811,9 @@ impl World {
         if !self.is_alive(entity) {
             return None;
         }
-        let location = self.entity_allocator.get_location(entity.index());
+        let location = self.entity_locations.get(entity);
         let archetype = location
-            .map(|location| self.storage().archetypes().get(location.archetype()))
+            .map(|location| self.storage().archetype(location.archetype()))
             .unwrap_or(None);
         archetype.map(|archetype| archetype.description().tags())
     }
@@ -942,11 +942,11 @@ impl World {
             // Delete all the data associated with keys in replace_mappings. This leaves the
             // associated entities in a dangling state, but we'll fix this later when we copy the
             // data over
-            for v in replace_mappings.values() {
-                if self.entity_allocator.is_alive(*v) {
+            for entity_to_replace in replace_mappings.values() {
+                if self.entity_allocator.is_alive(*entity_to_replace) {
                     let location = self
-                        .entity_allocator
-                        .get_location(v.index())
+                        .entity_locations
+                        .get(*entity_to_replace)
                         .expect("Failed to get location of live entity");
                     self.delete_location(location);
                 } else {
@@ -978,21 +978,21 @@ impl World {
 
             // If it doesn't exist, allocate it
             let dst_archetype_index = if let Some(arch_index) = matches {
-                arch_index
+                ArchetypeIndex(arch_index)
             } else {
                 dst_storage.alloc_archetype(dst_archetype).0
             };
 
             // Do the clone_from for this archetype
             dst_storage
-                .archetypes_mut()
-                .get_mut(dst_archetype_index)
+                .archetype_mut(dst_archetype_index)
                 .unwrap()
                 .clone_from(
                     &src_world,
                     src_archetype,
                     dst_archetype_index,
                     &self.entity_allocator,
+                    &mut self.entity_locations,
                     clone_impl,
                     replace_mappings,
                     &mut result_mappings,
@@ -1022,8 +1022,8 @@ impl World {
         if let Some(replace_mapping) = replace_mapping {
             if self.entity_allocator.is_alive(replace_mapping) {
                 let location = self
-                    .entity_allocator
-                    .get_location(replace_mapping.index())
+                    .entity_locations
+                    .get(replace_mapping)
                     .expect("Failed to get location of live entity");
                 self.delete_location(location);
             } else {
@@ -1032,8 +1032,8 @@ impl World {
         }
 
         let src_location = src_world
-            .entity_allocator
-            .get_location(src_entity.index())
+            .entity_locations
+            .get(src_entity)
             .unwrap();
         let src_archetype = &src_storage.archetypes()[src_location.archetype()];
 
@@ -1059,15 +1059,14 @@ impl World {
 
         // If it doesn't exist, allocate it
         let dst_archetype_index = if let Some(arch_index) = matches {
-            arch_index
+            ArchetypeIndex(arch_index)
         } else {
             dst_storage.alloc_archetype(dst_archetype).0
         };
 
         // Do the clone_from for this archetype
         dst_storage
-            .archetypes_mut()
-            .get_mut(dst_archetype_index)
+            .archetype_mut(dst_archetype_index)
             .unwrap()
             .clone_from_single(
                 &src_world,
@@ -1075,6 +1074,7 @@ impl World {
                 &src_location,
                 dst_archetype_index,
                 &mut self.entity_allocator,
+                &mut self.entity_locations,
                 clone_impl,
                 replace_mapping,
             )
@@ -1190,7 +1190,7 @@ pub trait CloneImpl {
         &self,
         src_world: &World,
         src_component_storage: &ComponentStorage,
-        src_component_storage_indexes: core::ops::Range<usize>,
+        src_component_storage_indexes: core::ops::Range<ComponentIndex>,
         src_type: ComponentTypeId,
         src_entities: &[Entity],
         dst_entities: &[Entity],
