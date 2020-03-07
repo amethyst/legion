@@ -782,6 +782,13 @@ impl ArchetypeData {
         self.tags.validate(self.chunk_sets.len());
     }
 
+    /// Given a source world and archetype, step through all of its chunks and copy the data in it
+    /// into this archetype. The archetype index is provided so that we can produce EntityLocations
+    /// During this process, we can replace pre-existing entities. This function assumes that any
+    /// entity referenced in replace_mappings actually exists in the world. The public API in world
+    /// checks this assumption and panics if it is violated.
+    ///
+    /// See also clone_from_single, which copies a specific entity
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn clone_from<C: crate::world::CloneImpl>(
         &mut self,
@@ -857,8 +864,8 @@ impl ArchetypeData {
                         let dst_entity = if let Some(dst_entity) = dst_entity {
                             // We are replacing data
                             // Verify that the entity is alive.. this checks the index and version of the entity
-                            //TODO: This check may not be needed in release mode since World::clone_from checks it
-                            assert!(dst_entity_allocator.is_alive(*dst_entity));
+                            // The entity should be alive because World::clone_from verifies this
+                            debug_assert!(dst_entity_allocator.is_alive(*dst_entity));
                             *dst_entity
                         } else {
                             // We are appending data, allocate a new entity
@@ -891,6 +898,13 @@ impl ArchetypeData {
         }
     }
 
+    /// Given a source world, archetype, and entity, copy it into this archetype. The archetype
+    /// index is provided so that we can produce EntityLocations.
+    /// During this process, we can replace a pre-existing entity. This function assumes that if
+    /// replace_mapping is not none, that the entity exists. The public API in world checks this
+    /// assumption and panics if it is violated.
+    ///
+    /// See also clone_from, which copies all data
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn clone_from_single<C: crate::world::CloneImpl>(
         &mut self,
@@ -950,8 +964,8 @@ impl ArchetypeData {
         let dst_entity = if let Some(dst_entity) = replace_mapping {
             // We are replacing data
             // Verify that the entity is alive.. this checks the index and version of the entity
-            //TODO: This check may not be needed in release mode since World::clone_from checks it
-            assert!(dst_entity_allocator.is_alive(dst_entity));
+            // The entity should be alive because World::clone_from verifies this
+            debug_assert!(dst_entity_allocator.is_alive(dst_entity));
             dst_entity
         } else {
             // We are appending data, allocate a new entity
@@ -989,7 +1003,6 @@ impl ArchetypeData {
         src_archetype: &ArchetypeData,
     ) {
         for (src_type, _) in src_archetype.description().components() {
-            //let (_, dst_components) = writer.get();
             let dst_components = unsafe { &mut *dst_components.get() };
 
             // Look up what type we should transform the data into (can be the same type, meaning it should be cloned)

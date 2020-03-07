@@ -983,6 +983,19 @@ impl World {
         }
     }
 
+    /// This will *copy* the `src_entity` from `src_world` into this world. The logic to do the copy
+    /// is delegated to the `clone_impl` provided by the user. In addition to simple copying, it's
+    /// also possible to transform from one type to another. This is useful for cases where you want
+    /// to read from serializable data (like a physics shape definition) and construct something
+    /// that isn't serializable (like a handle to a physics body)
+    ///
+    /// By default, the entity in the new world will be assigned a new Entity. The return value
+    /// indicates the Entity in the new world, which allows for mapping data the old and new world.
+    ///
+    /// If you want to replace an existing entity (for example to hot-reload data from a file,)
+    /// populate `replace_mapping`. This entity must exist in the destination world. The entity in
+    /// the destination world will be deleted, and the entity copied over will be assigned
+    /// the same entity. If these constraints are not met, this function will panic.
     pub fn clone_from_single<C: CloneImpl>(
         &mut self,
         src_world: &World,
