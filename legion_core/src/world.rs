@@ -1,6 +1,4 @@
 use crate::borrow::Ref;
-use crate::borrow::RefMap;
-use crate::borrow::RefMapMut;
 use crate::borrow::RefMapMutSet;
 use crate::borrow::RefMapSet;
 use crate::borrow::RefMut;
@@ -31,8 +29,8 @@ use crate::storage::TagTypeId;
 use crate::storage::Tags;
 use crate::tuple::TupleEq;
 use parking_lot::Mutex;
-use std::borrow::BorrowMut;
 use std::cell::UnsafeCell;
+use std::collections::HashMap;
 use std::iter::Enumerate;
 use std::iter::Fuse;
 use std::iter::FusedIterator;
@@ -912,12 +910,17 @@ impl World {
     /// world and the value must exist in the destination world. All entities in the destination
     /// world referenced by this map will be deleted, and the entities copied over will be assigned
     /// the same entity. If these constraints are not met, this function will panic.
-    pub fn clone_from<C: CloneImpl>(
+    pub fn clone_from<
+        's,
+        CloneImplT: CloneImpl,
+        CloneImplResultT: CloneImplResult,
+        EntityReplacePolicyT: EntityReplacePolicy<'s>,
+    >(
         &mut self,
         src_world: &World,
-        clone_impl: &C,
-        replace_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
-        mut result_mappings: Option<&mut std::collections::HashMap<Entity, Entity>>,
+        clone_impl: &CloneImplT,
+        clone_impl_result: &mut CloneImplResultT,
+        entity_replace_policy: &'s EntityReplacePolicyT,
     ) {
         let span = span!(Level::INFO, "CloneMerging worlds", source = src_world.id().0, destination = ?self.id());
         let _guard = span.enter();
@@ -925,30 +928,28 @@ impl World {
         let src_storage = unsafe { &(*src_world.storage.get()) };
         let dst_storage = unsafe { &mut (*self.storage.get()) };
 
-        // Erase all entities that are referred to by value. The code following will update the location
-        // of all these entities to point to new, valid locations
-        if let Some(replace_mappings) = replace_mappings {
-            // First check that all the keys exist in the source world. We're assuming the source
-            // data will be available later to replace the data we're about to delete
-            for k in replace_mappings.keys() {
-                if !src_world.entity_allocator.is_alive(*k) {
-                    panic!("clone_from assumes all replace_mapping keys exist in the source world");
-                }
+        // First check that all the src entities exist in the source world. We're assuming the
+        // source data will be available later to replace the data we're about to delete
+        for k in entity_replace_policy.src_entities() {
+            if !src_world.entity_allocator.is_alive(k) {
+                panic!("clone_from assumes all replace_mapping keys exist in the source world");
             }
+        }
 
-            // Delete all the data associated with keys in replace_mappings. This leaves the
-            // associated entities in a dangling state, but we'll fix this later when we copy the
-            // data over
-            for entity_to_replace in replace_mappings.values() {
-                if self.entity_allocator.is_alive(*entity_to_replace) {
-                    let location = self
-                        .entity_locations
-                        .get(*entity_to_replace)
-                        .expect("Failed to get location of live entity");
-                    self.delete_location(location);
-                } else {
-                    panic!("clone_from assumes all replace_mapping values exist in the destination world");
-                }
+        // Delete all the data associated with dst_entities. This leaves the
+        // associated entities in a dangling state, but we'll fix this later when we copy the
+        // data over
+        for entity_to_replace in entity_replace_policy.dst_entities() {
+            if self.entity_allocator.is_alive(entity_to_replace) {
+                let location = self
+                    .entity_locations
+                    .get(entity_to_replace)
+                    .expect("Failed to get location of live entity");
+                self.delete_location(location);
+            } else {
+                panic!(
+                    "clone_from assumes all replace_mapping values exist in the destination world"
+                );
             }
         }
 
@@ -977,8 +978,8 @@ impl World {
                     &self.entity_allocator,
                     &mut self.entity_locations,
                     clone_impl,
-                    replace_mappings,
-                    &mut result_mappings,
+                    clone_impl_result,
+                    entity_replace_policy,
                 );
         }
     }
@@ -1207,6 +1208,92 @@ pub trait CloneImpl {
         dst_data: *mut u8,
         num_components: usize,
     );
+}
+
+/// Used along with CloneImpl, allows receiving results from a clone_from or clone_from_single call
+pub trait CloneImplResult {
+    /// For every entity that is copied, this function will be called, passing the entity in the
+    /// source and destination worlds
+    fn add_result(&mut self, src_entity: Entity, dst_entity: Entity);
+}
+
+/// Used along with CloneImpl, allows specifying that certain entities in the receiving world should
+/// be replaced with entities from the source world
+pub trait EntityReplacePolicy<'s> {
+    /// This function must return all entities in the source world that will replace data in the
+    /// destination world
+    fn src_entities<'a>(&'s self) -> Box<dyn Iterator<Item = Entity> + 'a>
+    where
+        's: 'a;
+
+    /// This function must return all entities in the destination world that will be replaced
+    fn dst_entities<'a>(&'s self) -> Box<dyn Iterator<Item = Entity> + 'a>
+    where
+        's: 'a;
+
+    /// When called, if the provided source entity is intended to replace an entity in the
+    /// destination world, the function must return the entity in the destination world, or None
+    fn get_dst_entity(&self, src_entity: Entity) -> Option<Entity>;
+}
+
+/// Used to opt-out of receiving results from a clone_from or clone_from_single call
+pub struct NoneCloneImplResult;
+impl CloneImplResult for NoneCloneImplResult {
+    fn add_result(&mut self, _src_entity: Entity, _dst_entity: Entity) {
+        // do nothing
+    }
+}
+
+/// Used to opt-out of replacing entities during a clone_from or clone_from_single call
+pub struct NoneEntityReplacePolicy;
+impl<'s> EntityReplacePolicy<'s> for NoneEntityReplacePolicy {
+    fn src_entities<'a>(&self) -> Box<dyn Iterator<Item = Entity> + 'a>
+    where
+        's: 'a,
+    {
+        Box::new(std::iter::Empty::default())
+    }
+
+    fn dst_entities<'a>(&self) -> Box<dyn Iterator<Item = Entity> + 'a>
+    where
+        's: 'a,
+    {
+        Box::new(std::iter::Empty::default())
+    }
+
+    fn get_dst_entity(&self, _src_entity: Entity) -> Option<Entity> { None }
+}
+
+/// Default implementation of CloneImplResult that uses a hash map
+pub struct HashMapCloneImplResult<'m>(pub &'m mut HashMap<Entity, Entity>);
+
+impl<'m> CloneImplResult for HashMapCloneImplResult<'m> {
+    fn add_result(&mut self, src_entity: Entity, dst_entity: Entity) {
+        self.0.insert(src_entity, dst_entity);
+    }
+}
+
+/// Default implementation of EntityReplacePolicy that uses a hash map
+pub struct HashMapEntityReplacePolicy<'m>(pub &'m HashMap<Entity, Entity>);
+
+impl<'m, 's> EntityReplacePolicy<'s> for HashMapEntityReplacePolicy<'m> {
+    fn src_entities<'a>(&'s self) -> Box<dyn Iterator<Item = Entity> + 'a>
+    where
+        's: 'a,
+    {
+        Box::new(self.0.keys().cloned())
+    }
+
+    fn dst_entities<'a>(&'s self) -> Box<dyn Iterator<Item = Entity> + 'a>
+    where
+        's: 'a,
+    {
+        Box::new(self.0.values().cloned())
+    }
+
+    fn get_dst_entity(&self, src_entity: Entity) -> Option<Entity> {
+        self.0.get(&src_entity).map(|x| *x)
+    }
 }
 
 #[derive(Error, Debug)]

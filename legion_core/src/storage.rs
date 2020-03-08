@@ -790,16 +790,21 @@ impl ArchetypeData {
     ///
     /// See also clone_from_single, which copies a specific entity
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn clone_from<C: crate::world::CloneImpl>(
+    pub(crate) fn clone_from<
+        's,
+        CloneImplT: crate::world::CloneImpl,
+        CloneImplResultT: crate::world::CloneImplResult,
+        EntityReplacePolicyT: crate::world::EntityReplacePolicy<'s>,
+    >(
         &mut self,
         src_world: &crate::world::World,
         src_archetype: &ArchetypeData,
         dst_archetype_index: ArchetypeIndex,
         dst_entity_allocator: &crate::entity::EntityAllocator,
         dst_entity_locations: &mut crate::entity::Locations,
-        clone_impl: &C,
-        replace_mappings: Option<&std::collections::HashMap<Entity, Entity>>,
-        result_mappings: &mut Option<&mut std::collections::HashMap<Entity, Entity>>,
+        clone_impl: &CloneImplT,
+        clone_impl_result: &mut CloneImplResultT,
+        entity_replace_policy: &EntityReplacePolicyT,
     ) {
         // Iterate all the chunk sets within the source archetype
         let src_tags = &src_archetype.tags;
@@ -831,8 +836,7 @@ impl ArchetypeData {
 
                     // Find the region of memory we will be reading from in the source chunk
                     let src_begin_idx = ComponentIndex(src_chunk.len() - entities_remaining);
-                    let src_end_idx =
-                        ComponentIndex(src_begin_idx.0 + entities_to_write);
+                    let src_end_idx = ComponentIndex(src_begin_idx.0 + entities_to_write);
 
                     let dst_begin_idx = ComponentIndex(dst_entities.len());
                     let dst_end_idx = ComponentIndex(dst_entities.len() + entities_to_write);
@@ -849,11 +853,9 @@ impl ArchetypeData {
                     // We know how many entities will be appended to this list
                     dst_entities.reserve(dst_entities.len() + entities_to_write);
 
-                    for src_entity in
-                        &src_chunk.entities[src_begin_idx.0..src_end_idx.0]
-                    {
+                    for src_entity in &src_chunk.entities[src_begin_idx.0..src_end_idx.0] {
                         // Determine if there is an entity we will be replacing
-                        let dst_entity = replace_mappings.and_then(|x| x.get(src_entity));
+                        let dst_entity = entity_replace_policy.get_dst_entity(*src_entity);
 
                         // The location of the next entity
                         let location = EntityLocation::new(
@@ -868,8 +870,8 @@ impl ArchetypeData {
                             // We are replacing data
                             // Verify that the entity is alive.. this checks the index and version of the entity
                             // The entity should be alive because World::clone_from verifies this
-                            debug_assert!(dst_entity_allocator.is_alive(*dst_entity));
-                            *dst_entity
+                            debug_assert!(dst_entity_allocator.is_alive(dst_entity));
+                            dst_entity
                         } else {
                             // We are appending data, allocate a new entity
                             dst_entity_allocator.create_entity()
@@ -878,9 +880,7 @@ impl ArchetypeData {
                         dst_entity_locations.set(dst_entity, location);
                         dst_entities.push(dst_entity);
 
-                        if let Some(result_mappings) = result_mappings {
-                            result_mappings.insert(*src_entity, dst_entity);
-                        }
+                        clone_impl_result.add_result(*src_entity, dst_entity);
                     }
 
                     ArchetypeData::clone_components(
@@ -1031,8 +1031,7 @@ impl ArchetypeData {
                     src_component_storage.data_raw();
 
                 // offset to the first entity we want to copy from the source chunk
-                let src_data =
-                    src_component_chunk_data.add(src_element_size * src_range.start.0);
+                let src_data = src_component_chunk_data.add(src_element_size * src_range.start.0);
 
                 // allocate the space we need in the destination chunk
                 let dst_data = dst_component_writer.reserve_raw(entities_to_write).as_ptr();
