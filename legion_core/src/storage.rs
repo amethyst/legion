@@ -830,9 +830,12 @@ impl ArchetypeData {
                     let (dst_entities, dst_components) = writer.get();
 
                     // Find the region of memory we will be reading from in the source chunk
-                    let src_entity_start_idx = ComponentIndex(src_chunk.len() - entities_remaining);
-                    let src_entity_end_idx =
-                        ComponentIndex(src_entity_start_idx.0 + entities_to_write);
+                    let src_begin_idx = ComponentIndex(src_chunk.len() - entities_remaining);
+                    let src_end_idx =
+                        ComponentIndex(src_begin_idx.0 + entities_to_write);
+
+                    let dst_begin_idx = ComponentIndex(dst_entities.len());
+                    let dst_end_idx = ComponentIndex(dst_entities.len() + entities_to_write);
 
                     // Copy all the entities to the destination chunk. The normal case is that we simply allocate
                     // new entities.
@@ -847,7 +850,7 @@ impl ArchetypeData {
                     dst_entities.reserve(dst_entities.len() + entities_to_write);
 
                     for src_entity in
-                        &src_chunk.entities[src_entity_start_idx.0..src_entity_end_idx.0]
+                        &src_chunk.entities[src_begin_idx.0..src_end_idx.0]
                     {
                         // Determine if there is an entity we will be replacing
                         let dst_entity = replace_mappings.and_then(|x| x.get(src_entity));
@@ -881,15 +884,14 @@ impl ArchetypeData {
                     }
 
                     ArchetypeData::clone_components(
-                        src_world,
                         clone_impl,
-                        src_chunk,
-                        entities_to_write,
-                        &dst_entities,
-                        dst_components,
-                        src_entity_start_idx,
-                        src_entity_end_idx,
+                        src_world,
                         src_archetype,
+                        src_chunk,
+                        src_begin_idx..src_end_idx,
+                        &dst_entities[dst_begin_idx.0..dst_end_idx.0],
+                        dst_components,
+                        entities_to_write,
                     );
 
                     entities_remaining -= entities_to_write;
@@ -944,8 +946,12 @@ impl ArchetypeData {
         let (dst_entities, dst_components) = writer.get();
 
         // Find the region of memory we will be reading from in the source chunk
-        let src_entity_start_idx = src_location.component();
-        let src_entity_end_idx = ComponentIndex(src_entity_start_idx.0 + 1);
+        let src_begin_idx = src_location.component();
+        let src_end_idx = ComponentIndex(src_begin_idx.0 + 1);
+
+        // We know how many entities will be appended to this list
+        let dst_begin_idx = ComponentIndex(dst_entities.len());
+        let dst_end_idx = ComponentIndex(dst_entities.len() + entities_to_write);
 
         // Copy the entity to the destination chunk. The normal case is that we simply allocate
         // a new entity.
@@ -976,31 +982,31 @@ impl ArchetypeData {
         dst_entities.push(dst_entity);
 
         ArchetypeData::clone_components(
-            src_world,
             clone_impl,
-            src_chunk,
-            entities_to_write,
-            &dst_entities,
-            dst_components,
-            src_entity_start_idx,
-            src_entity_end_idx,
+            src_world,
             src_archetype,
+            src_chunk,
+            src_begin_idx..src_end_idx,
+            &dst_entities[dst_begin_idx.0..dst_end_idx.0],
+            dst_components,
+            entities_to_write,
         );
 
         dst_entity
     }
 
+    /// Implements shared logic between clone_from and clone_from_single. For every component type,
+    /// in the given archetype,
     #[allow(clippy::too_many_arguments)]
     fn clone_components<C: crate::world::CloneImpl>(
-        src_world: &crate::world::World,
         clone_impl: &C,
+        src_world: &crate::world::World,
+        src_archetype: &ArchetypeData,
         src_chunk: &ComponentStorage,
-        entities_to_write: usize,
+        src_range: core::ops::Range<ComponentIndex>,
         dst_entities: &[Entity],
         dst_components: &UnsafeCell<Components>,
-        src_entity_start_idx: ComponentIndex,
-        src_entity_end_idx: ComponentIndex,
-        src_archetype: &ArchetypeData,
+        entities_to_write: usize,
     ) {
         for (src_type, _) in src_archetype.description().components() {
             let dst_components = unsafe { &mut *dst_components.get() };
@@ -1026,7 +1032,7 @@ impl ArchetypeData {
 
                 // offset to the first entity we want to copy from the source chunk
                 let src_data =
-                    src_component_chunk_data.add(src_element_size * src_entity_start_idx.0);
+                    src_component_chunk_data.add(src_element_size * src_range.start.0);
 
                 // allocate the space we need in the destination chunk
                 let dst_data = dst_component_writer.reserve_raw(entities_to_write).as_ptr();
@@ -1035,10 +1041,10 @@ impl ArchetypeData {
                 clone_impl.clone_components(
                     src_world,
                     src_chunk,
-                    src_entity_start_idx..src_entity_end_idx,
+                    src_range.clone(),
                     *src_type,
-                    &src_chunk.entities[src_entity_start_idx.0..src_entity_end_idx.0],
-                    &dst_entities[src_entity_start_idx.0..src_entity_end_idx.0],
+                    &src_chunk.entities[src_range.start.0..src_range.end.0],
+                    dst_entities,
                     src_data,
                     dst_data,
                     entities_to_write,
