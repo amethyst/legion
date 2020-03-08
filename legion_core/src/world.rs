@@ -1053,7 +1053,7 @@ impl World {
                 src_archetype,
                 &src_location,
                 dst_archetype_index,
-                &mut self.entity_allocator,
+                &self.entity_allocator,
                 &mut self.entity_locations,
                 clone_impl,
                 replace_mapping,
@@ -1081,13 +1081,11 @@ impl World {
             .next();
 
         // If it doesn't exist, allocate it
-        let dst_archetype_index = if let Some(arch_index) = matches {
+        if let Some(arch_index) = matches {
             ArchetypeIndex(arch_index)
         } else {
             dst_storage.alloc_archetype(dst_archetype).0
-        };
-
-        dst_archetype_index
+        }
     }
 
     fn find_archetype<T, C>(&self, tags: &mut T, components: &mut C) -> Option<ArchetypeIndex>
@@ -1292,7 +1290,7 @@ impl<'m, 's> EntityReplacePolicy<'s> for HashMapEntityReplacePolicy<'m> {
     }
 
     fn get_dst_entity(&self, src_entity: Entity) -> Option<Entity> {
-        self.0.get(&src_entity).map(|x| *x)
+        self.0.get(&src_entity).copied()
     }
 }
 

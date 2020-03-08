@@ -737,7 +737,7 @@ impl ArchetypeData {
         src_chunk_set_index: SetIndex,
     ) -> SetIndex {
         let dst_chunk_set_index = self.find_chunk_set_by_tags(src_tags, src_chunk_set_index);
-        let dst_chunk_set_index = dst_chunk_set_index.unwrap_or_else(|| {
+        dst_chunk_set_index.unwrap_or_else(|| {
             self.alloc_chunk_set(|self_tags| {
                 for (type_id, other_tags) in src_tags.0.iter() {
                     unsafe {
@@ -747,8 +747,7 @@ impl ArchetypeData {
                     }
                 }
             })
-        });
-        dst_chunk_set_index
+        })
     }
 
     pub(crate) fn move_from(&mut self, mut other: ArchetypeData) {
