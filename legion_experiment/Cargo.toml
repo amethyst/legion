@@ -1,0 +1,26 @@
+[package]
+name = "legion_experiment"
+version = "0.2.1"
+authors = ["Thomas Gillen <thomas.gillen@googlemail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+
+[dependencies]
+parking_lot = "0.9"
+downcast-rs = "1.0"
+itertools = "0.8"
+rayon = { version = "1.2", optional = true }
+crossbeam-queue = { version = "0.2.0", optional = true }
+crossbeam-channel = "0.4.0"
+derivative = "1"
+smallvec = "0.6"
+tracing = "0.1"
+metrics = { version = "0.12", optional = true }
+serde = { version = "1", optional = true }
+fxhash = "0.2"
+thiserror = "1.0"
+paste = "0.1"
+smallbitvec = "2.4"
