@@ -787,7 +787,7 @@ impl ArchetypeData {
     /// entity referenced in replace_mappings actually exists in the world. The public API in world
     /// checks this assumption and panics if it is violated.
     ///
-    /// See also clone_from_single, which copies a specific entity
+    /// See also `clone_from_single`, which copies a specific entity
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn clone_from<
         's,
@@ -905,7 +905,7 @@ impl ArchetypeData {
     /// replace_mapping is not none, that the entity exists. The public API in world checks this
     /// assumption and panics if it is violated.
     ///
-    /// See also clone_from, which copies all data
+    /// See also `clone_from`, which copies all data
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn clone_from_single<C: crate::world::CloneImpl>(
         &mut self,
@@ -994,7 +994,7 @@ impl ArchetypeData {
         dst_entity
     }
 
-    /// Implements shared logic between clone_from and clone_from_single. For every component type,
+    /// Implements shared logic between `clone_from` and `clone_from_single`. For every component type,
     /// in the given archetype,
     #[allow(clippy::too_many_arguments)]
     fn clone_components<C: crate::world::CloneImpl>(

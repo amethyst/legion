@@ -1178,7 +1178,7 @@ impl Default for World {
     fn default() -> Self { Self::new() }
 }
 
-/// Describes how to handle a clone_from. Allows the user to transform components from one type
+/// Describes how to handle a `clone_from`. Allows the user to transform components from one type
 /// to another and provide their own implementation for cloning/transforming
 pub trait CloneImpl {
     /// When a component of the provided `component_type` is encountered, we will transfer data
@@ -1208,33 +1208,61 @@ pub trait CloneImpl {
     );
 }
 
-/// Used along with CloneImpl, allows receiving results from a clone_from or clone_from_single call
+/// Used along with `CloneImpl`, allows receiving results from a `clone_from` or `clone_from_single`
+/// call.
 pub trait CloneImplResult {
     /// For every entity that is copied, this function will be called, passing the entity in the
     /// source and destination worlds
     fn add_result(&mut self, src_entity: Entity, dst_entity: Entity);
 }
 
-/// Used along with CloneImpl, allows specifying that certain entities in the receiving world should
-/// be replaced with entities from the source world
+/// Used along with `CloneImpl`, allows specifying that certain entities in the receiving world should
+/// be replaced with entities from the source world.
+///
+/// A typical implementation of this trait would be to wrap a HashMap. `src_entities` would be
+/// implemented by returning keys(), `dst_entities` would be implemented by returning values(), and
+/// `get_dst_entity` would be implemented by returning the result of get(src_entity).
+///
+/// Default implementations provided in legion include:
+/// * `NoneEntityReplacePolicy` - No entity replacement will occur
+/// * `HashMapCloneImplResult` - Wraps the standard library's HashMap.
 pub trait EntityReplacePolicy<'s> {
-    /// This function must return all entities in the source world that will replace data in the
-    /// destination world
+    /// Returns all entities in the source world that will replace data in the destination world
+    ///
+    /// # Safety
+    ///
+    /// * All entities returned via the iterator must exist in the source world
+    /// * All entities that will be copied from the source world must be included in the
+    ///   returned iterator.
     fn src_entities<'a>(&'s self) -> Box<dyn Iterator<Item = Entity> + 'a>
     where
         's: 'a;
 
-    /// This function must return all entities in the destination world that will be replaced
+    /// Returns all entities in the destination world that will be replaced
+    ///
+    /// # Safety
+    ///
+    /// * All entities returned via the iterator must exist in the destination world
+    /// * All entities that will be replaced in the destination world must be included in the
+    ///   returned iterator
     fn dst_entities<'a>(&'s self) -> Box<dyn Iterator<Item = Entity> + 'a>
     where
         's: 'a;
 
-    /// When called, if the provided source entity is intended to replace an entity in the
-    /// destination world, the function must return the entity in the destination world, or None
+    /// Returns the entity in the destination world that will be replaced by the given entity in the
+    /// source world, otherwise None if the entity in the source world should not replace anything.
+    ///
+    /// # Safety
+    ///
+    /// * All entities passed into this function that result in a non-None return value must be
+    ///   included in the iterator returned by `src_entities`
+    /// * All entities returned by this function must be included in the iterator returned by
+    ///   `dst_entities`
     fn get_dst_entity(&self, src_entity: Entity) -> Option<Entity>;
 }
 
-/// Used to opt-out of receiving results from a clone_from or clone_from_single call
+/// Used to opt-out of receiving results from a `clone_from` or `clone_from_single` call
+/// (See comments on `CloneImplResult`)
 pub struct NoneCloneImplResult;
 impl CloneImplResult for NoneCloneImplResult {
     fn add_result(&mut self, _src_entity: Entity, _dst_entity: Entity) {
@@ -1242,7 +1270,8 @@ impl CloneImplResult for NoneCloneImplResult {
     }
 }
 
-/// Used to opt-out of replacing entities during a clone_from or clone_from_single call
+/// Used to opt-out of replacing entities during a `clone_from` or `clone_from_single` call.
+/// (See comments on `EntityReplacePolicy`)
 pub struct NoneEntityReplacePolicy;
 impl<'s> EntityReplacePolicy<'s> for NoneEntityReplacePolicy {
     fn src_entities<'a>(&self) -> Box<dyn Iterator<Item = Entity> + 'a>
@@ -1262,7 +1291,9 @@ impl<'s> EntityReplacePolicy<'s> for NoneEntityReplacePolicy {
     fn get_dst_entity(&self, _src_entity: Entity) -> Option<Entity> { None }
 }
 
-/// Default implementation of CloneImplResult that uses a hash map
+/// Default implementation of `CloneImplResult` that uses a hash map. Keys are entities in the
+/// source world and values are entities in the destination world. (See comments on
+/// `CloneImplResult`)
 pub struct HashMapCloneImplResult<'m>(pub &'m mut HashMap<Entity, Entity>);
 
 impl<'m> CloneImplResult for HashMapCloneImplResult<'m> {
@@ -1271,7 +1302,9 @@ impl<'m> CloneImplResult for HashMapCloneImplResult<'m> {
     }
 }
 
-/// Default implementation of EntityReplacePolicy that uses a hash map
+/// Default implementation of `EntityReplacePolicy` that uses a hash map. Keys are entities in the
+/// source world and values are entities in the destination world. (See comments on
+/// `EntityReplacePolicy`)
 pub struct HashMapEntityReplacePolicy<'m>(pub &'m HashMap<Entity, Entity>);
 
 impl<'m, 's> EntityReplacePolicy<'s> for HashMapEntityReplacePolicy<'m> {
