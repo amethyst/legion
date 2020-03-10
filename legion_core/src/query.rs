@@ -1192,6 +1192,10 @@ where
     /// This method performs runtime borrow checking. It will panic if any other code is
     /// concurrently writing to the data slice.
     pub fn components<'a, T: Component>(&self, world: &'a World) -> RefMapSet<'a, Vec<&'a T>> {
+        if !V::reads::<T>() {
+            panic!("data type not readable via this query");
+        }
+
         let mut borrows = vec![];
         let mut refs = vec![];
 
@@ -1226,6 +1230,10 @@ where
         &self,
         world: &'a World,
     ) -> RefMapMutSet<'a, Vec<&'a mut T>> {
+        if !V::writes::<T>() {
+            panic!("data type not writable via this query");
+        }
+
         let mut borrows = vec![];
         let mut refs = vec![];
 

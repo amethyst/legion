@@ -620,12 +620,13 @@ fn query_get_all_components() {
     );
     world.insert((Static, Model(1)), vec![(Pos(1., 2., 3.),)]);
 
-    let query_pos = Write::<Pos>::query();
-    let query_rot = Write::<Rot>::query();
-
+    let query_pos = Read::<Pos>::query();
+    let query_rot = Read::<Rot>::query();
     assert_eq!(2, query_pos.components::<Pos>(&world).len());
     assert_eq!(1, query_rot.components::<Rot>(&world).len());
 
+    let query_pos = Write::<Pos>::query();
+    let query_rot = Write::<Rot>::query();
     assert_eq!(2, query_pos.components_mut::<Pos>(&world).len());
     assert_eq!(1, query_rot.components_mut::<Rot>(&world).len());
 }
