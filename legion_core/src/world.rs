@@ -1,6 +1,4 @@
 use crate::borrow::Ref;
-use crate::borrow::RefMapMutSet;
-use crate::borrow::RefMapSet;
 use crate::borrow::RefMut;
 use crate::entity::BlockAllocator;
 use crate::entity::Entity;
@@ -717,56 +715,6 @@ impl World {
         unsafe { self.get_component_mut_unchecked(entity) }
     }
 
-    pub fn get_all_components<'a, T: Component>(&'a self) -> RefMapSet<'a, Vec<&'a T>> {
-        let filter = crate::filter::filter_fns::component::<T>();
-
-        let mut borrows = vec![];
-        let mut refs = vec![];
-
-        unsafe {
-            filter
-                .iter_archetype_indexes(self.storage())
-                .flat_map(|archetype_index| {
-                    self.storage()
-                        .archetypes()
-                        .get_unchecked(archetype_index.0)
-                        .iter_data_slice::<T>()
-                })
-                .map(|x| x.deconstruct())
-                .for_each(|(borrow, slice)| {
-                    borrows.push(borrow);
-                    refs.extend(slice);
-                });
-        }
-
-        RefMapSet::new(borrows, refs)
-    }
-
-    pub fn get_all_components_mut<'a, T: Component>(&'a self) -> RefMapMutSet<'a, Vec<&'a mut T>> {
-        let filter = crate::filter::filter_fns::component::<T>();
-
-        let mut borrows = vec![];
-        let mut refs = vec![];
-
-        unsafe {
-            filter
-                .iter_archetype_indexes(self.storage())
-                .flat_map(|archetype_index| {
-                    self.storage()
-                        .archetypes()
-                        .get_unchecked(archetype_index.0)
-                        .iter_data_slice_mut::<T>()
-                })
-                .map(|x| x.deconstruct())
-                .for_each(|(borrow, slice)| {
-                    borrows.push(borrow);
-                    refs.extend(slice);
-                });
-        }
-
-        RefMapMutSet::new(borrows, refs)
-    }
-
     /// Gets tag data for the given entity.
     ///
     /// Returns `Some(data)` if the entity was found and contains the specified data.
@@ -785,33 +733,6 @@ impl World {
 
     /// Determines if the given `Entity` is alive within this `World`.
     pub fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
-
-    /// Returns the entity's component types, if the entity exists.
-    pub fn entity_component_types(
-        &self,
-        entity: Entity,
-    ) -> Option<&[(ComponentTypeId, ComponentMeta)]> {
-        if !self.is_alive(entity) {
-            return None;
-        }
-        let location = self.entity_locations.get(entity);
-        let archetype = location
-            .map(|location| self.storage().archetype(location.archetype()))
-            .unwrap_or(None);
-        archetype.map(|archetype| archetype.description().components())
-    }
-
-    /// Returns the entity's tag types, if the entity exists.
-    pub fn entity_tag_types(&self, entity: Entity) -> Option<&[(TagTypeId, TagMeta)]> {
-        if !self.is_alive(entity) {
-            return None;
-        }
-        let location = self.entity_locations.get(entity);
-        let archetype = location
-            .map(|location| self.storage().archetype(location.archetype()))
-            .unwrap_or(None);
-        archetype.map(|archetype| archetype.description().tags())
-    }
 
     /// Iteratively defragments the world's internal memory.
     ///
