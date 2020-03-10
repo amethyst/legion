@@ -1,6 +1,4 @@
 use crate::borrow::Ref;
-use crate::borrow::RefMapMutSet;
-use crate::borrow::RefMapSet;
 use crate::borrow::RefMut;
 use crate::entity::BlockAllocator;
 use crate::entity::Entity;
@@ -713,60 +711,6 @@ impl World {
     pub fn get_component_mut<T: Component>(&mut self, entity: Entity) -> Option<RefMut<T>> {
         // safe because the &mut self ensures exclusivity
         unsafe { self.get_component_mut_unchecked(entity) }
-    }
-
-    /// Returns a RefMapSet of all components of a given type. This ultimately allows for getting
-    /// a contiguous slice of refs to all components of the given type.
-    pub fn get_all_components<'a, T: Component>(&'a self) -> RefMapSet<'a, Vec<&'a T>> {
-        let filter = crate::filter::filter_fns::component::<T>();
-
-        let mut borrows = vec![];
-        let mut refs = vec![];
-
-        unsafe {
-            filter
-                .iter_archetype_indexes(self.storage())
-                .flat_map(|archetype_index| {
-                    self.storage()
-                        .archetypes()
-                        .get_unchecked(archetype_index.0)
-                        .iter_data_slice::<T>()
-                })
-                .map(|x| x.deconstruct())
-                .for_each(|(borrow, slice)| {
-                    borrows.push(borrow);
-                    refs.extend(slice);
-                });
-        }
-
-        RefMapSet::new(borrows, refs)
-    }
-
-    /// Returns a RefMapSet of all components of a given type. This ultimately allows for getting
-    /// a contiguous slice of mutable refs to all components of the given type.
-    pub fn get_all_components_mut<'a, T: Component>(&'a self) -> RefMapMutSet<'a, Vec<&'a mut T>> {
-        let filter = crate::filter::filter_fns::component::<T>();
-
-        let mut borrows = vec![];
-        let mut refs = vec![];
-
-        unsafe {
-            filter
-                .iter_archetype_indexes(self.storage())
-                .flat_map(|archetype_index| {
-                    self.storage()
-                        .archetypes()
-                        .get_unchecked(archetype_index.0)
-                        .iter_data_slice_mut::<T>()
-                })
-                .map(|x| x.deconstruct())
-                .for_each(|(borrow, slice)| {
-                    borrows.push(borrow);
-                    refs.extend(slice);
-                });
-        }
-
-        RefMapMutSet::new(borrows, refs)
     }
 
     /// Gets tag data for the given entity.
