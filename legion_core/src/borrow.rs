@@ -397,6 +397,11 @@ impl<'a, T: 'a> AsRef<T> for RefMut<'a, T> {
     fn as_ref(&self) -> &T { self.value }
 }
 
+impl<'a, T: 'a> AsMut<T> for RefMut<'a, T> {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut T { self.value }
+}
+
 impl<'a, T: 'a> std::borrow::Borrow<T> for RefMut<'a, T> {
     #[inline(always)]
     fn borrow(&self) -> &T { self.value }
@@ -519,6 +524,11 @@ impl<'a, T: 'a> DerefMut for RefMapMut<'a, T> {
 impl<'a, T: 'a> AsRef<T> for RefMapMut<'a, T> {
     #[inline(always)]
     fn as_ref(&self) -> &T { &self.value }
+}
+
+impl<'a, T: 'a> AsMut<T> for RefMapMut<'a, T> {
+    #[inline(always)]
+    fn as_mut(&mut self) -> &mut T { &mut self.value }
 }
 
 impl<'a, T: 'a> std::borrow::Borrow<T> for RefMapMut<'a, T> {
