@@ -1176,7 +1176,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::schedule::*;
     use legion_core::prelude::*;
@@ -1743,5 +1743,19 @@ mod tests {
                 executor.execute(&mut world, &mut Resources::default());
             }
         });
+    }
+
+    #[cfg(all(target_arch = "wasm32", not(features = "par-schedule")))]
+    mod wasm {
+        #[wasm_bindgen_test]
+        fn system_mutate_archetype_buffer() { super::system_mutate_archetype_buffer() }
+        #[wasm_bindgen_test]
+        fn system_mutate_archetype() { super::system_mutate_archetype() }
+        #[wasm_bindgen_test]
+        fn fnmut_stateful_system_test() { super::fnmut_stateful_system_test() }
+        #[wasm_bindgen_test]
+        fn builder_create_and_execute() { super::builder_create_and_execute() }
+        #[wasm_bindgen_test]
+        fn builder_schedule_execute() { super::builder_schedule_execute() }
     }
 }

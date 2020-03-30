@@ -44,6 +44,9 @@ itertools = "0.8"
 rayon = "1.2"
 crossbeam-channel = "0.4.0"
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = { version = "0.3" }
+
 [[bench]]
 name = "benchmarks"
 harness = false

@@ -363,7 +363,7 @@ impl<'a> Iterator for CreateEntityIter<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use crate::entity::*;
     use std::collections::HashSet;
 
