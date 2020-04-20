@@ -469,9 +469,10 @@ impl Builder {
     }
 
     /// Adds a thread local system to the schedule. This system will be executed on the main thread.
-    pub fn add_thread_local<S: Into<Box<dyn Runnable>>>(self, system: S) -> Self {
-        let mut system = system.into();
-        self.add_thread_local_fn(move |world, resources| system.run(world, resources))
+    pub fn add_thread_local<S: Into<Box<dyn Runnable>>>(mut self, system: S) -> Self {
+        let system = system.into();
+        self.steps.push(Step::ThreadLocalSystem(system));
+        self
     }
 
     /// Finalizes the builder into a `Schedule`.
@@ -495,6 +496,8 @@ pub enum Step {
     FlushCmdBuffers,
     /// A thread local function.
     ThreadLocalFn(Box<dyn FnMut(&mut World, &mut Resources)>),
+    /// A thread local system
+    ThreadLocalSystem(Box<dyn Runnable>),
 }
 
 /// A schedule of systems for execution.
@@ -529,16 +532,28 @@ impl Schedule {
     /// Executes all of the steps in the schedule.
     pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
         let mut waiting_flush: Vec<&mut Executor> = Vec::new();
+        let mut thread_local_systems: Vec<&mut Box<dyn Runnable>> = Vec::new();
         for step in &mut self.steps {
             match step {
                 Step::Systems(executor) => {
                     executor.run_systems(world, resources);
                     waiting_flush.push(executor);
                 }
-                Step::FlushCmdBuffers => waiting_flush
-                    .drain(..)
-                    .for_each(|e| e.flush_command_buffers(world)),
+                Step::FlushCmdBuffers => {
+                    waiting_flush
+                        .drain(..)
+                        .for_each(|e| e.flush_command_buffers(world));
+                    thread_local_systems.drain(..).for_each(|system| {
+                        system.command_buffer_mut(world.id()).unwrap().write(world)
+                    });
+                }
                 Step::ThreadLocalFn(function) => function(world, resources),
+                Step::ThreadLocalSystem(system) => {
+                    system.run(world, resources);
+                    if system.command_buffer_mut(world.id()).is_some() {
+                        thread_local_systems.push(system)
+                    }
+                }
             }
         }
     }
@@ -633,5 +648,37 @@ mod tests {
             .build();
 
         schedule.execute(&mut world, &mut resources);
+    }
+
+    #[test]
+    fn flush_thread_local() {
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+        let mut resources = Resources::default();
+
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        struct TestComp(f32, f32, f32);
+
+        let mut entity = Arc::new(Mutex::new(None));
+
+        {
+            let mut entity = entity.clone();
+
+            let system_one = SystemBuilder::new("one").build_thread_local(move |cmd, _, _, _| {
+                let mut entity = entity.lock().unwrap();
+                *entity = Some(cmd.insert((), vec![(TestComp(0.0, 0.0, 0.0),)])[0]);
+
+                println!("asddsadsd");
+            });
+
+            let mut schedule = Schedule::builder().add_thread_local(system_one).build();
+
+            schedule.execute(&mut world, &mut resources);
+        }
+
+        let entity = entity.lock().unwrap();
+
+        assert!(entity.is_some());
+        assert!(world.get_entity_location(entity.unwrap()).is_some());
     }
 }
