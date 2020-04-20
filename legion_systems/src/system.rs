@@ -152,19 +152,19 @@ where
     ///
     /// This function may panic if other code is concurrently accessing the same components.
     #[inline]
-    pub unsafe fn iter_chunks_unchecked<'a, 'b>(
-        &'b self,
-        world: &SubWorld,
-    ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
+    pub unsafe fn iter_chunks_unchecked<'a, 'data>(
+        &'a self,
+        world: &'data SubWorld,
+    ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
         self.query.get().iter_chunks_unchecked(&*world.world)
     }
 
     /// Gets an iterator which iterates through all chunks that match the query.
     #[inline]
-    pub fn iter_chunks<'a, 'b>(
-        &'b self,
-        world: &SubWorld,
-    ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
+    pub fn iter_chunks<'a, 'data>(
+        &'a self,
+        world: &'data SubWorld,
+    ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>
     where
         V: ReadOnly,
     {
@@ -174,10 +174,10 @@ where
 
     /// Gets an iterator which iterates through all chunks that match the query.
     #[inline]
-    pub fn iter_chunks_mut<'a, 'b>(
-        &'b self,
-        world: &mut SubWorld,
-    ) -> ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
+    pub fn iter_chunks_mut<'a, 'data>(
+        &'a self,
+        world: &'data mut SubWorld,
+    ) -> ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter> {
         // safe because the &mut SubWorld ensures exclusivity
         unsafe { self.iter_chunks_unchecked(world) }
     }
@@ -193,26 +193,26 @@ where
     ///
     /// This function may panic if other code is concurrently accessing the same components.
     #[inline]
-    pub unsafe fn iter_entities_unchecked<'a, 'b>(
-        &'b self,
-        world: &SubWorld,
+    pub unsafe fn iter_entities_unchecked<'a, 'data>(
+        &'a self,
+        world: &'data SubWorld,
     ) -> ChunkEntityIter<
-        'a,
+        'data,
         V,
-        ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+        ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
     > {
         self.query.get().iter_entities_unchecked(&*world.world)
     }
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     #[inline]
-    pub fn iter_entities<'a, 'b>(
-        &'b self,
-        world: &SubWorld,
+    pub fn iter_entities<'a, 'data>(
+        &'a self,
+        world: &'data SubWorld,
     ) -> ChunkEntityIter<
-        'a,
+        'data,
         V,
-        ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+        ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
     >
     where
         V: ReadOnly,
@@ -223,13 +223,13 @@ where
 
     /// Gets an iterator which iterates through all entity data that matches the query, and also yields the the `Entity` IDs.
     #[inline]
-    pub fn iter_entities_mut<'a, 'b>(
-        &'b self,
-        world: &mut SubWorld,
+    pub fn iter_entities_mut<'a, 'data>(
+        &'a self,
+        world: &'data mut SubWorld,
     ) -> ChunkEntityIter<
-        'a,
+        'data,
         V,
-        ChunkViewIter<'a, 'b, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
+        ChunkViewIter<'data, 'a, V, F::ArchetypeFilter, F::ChunksetFilter, F::ChunkFilter>,
     > {
         // safe because the &mut SubWorld ensures exclusivity
         unsafe { self.iter_entities_unchecked(world) }
@@ -248,7 +248,7 @@ where
     #[inline]
     pub unsafe fn iter_unchecked<'a, 'data>(
         &'a self,
-        world: &SubWorld,
+        world: &'data SubWorld,
     ) -> ChunkDataIter<
         'data,
         V,
@@ -261,7 +261,7 @@ where
     #[inline]
     pub fn iter<'a, 'data>(
         &'a self,
-        world: &SubWorld,
+        world: &'data SubWorld,
     ) -> ChunkDataIter<
         'data,
         V,
@@ -278,7 +278,7 @@ where
     #[inline]
     pub fn iter_mut<'a, 'data>(
         &'a self,
-        world: &mut SubWorld,
+        world: &'data mut SubWorld,
     ) -> ChunkDataIter<
         'data,
         V,
