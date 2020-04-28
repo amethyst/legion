@@ -1,93 +1,95 @@
-use crate::borrow::{RefMap, RefMapMut};
-use crate::entity::{EntityLocation, Locations};
-use crate::storage::archetype::EntityTypeLayout;
-use crate::storage::components::{Component, ComponentTypeId};
-use crate::storage::tags::{Tag, TagTypeId};
-use crate::storage::Storage;
+use crate::{
+    entity::EntityLocation,
+    storage::{archetype::Archetype, component::Component, ComponentStorage, Components},
+};
 
 pub struct Entry<'a> {
-    location: EntityLocation,
-    storage: &'a Storage,
+    location: &'a EntityLocation,
+    components: &'a Components,
+    archetypes: &'a [Archetype],
 }
 
 impl<'a> Entry<'a> {
-    pub(crate) fn new(location: EntityLocation, storage: &'a Storage) -> Self {
-        Self { location, storage }
+    pub(crate) fn new(
+        location: &'a EntityLocation,
+        components: &'a Components,
+        archetypes: &'a [Archetype],
+    ) -> Self {
+        Self {
+            location,
+            components,
+            archetypes,
+        }
     }
 
-    pub fn layout(&self) -> &EntityTypeLayout { self.storage[self.location.archetype()].layout() }
-
-    pub fn location(&self) -> EntityLocation { self.location }
-
-    pub fn get_component<T: Component>(&self) -> Option<RefMap<&T>> {
-        let type_id = ComponentTypeId::of::<T>();
-        let chunk = &self.storage[self.location.archetype()][self.location.chunk()];
-        let components = chunk.components().get(type_id)?;
-        Some(
-            unsafe { components.get_slice::<T>() }
-                .map_into(|slice| &slice[self.location.component().0]),
-        )
+    pub fn archetype(&self) -> &Archetype {
+        &self.archetypes[self.location.archetype()]
     }
 
-    pub fn get_tag<T: Tag>(&self) -> Option<&T> {
-        let arch = &self.storage[self.location.archetype()];
-        arch.tags().get()
+    pub fn location(&self) -> EntityLocation {
+        *self.location
+    }
+
+    pub fn get_component<T: Component>(&self) -> Option<&T> {
+        let component = self.location.component();
+        let archetype = self.location.archetype();
+        self.components
+            .get_downcast::<T>()
+            .and_then(move |storage| storage.get(archetype))
+            .and_then(move |slice| slice.into_slice().get(component.0))
     }
 }
 
 pub struct EntryMut<'a> {
-    location: EntityLocation,
-    storage: &'a mut Storage,
-    entity_locations: &'a mut Locations,
+    location: &'a mut EntityLocation,
+    components: &'a mut Components,
+    archetypes: &'a mut [Archetype],
 }
 
 impl<'a> EntryMut<'a> {
     pub(crate) fn new(
-        location: EntityLocation,
-        storage: &'a mut Storage,
-        entity_locations: &'a mut Locations,
+        location: &'a mut EntityLocation,
+        components: &'a mut Components,
+        archetypes: &'a mut [Archetype],
     ) -> Self {
         Self {
             location,
-            storage,
-            entity_locations,
+            components,
+            archetypes,
         }
     }
 
-    pub fn layout(&self) -> &EntityTypeLayout { self.storage[self.location.archetype()].layout() }
-
-    pub fn location(&self) -> EntityLocation { self.location }
-
-    pub fn get_component<T: Component>(&self) -> Option<RefMap<&T>> {
-        let type_id = ComponentTypeId::of::<T>();
-        let chunk = &self.storage[self.location.archetype()][self.location.chunk()];
-        let components = chunk.components().get(type_id)?;
-        Some(
-            unsafe { components.get_slice::<T>() }
-                .map_into(|slice| &slice[self.location.component().0]),
-        )
+    pub fn archetype(&self) -> &Archetype {
+        &self.archetypes[self.location.archetype()]
     }
 
-    pub fn get_component_mut<T: Component>(&mut self) -> Option<RefMapMut<&mut T>> {
-        let type_id = ComponentTypeId::of::<T>();
-        let chunk = &self.storage[self.location.archetype()][self.location.chunk()];
-        let components = chunk.components().get(type_id)?;
-        Some(
-            unsafe { components.get_slice_mut::<T>() }
-                .map_into(|slice| &mut slice[self.location.component().0]),
-        )
+    pub fn location(&self) -> EntityLocation {
+        *self.location
     }
 
-    pub fn get_tag<T: Tag>(&self) -> Option<&T> {
-        let arch = &self.storage[self.location.archetype()];
-        arch.tags().get()
+    pub fn get_component<T: Component>(&self) -> Option<&T> {
+        let component = self.location.component();
+        let archetype = self.location.archetype();
+        self.components
+            .get_downcast::<T>()
+            .and_then(move |storage| storage.get(archetype))
+            .and_then(move |slice| slice.into_slice().get(component.0))
     }
 
-    pub fn add_component<T: Component>(&mut self, component: T) {}
+    pub fn get_component_mut<T: Component>(&mut self) -> Option<&mut T> {
+        let component = self.location.component();
+        let archetype = self.location.archetype();
+        self.components
+            .get_downcast::<T>()
+            .and_then(move |storage| unsafe { storage.get_mut(archetype) })
+            .and_then(move |slice| slice.into_slice().get_mut(component.0))
+    }
 
-    pub fn remove_component<T: Component>(&mut self) {}
+    pub fn add_component<T: Component>(&mut self, component: T) {
+        todo!()
+    }
 
-    pub fn add_tag<T: Tag>(&mut self, tag: T) {}
-
-    pub fn remove_tag<T: Tag>(&mut self) {}
+    pub fn remove_component<T: Component>(&mut self) {
+        todo!()
+    }
 }

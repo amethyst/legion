@@ -1,8 +1,8 @@
-pub mod borrow;
-pub mod entity;
+mod entity;
 pub mod entry;
-pub mod event;
+mod hash;
+mod insert;
+mod iter;
 pub mod query;
 pub mod storage;
-pub mod universe;
 pub mod world;

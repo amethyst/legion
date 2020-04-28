@@ -1,355 +1,287 @@
-use crate::borrow::{AtomicRefCell, Ref};
-use crate::event::{Event, EventFilter, Subscriber, Subscribers};
-use crate::storage::archetype::{Archetype, ArchetypeTagsRef, EntityTypeLayout};
-use crate::storage::chunk::Chunk;
-use crate::storage::components::{ComponentStorageLayout, ComponentTypeId};
-use crate::storage::filter::FilterResult;
-use crate::storage::index::ArchetypeIndex;
-use crate::storage::slicevec::{SliceVec, SliceVecIter};
-use crate::storage::tags::{TagStorage, TagTypeId};
-use smallvec::SmallVec;
-use std::iter::{Enumerate, Zip};
-use std::ops::{Deref, DerefMut};
-use std::slice::Iter;
-use std::sync::Arc;
+use crate::hash::ComponentTypeIdHasher;
+use archetype::ArchetypeIndex;
+use component::{Component, ComponentTypeId};
+use downcast_rs::{impl_downcast, Downcast};
+use std::{
+    cell::UnsafeCell,
+    collections::{HashMap, HashSet},
+    hash::BuildHasherDefault,
+    ops::{Deref, DerefMut, Index, IndexMut},
+};
 
 pub mod archetype;
-pub mod chunk;
-pub mod components;
+pub mod component;
 pub mod filter;
+pub mod group;
 pub mod index;
+pub mod packed;
 pub mod slicevec;
-pub mod tags;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct ComponentIndex(pub(crate) usize);
+
+pub trait UnknownComponentStorage: Downcast {
+    fn insert_archetype(&mut self, archetype: ArchetypeIndex, index: Option<usize>);
+    fn move_component(
+        &mut self,
+        epoch: u64,
+        source: ArchetypeIndex,
+        index: usize,
+        dst: ArchetypeIndex,
+    );
+    fn swap_remove(&mut self, epoch: u64, archetype: ArchetypeIndex, index: usize);
+    fn pack(&mut self, epoch_threshold: u64) -> usize;
+    fn fragmentation(&self) -> f32;
+}
+impl_downcast!(UnknownComponentStorage);
+
+pub struct ComponentSlice<'a, T: Component> {
+    pub components: &'a [T],
+    pub version: &'a u64,
+}
+
+impl<'a, T: Component> ComponentSlice<'a, T> {
+    pub fn new(components: &'a [T], version: &'a u64) -> Self {
+        Self {
+            components,
+            version,
+        }
+    }
+
+    pub fn into_slice(self) -> &'a [T] {
+        self.components
+    }
+}
+
+impl<'a, T: Component> Into<&'a [T]> for ComponentSlice<'a, T> {
+    fn into(self) -> &'a [T] {
+        self.components
+    }
+}
+
+impl<'a, T: Component> Deref for ComponentSlice<'a, T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        &self.components
+    }
+}
+
+impl<'a, T: Component> Index<ComponentIndex> for ComponentSlice<'a, T> {
+    type Output = T;
+    fn index(&self, index: ComponentIndex) -> &Self::Output {
+        &self.components[index.0]
+    }
+}
+
+pub struct ComponentSliceMut<'a, T: Component> {
+    pub components: &'a mut [T],
+    pub version: &'a mut u64,
+}
+
+impl<'a, T: Component> ComponentSliceMut<'a, T> {
+    pub fn new(components: &'a mut [T], version: &'a mut u64) -> Self {
+        Self {
+            components,
+            version,
+        }
+    }
+
+    pub fn into_slice(self) -> &'a mut [T] {
+        self.components
+    }
+}
+
+impl<'a, T: Component> Into<&'a mut [T]> for ComponentSliceMut<'a, T> {
+    fn into(self) -> &'a mut [T] {
+        self.components
+    }
+}
+
+impl<'a, T: Component> Deref for ComponentSliceMut<'a, T> {
+    type Target = [T];
+
+    fn deref(&self) -> &Self::Target {
+        &self.components
+    }
+}
+
+impl<'a, T: Component> DerefMut for ComponentSliceMut<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.components
+    }
+}
+
+impl<'a, T: Component> Index<ComponentIndex> for ComponentSliceMut<'a, T> {
+    type Output = T;
+    fn index(&self, index: ComponentIndex) -> &Self::Output {
+        &self.components[index.0]
+    }
+}
+
+impl<'a, T: Component> IndexMut<ComponentIndex> for ComponentSliceMut<'a, T> {
+    fn index_mut(&mut self, index: ComponentIndex) -> &mut Self::Output {
+        &mut self.components[index.0]
+    }
+}
+
+pub trait ComponentStorage<'a, T: Component>: UnknownComponentStorage + Default {
+    type Iter: Iterator<Item = ComponentSlice<'a, T>>;
+    type IterMut: Iterator<Item = ComponentSliceMut<'a, T>>;
+
+    fn len(&self) -> usize;
+
+    /// Copies new components into the specified archetype slice.
+    ///
+    /// # Safety
+    /// The components located at `ptr` are memcopied into the storage. If `T` is not `Copy`, then the
+    /// previous memory location should no longer be accessed.
+    unsafe fn extend_memcopy(
+        &mut self,
+        epoch: u64,
+        archetype: ArchetypeIndex,
+        ptr: *const T,
+        len: usize,
+    );
+
+    /// Gets the component slice for the specified archetype.
+    fn get(&'a self, archetype: ArchetypeIndex) -> Option<ComponentSlice<'a, T>>;
+
+    /// Gets a mutable component slice for the specified archetype.
+    ///
+    /// # Safety
+    /// Ensure that the requested archetype slice is not concurrently borrowed anywhere else such that memory
+    /// is not mutably aliased.
+    unsafe fn get_mut(&'a self, archetype: ArchetypeIndex) -> Option<ComponentSliceMut<'a, T>>;
+
+    /// Iterates through all archetype component slices.
+    fn iter(&'a self, archetype_count: usize) -> Self::Iter;
+
+    /// Iterates through all mutable archetype component slices.
+    ///
+    /// # Safety
+    /// Ensure that all requested archetype slices are not concurrently borrowed anywhere else such that memory
+    /// is not mutably aliased.
+    unsafe fn iter_mut(&'a self, archetype_count: usize) -> Self::IterMut;
+}
 
 #[derive(Default)]
-pub struct Storage {
-    /// Query search index.
-    index: LayoutIndex,
-    /// Distinct entity component/tag layouts.
-    /// Each index in this vector corresponds to an index in the `Index`.
-    layouts: Vec<Arc<EntityLayoutData>>,
-    /// A vector of all archetypes, each containing chunks of entity component data.
-    data: Vec<Archetype>,
-    /// All subscribers.
-    subscribers: Subscribers,
-    /// Subscribers for each layout.
-    subscribers_per_layout: Vec<Subscribers>,
-}
-
-impl Storage {
-    pub fn layout_index(&self) -> &LayoutIndex { &self.index }
-
-    pub(crate) fn push_layout(&mut self, layout: EntityTypeLayout) -> usize {
-        let storage_layout = ComponentStorageLayout::new(&layout);
-        self.index.push_layout(&layout);
-        self.subscribers_per_layout.push(Subscribers::new(
-            self.subscribers
-                .matches_layout(layout.component_types(), layout.tag_types()),
-        ));
-        self.layouts.push(Arc::new(EntityLayoutData {
-            entity_layout: layout,
-            chunk_layout: storage_layout,
-        }));
-        self.layouts.len() - 1
-    }
-
-    pub(crate) fn push_archetype(
-        &mut self,
-        layout_index: usize,
-        mut init_tags: impl FnMut(&mut TagValues),
-    ) -> ArchetypeIndex {
-        {
-            let mut tag_values = unsafe { self.index.tag_values[layout_index].get_mut() };
-            init_tags(&mut *tag_values);
-        }
-
-        let index = ArchetypeIndex(self.data.len());
-        let layout_archetypes = &mut self.index.archetypes[layout_index];
-        let layout_archetypes_index = layout_archetypes.len();
-        layout_archetypes.push(index);
-
-        let tags = self.index.tag_values[layout_index].clone();
-        let subscribers = self.subscribers_per_layout[layout_index]
-            .matches_archetype(&ArchetypeTagsRef::new(tags.get(), layout_archetypes_index));
-        let arch = Archetype::new(
-            tags,
-            layout_archetypes_index,
-            self.layouts[layout_index].clone(),
-            Subscribers::new(subscribers),
-        );
-
-        self.data.push(arch);
-        index
-    }
-
-    pub(crate) fn merge(&mut self, mut other: Storage) {
-        //        for archetype in other.data.drain(..) {
-        //            let layout_index =
-        //                {
-        //                    if let Some((i, _)) = self.layout_index().iter().enumerate().find(
-        //                        |(i, (tags, components, _, _))| {
-        //                            archetype
-        //                                .layout()
-        //                                .matches_layout(tags, components)
-        //                                .is_pass()
-        //                        },
-        //                    ) {
-        //                        i
-        //                    } else {
-        //                        self.push_layout(archetype.layout().clone())
-        //                    }
-        //                };
-        //
-        //            let (tags, archetypes) =
-        //                self.layouts.layout_archetypes(layout_index).unwrap();
-        //
-        //            for (index, arch) in archetypes.iter().enumerate() {
-        //                if archetype.matches_archetype(&ArchetypeTagsRef { tags, index }).is_pass() {
-        //                    // found matching archetype, move chunks
-        //                    self.data[arch.0].
-        //                }
-        //            }
-        //
-        //            // no matching archetype
-        //            self.data.push()
-        //        }
-        panic!("unimplemented");
-    }
-
-    pub(crate) fn subscribe<T: EventFilter + 'static>(
-        &mut self,
-        sender: crossbeam_channel::Sender<Event>,
-        filter: T,
-        send_initial_events: bool,
-    ) {
-        let subscriber = Subscriber::new(Arc::new(filter), sender);
-        self.subscribers.push(subscriber.clone());
-
-        for (i, (components, tags, _, _)) in self.index.iter().enumerate() {
-            if subscriber
-                .filter()
-                .matches_layout(components, tags)
-                .is_pass()
-            {
-                self.subscribers_per_layout[i].push(subscriber.clone());
-
-                for arch in self.data.iter_mut() {
-                    if subscriber
-                        .filter()
-                        .matches_archetype(&arch.tags())
-                        .is_pass()
-                    {
-                        arch.subscribe(subscriber.clone(), send_initial_events);
-                    }
-                }
-            }
-        }
-    }
-}
-
-impl Deref for Storage {
-    type Target = [Archetype];
-
-    fn deref(&self) -> &Self::Target { &self.data }
-}
-
-impl DerefMut for Storage {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.data }
-}
-
-#[derive(Default)]
-pub struct LayoutIndex {
-    /// Slices of component types for each entity layout.
-    component_layouts: SliceVec<ComponentTypeId>,
-    /// Slices of tag types for each entity layout.
-    tag_layouts: SliceVec<TagTypeId>,
-    /// Vectors of tag values for each entity layout.
-    tag_values: Vec<Arc<AtomicRefCell<TagValues>>>,
-    /// Vectors of archetype indexes for each entity layout.
-    archetypes: Vec<Vec<ArchetypeIndex>>,
-}
-
-impl LayoutIndex {
-    fn push_layout(&mut self, layout: &EntityTypeLayout) -> usize {
-        self.component_layouts
-            .push(layout.components().map(|(t, _)| *t));
-        self.tag_layouts.push(layout.tags().map(|(t, _)| *t));
-        self.tag_values.push(Arc::new(AtomicRefCell::new(TagValues {
-            tags: layout
-                .tags()
-                .map(|(tag_type, meta)| (*tag_type, TagStorage::new(*meta)))
-                .collect(),
-        })));
-        self.archetypes.push(Vec::default());
-        self.archetypes.len() - 1
-    }
-
-    pub fn iter(&self) -> LayoutIndexIter {
-        let layouts = self
-            .component_layouts
-            .iter()
-            .zip(self.tag_layouts.iter())
-            .zip(self.tag_values.iter())
-            .zip(self.archetypes.iter());
-        LayoutIndexIter { layouts }
-    }
-
-    pub fn layout_archetypes(
-        &self,
-        layout_index: usize,
-    ) -> Option<(Ref<TagValues>, &[ArchetypeIndex])> {
-        let tags = self.tag_values.get(layout_index)?;
-        let archetypes = self.archetypes.get(layout_index)?;
-        Some((tags.get(), archetypes.as_slice()))
-    }
-
-    pub fn search<'a, T: LayoutFilter, U: ArchetypeFilter>(
-        &'a self,
-        layout_filter: &'a T,
-        archetype_filter: &'a U,
-    ) -> ArchetypeSearchIter<'a, T, U> {
-        ArchetypeSearchIter {
-            layout_filter,
-            archetype_filter,
-            layout_data: self.iter(),
-            current_layout: None,
-        }
-    }
-}
-
-pub struct LayoutIndexIter<'a> {
-    layouts: Zip<
-        Zip<
-            Zip<SliceVecIter<'a, ComponentTypeId>, SliceVecIter<'a, TagTypeId>>,
-            Iter<'a, Arc<AtomicRefCell<TagValues>>>,
-        >,
-        Iter<'a, Vec<ArchetypeIndex>>,
+pub struct Components {
+    storages: HashMap<
+        ComponentTypeId,
+        UnsafeCell<Box<dyn UnknownComponentStorage>>,
+        BuildHasherDefault<ComponentTypeIdHasher>,
     >,
 }
 
-impl<'a> Iterator for LayoutIndexIter<'a> {
-    type Item = (
-        &'a [ComponentTypeId],
-        &'a [TagTypeId],
-        Ref<'a, TagValues>,
-        &'a [ArchetypeIndex],
-    );
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.layouts
-            .next()
-            .map(|(((component_types, tag_types), tags), archetypes)| {
-                (
-                    component_types,
-                    tag_types,
-                    tags.get(),
-                    archetypes.as_slice(),
-                )
-            })
-    }
-}
-
-#[derive(Default)]
-pub struct TagValues {
-    tags: SmallVec<[(TagTypeId, TagStorage); 3]>,
-}
-
-impl TagValues {
-    pub fn get(&self, type_id: TagTypeId) -> Option<&TagStorage> {
-        self.tags
-            .iter()
-            .find(|(t, _)| t == &type_id)
-            .map(|(_, t)| t)
+impl Components {
+    pub fn get_or_insert_with<F>(
+        &mut self,
+        type_id: ComponentTypeId,
+        mut create: F,
+    ) -> &mut dyn UnknownComponentStorage
+    where
+        F: FnMut() -> Box<dyn UnknownComponentStorage>,
+    {
+        let cell = self
+            .storages
+            .entry(type_id)
+            .or_insert_with(|| UnsafeCell::new(create()));
+        unsafe { &mut *cell.get() }.deref_mut()
     }
 
-    pub fn get_mut(&mut self, type_id: TagTypeId) -> Option<&mut TagStorage> {
-        self.tags
-            .iter_mut()
-            .find(|(t, _)| t == &type_id)
-            .map(|(_, t)| t)
+    pub fn get(&self, type_id: ComponentTypeId) -> Option<&dyn UnknownComponentStorage> {
+        self.storages
+            .get(&type_id)
+            .map(|cell| unsafe { &*cell.get() }.deref())
     }
-}
 
-#[derive(Clone)]
-pub struct EntityLayoutData {
-    pub entity_layout: EntityTypeLayout,
-    pub chunk_layout: ComponentStorageLayout,
-}
-
-pub trait LayoutFilter {
-    fn matches_layout(&self, components: &[ComponentTypeId], tags: &[TagTypeId]) -> Option<bool>;
-}
-
-impl<T: LayoutFilter> LayoutFilter for &T {
-    fn matches_layout(&self, components: &[ComponentTypeId], tags: &[TagTypeId]) -> Option<bool> {
-        <T as LayoutFilter>::matches_layout(self, components, tags)
+    pub fn get_downcast<T: Component>(&self) -> Option<&T::Storage> {
+        let type_id = ComponentTypeId::of::<T>();
+        self.get(type_id).and_then(|storage| storage.downcast_ref())
     }
-}
 
-pub trait ArchetypeFilter {
-    fn matches_archetype(&self, tags: &ArchetypeTagsRef) -> Option<bool>;
-}
-
-impl<T: ArchetypeFilter> ArchetypeFilter for &T {
-    fn matches_archetype(&self, tags: &ArchetypeTagsRef) -> Option<bool> {
-        <T as ArchetypeFilter>::matches_archetype(self, tags)
+    pub fn get_mut(
+        &mut self,
+        type_id: ComponentTypeId,
+    ) -> Option<&mut dyn UnknownComponentStorage> {
+        self.storages
+            .get_mut(&type_id)
+            .map(|cell| unsafe { &mut *cell.get() }.deref_mut())
     }
-}
 
-pub trait ChunkFilter {
-    fn prepare(&mut self);
-    fn matches_chunk(&mut self, chunk: &Chunk) -> Option<bool>;
-}
+    pub fn get_multi_mut(&mut self) -> MultiMut {
+        MultiMut::new(self)
+    }
 
-pub struct ArchetypeSearchIter<'a, Layout, Arch>
-where
-    Layout: LayoutFilter,
-    Arch: ArchetypeFilter,
-{
-    layout_filter: &'a Layout,
-    archetype_filter: &'a Arch,
-    layout_data: LayoutIndexIter<'a>,
-    current_layout: Option<(Ref<'a, TagValues>, Enumerate<Iter<'a, ArchetypeIndex>>)>,
-}
+    pub fn pack(&mut self, options: &PackOptions, epoch: u64) {
+        let mut total_moved_bytes = 0;
+        for (_, cell) in self.storages.iter_mut() {
+            let storage = unsafe { &mut *cell.get() };
 
-impl<'a, Layout, Arch> Iterator for ArchetypeSearchIter<'a, Layout, Arch>
-where
-    Layout: LayoutFilter,
-    Arch: ArchetypeFilter,
-{
-    type Item = ArchetypeIndex;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            // if we have selected a layout, find next arch which matches arch filter
-            if let Some((tags, archetypes)) = &mut self.current_layout {
-                for (index, arch) in archetypes {
-                    if self
-                        .archetype_filter
-                        .matches_archetype(&ArchetypeTagsRef::new(tags.clone(), index))
-                        .is_pass()
-                    {
-                        return Some(*arch);
-                    }
-                }
+            if storage.fragmentation() >= options.fragmentation_threshold {
+                total_moved_bytes += storage.pack(epoch - options.stability_threshold);
             }
 
-            // find next layout
-            loop {
-                match self.layout_data.next() {
-                    Some((component_types, tag_types, tags, archetypes)) => {
-                        if self
-                            .layout_filter
-                            .matches_layout(component_types, tag_types)
-                            .is_pass()
-                        {
-                            self.current_layout = Some((tags, archetypes.iter().enumerate()));
-                            break;
-                        }
-                    }
-                    None => return None,
-                }
+            if total_moved_bytes >= options.maximum_iteration_size {
+                break;
             }
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct PackOptions {
+    stability_threshold: u64,
+    fragmentation_threshold: f32,
+    maximum_iteration_size: usize,
+}
+
+impl PackOptions {
+    pub fn force() -> Self {
+        Self {
+            stability_threshold: 0,
+            fragmentation_threshold: 0.0,
+            maximum_iteration_size: usize::MAX,
+        }
+    }
+}
+
+impl Default for PackOptions {
+    fn default() -> Self {
+        Self {
+            stability_threshold: 120,
+            fragmentation_threshold: 1.0 / 64.0,
+            maximum_iteration_size: 4 * 1024 * 1024,
+        }
+    }
+}
+
+pub struct MultiMut<'a> {
+    components: &'a mut Components,
+    #[cfg(debug_assertions)]
+    claimed: HashSet<ComponentTypeId, BuildHasherDefault<ComponentTypeIdHasher>>,
+}
+
+impl<'a> MultiMut<'a> {
+    fn new(components: &'a mut Components) -> Self {
+        Self {
+            components,
+            #[cfg(debug_assertions)]
+            claimed: HashSet::default(),
+        }
+    }
+
+    pub unsafe fn claim<T: Component>(&mut self) -> Option<&'a mut T::Storage> {
+        let type_id = ComponentTypeId::of::<T>();
+        #[cfg(debug_assertions)]
+        {
+            assert!(!self.claimed.contains(&type_id));
+            self.claimed.insert(type_id);
+        }
+        self.components
+            .storages
+            .get(&type_id)
+            .and_then(|cell| { &mut *cell.get() }.downcast_mut())
     }
 }

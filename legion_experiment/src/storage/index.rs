@@ -1,54 +1,50 @@
-use crate::entity::Entity;
-use crate::storage::archetype::Archetype;
-use crate::storage::chunk::Chunk;
-use std::fmt;
-use std::ops::Deref;
-use std::ops::Index;
-use std::ops::IndexMut;
+use super::{
+    archetype::{ArchetypeIndex, EntityLayout},
+    component::ComponentTypeId,
+    slicevec::SliceVec,
+};
+use crate::query::filter::LayoutFilter;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ChunkIndex(pub usize);
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ArchetypeIndex(pub usize);
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ComponentIndex(pub usize);
-
-macro_rules! impl_index {
-    ($index_ty:ty: $output_ty:ty) => {
-        impl Index<$index_ty> for [$output_ty] {
-            type Output = $output_ty;
-            #[inline(always)]
-            fn index(&self, index: $index_ty) -> &Self::Output { &self[index.0] }
-        }
-        impl IndexMut<$index_ty> for [$output_ty] {
-            #[inline(always)]
-            fn index_mut(&mut self, index: $index_ty) -> &mut Self::Output { &mut self[index.0] }
-        }
-        impl Index<$index_ty> for Vec<$output_ty> {
-            type Output = $output_ty;
-            #[inline(always)]
-            fn index(&self, index: $index_ty) -> &Self::Output { &self[index.0] }
-        }
-        impl IndexMut<$index_ty> for Vec<$output_ty> {
-            #[inline(always)]
-            fn index_mut(&mut self, index: $index_ty) -> &mut Self::Output { &mut self[index.0] }
-        }
-        impl Deref for $index_ty {
-            type Target = usize;
-            #[inline(always)]
-            fn deref(&self) -> &usize { &self.0 }
-        }
-        impl fmt::Display for $index_ty {
-            #[inline]
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                fmt::Display::fmt(&**self, f)
-            }
-        }
-    };
+#[derive(Default)]
+pub struct SearchIndex {
+    component_layouts: SliceVec<ComponentTypeId>,
 }
 
-impl_index!(ChunkIndex: Chunk);
-impl_index!(ArchetypeIndex: Archetype);
-impl_index!(ComponentIndex: Entity);
+impl SearchIndex {
+    pub fn new() -> Self {
+        Self {
+            component_layouts: SliceVec::default(),
+        }
+    }
+
+    pub(crate) fn push(&mut self, archetype_layout: &EntityLayout) {
+        self.component_layouts
+            .push(archetype_layout.component_types().iter().copied());
+    }
+
+    pub fn search_from<'a, F: LayoutFilter>(
+        &'a self,
+        filter: &'a F,
+        start: usize,
+    ) -> impl Iterator<Item = ArchetypeIndex> + 'a {
+        self.component_layouts
+            .iter()
+            .skip(start)
+            .enumerate()
+            .filter(move |(_, components)| filter.matches_layout(components).is_pass())
+            .map(|(i, _)| ArchetypeIndex(i as u32))
+    }
+
+    pub fn search<'a, F: LayoutFilter>(
+        &'a self,
+        filter: &'a F,
+    ) -> impl Iterator<Item = ArchetypeIndex> + 'a {
+        self.search_from(filter, 0)
+    }
+}
+
+// impl<T: LayoutFilter> LayoutFilter for &T {
+//     fn matches_layout(&self, components: &[ComponentTypeId]) -> Option<bool> {
+//         <T as LayoutFilter>::matches_layout(self, components)
+//     }
+// }

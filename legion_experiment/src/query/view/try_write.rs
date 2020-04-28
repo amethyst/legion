@@ -1,0 +1,240 @@
+use super::{DefaultFilter, Fetch, IntoIndexableIter, View};
+use crate::{
+    iter::indexed::{IndexedIter, TrustedRandomAccess},
+    query::{
+        filter::{passthrough::Passthrough, EntityFilterTuple},
+        QueryResult,
+    },
+    storage::{
+        archetype::{Archetype, ArchetypeIndex},
+        component::{Component, ComponentTypeId},
+        packed::next_component_version,
+        ComponentSliceMut, ComponentStorage, Components,
+    },
+};
+use derivative::Derivative;
+use std::{any::TypeId, marker::PhantomData};
+
+/// Writes a single entity data component type from a chunk.
+#[derive(Derivative, Debug, Copy, Clone)]
+#[derivative(Default(bound = ""))]
+pub struct TryWrite<T: Component>(PhantomData<T>);
+
+impl<T: Component> DefaultFilter for TryWrite<T> {
+    type Filter = EntityFilterTuple<Passthrough, Passthrough>;
+}
+
+impl<'data, T: Component> View<'data> for TryWrite<T> {
+    type Element = <Self::Fetch as IntoIndexableIter>::Item;
+    type Fetch = <TryWriteIter<'data, T> as Iterator>::Item;
+    type Iter = TryWriteIter<'data, T>;
+    type Read = [ComponentTypeId; 1];
+    type Write = [ComponentTypeId; 1];
+
+    #[inline]
+    fn validate() {}
+
+    #[inline]
+    fn reads_types() -> Self::Read {
+        [ComponentTypeId::of::<T>()]
+    }
+
+    #[inline]
+    fn writes_types() -> Self::Write {
+        [ComponentTypeId::of::<T>()]
+    }
+
+    #[inline]
+    fn reads<D: Component>() -> bool {
+        TypeId::of::<T>() == TypeId::of::<D>()
+    }
+
+    #[inline]
+    fn writes<D: Component>() -> bool {
+        TypeId::of::<T>() == TypeId::of::<D>()
+    }
+
+    unsafe fn fetch(
+        components: &'data Components,
+        archetypes: &'data [Archetype],
+        query: QueryResult<'data>,
+    ) -> Self::Iter {
+        let components = components.get_downcast::<T>().unwrap();
+        let archetype_indexes = match query {
+            QueryResult::Unordered(archetypes) => archetypes.iter(),
+            QueryResult::Ordered(archetypes) => archetypes.iter(),
+        };
+        TryWriteIter {
+            components,
+            archetypes,
+            archetype_indexes,
+        }
+    }
+}
+
+/// A fetch iterator which pulls out shared component slices.
+pub struct TryWriteIter<'a, T: Component> {
+    components: &'a T::Storage,
+    archetype_indexes: std::slice::Iter<'a, ArchetypeIndex>,
+    archetypes: &'a [Archetype],
+}
+
+impl<'a, T: Component> Iterator for TryWriteIter<'a, T> {
+    type Item = Slice<'a, T>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.archetype_indexes.next().map(|i| unsafe {
+            self.components.get_mut(*i).map_or_else(
+                || Slice::Empty(self.archetypes[*i].entities().len()),
+                |c| c.into(),
+            )
+        })
+    }
+}
+
+pub enum Slice<'a, T: Component> {
+    Occupied {
+        version: &'a mut u64,
+        components: &'a mut [T],
+        next_version: u64,
+    },
+    Empty(usize),
+}
+
+impl<'a, T: Component> From<ComponentSliceMut<'a, T>> for Slice<'a, T> {
+    fn from(slice: ComponentSliceMut<'a, T>) -> Self {
+        Slice::Occupied {
+            components: slice.components,
+            version: slice.version,
+            next_version: next_component_version(),
+        }
+    }
+}
+
+impl<'a, T: Component> IntoIndexableIter for Slice<'a, T> {
+    type Item = Option<&'a mut T>;
+    type IntoIter = IndexedIter<Data<'a, T>>;
+
+    fn into_indexable_iter(self) -> Self::IntoIter {
+        let data = match self {
+            Self::Occupied { components, .. } => Data::Occupied(components),
+            Self::Empty(count) => Data::Empty(count),
+        };
+        IndexedIter::new(data)
+    }
+}
+
+impl<'a, T: Component> IntoIterator for Slice<'a, T> {
+    type Item = <Self as IntoIndexableIter>::Item;
+    type IntoIter = <Self as IntoIndexableIter>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_indexable_iter()
+    }
+}
+
+impl<'a, T: Component> Fetch for Slice<'a, T> {
+    type Data = Option<&'a mut [T]>;
+
+    #[inline]
+    fn into_components(self) -> Self::Data {
+        match self {
+            Self::Occupied { components, .. } => Some(components),
+            Self::Empty(_) => None,
+        }
+    }
+
+    #[inline]
+    fn find<C: 'static>(&self) -> Option<&[C]> {
+        if TypeId::of::<C>() == TypeId::of::<T>() {
+            // safety: C and T are the same type
+            match self {
+                Self::Occupied { components, .. } => Some(unsafe {
+                    std::slice::from_raw_parts(components.as_ptr() as *const C, components.len())
+                }),
+                Self::Empty(_) => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn find_mut<C: 'static>(&mut self) -> Option<&mut [C]> {
+        if TypeId::of::<C>() == TypeId::of::<T>() {
+            // safety: C and T are the same type
+            match self {
+                Self::Occupied { components, .. } => Some(unsafe {
+                    std::slice::from_raw_parts_mut(
+                        components.as_mut_ptr() as *mut C,
+                        components.len(),
+                    )
+                }),
+                Self::Empty(_) => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn version<C: Component>(&self) -> Option<u64> {
+        if TypeId::of::<C>() == TypeId::of::<T>() {
+            match self {
+                Self::Occupied { version, .. } => Some(**version),
+                Self::Empty(_) => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn accepted(&mut self) {
+        if let Self::Occupied {
+            version,
+            next_version,
+            ..
+        } = self
+        {
+            **version = *next_version
+        }
+    }
+}
+
+pub enum Data<'a, T: Component> {
+    Occupied(&'a mut [T]),
+    Empty(usize),
+}
+
+unsafe impl<'a, T: Component> TrustedRandomAccess for Data<'a, T> {
+    type Item = Option<&'a mut T>;
+
+    #[inline]
+    fn len(&self) -> usize {
+        match self {
+            Self::Occupied(slice) => slice.len(),
+            Self::Empty(len) => *len,
+        }
+    }
+
+    #[inline]
+    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item {
+        match self {
+            Self::Occupied(slice) => Some(slice.get_unchecked(i)),
+            Self::Empty(_) => None,
+        }
+    }
+
+    #[inline]
+    fn split_at(self, index: usize) -> (Self, Self) {
+        match self {
+            Self::Occupied(slice) => {
+                let (left, right) = slice.split_at_mut(index);
+                (Self::Occupied(left), Self::Occupied(right))
+            }
+            Self::Empty(count) => (Self::Empty(index), Self::Empty(count - index)),
+        }
+    }
+}

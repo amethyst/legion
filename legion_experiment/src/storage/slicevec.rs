@@ -13,10 +13,14 @@ pub struct SliceVec<T> {
 
 impl<T> SliceVec<T> {
     /// Gets the length of the vector.
-    pub fn len(&self) -> usize { self.counts.len() }
+    pub fn len(&self) -> usize {
+        self.counts.len()
+    }
 
     /// Determines if the vector is empty.
-    pub fn is_empty(&self) -> bool { self.len() < 1 }
+    pub fn is_empty(&self) -> bool {
+        self.len() < 1
+    }
 
     /// Pushes a new slice onto the end of the vector.
     pub fn push<I: IntoIterator<Item = T>>(&mut self, items: I) {
@@ -60,10 +64,14 @@ impl<'a, T> Iterator for SliceVecIter<'a, T> {
     }
 
     #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) { (self.counts.len(), Some(self.counts.len())) }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.counts.len(), Some(self.counts.len()))
+    }
 
     #[inline]
-    fn count(self) -> usize { self.len() }
+    fn count(self) -> usize {
+        self.len()
+    }
 }
 
 impl<'a, T> ExactSizeIterator for SliceVecIter<'a, T> {}
@@ -74,7 +82,9 @@ mod test {
     use super::*;
 
     #[test]
-    fn create() { let _ = SliceVec::<usize>::default(); }
+    fn create() {
+        let _ = SliceVec::<usize>::default();
+    }
 
     #[test]
     fn push() {
