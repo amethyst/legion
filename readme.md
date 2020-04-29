@@ -69,6 +69,12 @@ for (mut pos, vel) in query.iter(&mut world) {
 }
 ```
 
+### WASM
+Legion runs with parallelism on by default, which is not currently supported by Web Assembly as it runs single-threaded. Therefore, to build for WASM, ensure you set `default-features = false` in Cargo.toml:
+```toml
+legion = { version = "*", default-features = false }
+```
+
 ## Features
 
 Legion aims to be a more feature-complete game-ready ECS than many of its predecessors.
