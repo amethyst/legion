@@ -48,30 +48,22 @@ impl<'a, T: Component> ComponentSlice<'a, T> {
         }
     }
 
-    pub fn into_slice(self) -> &'a [T] {
-        self.components
-    }
+    pub fn into_slice(self) -> &'a [T] { self.components }
 }
 
 impl<'a, T: Component> Into<&'a [T]> for ComponentSlice<'a, T> {
-    fn into(self) -> &'a [T] {
-        self.components
-    }
+    fn into(self) -> &'a [T] { self.components }
 }
 
 impl<'a, T: Component> Deref for ComponentSlice<'a, T> {
     type Target = [T];
 
-    fn deref(&self) -> &Self::Target {
-        &self.components
-    }
+    fn deref(&self) -> &Self::Target { &self.components }
 }
 
 impl<'a, T: Component> Index<ComponentIndex> for ComponentSlice<'a, T> {
     type Output = T;
-    fn index(&self, index: ComponentIndex) -> &Self::Output {
-        &self.components[index.0]
-    }
+    fn index(&self, index: ComponentIndex) -> &Self::Output { &self.components[index.0] }
 }
 
 pub struct ComponentSliceMut<'a, T: Component> {
@@ -87,36 +79,26 @@ impl<'a, T: Component> ComponentSliceMut<'a, T> {
         }
     }
 
-    pub fn into_slice(self) -> &'a mut [T] {
-        self.components
-    }
+    pub fn into_slice(self) -> &'a mut [T] { self.components }
 }
 
 impl<'a, T: Component> Into<&'a mut [T]> for ComponentSliceMut<'a, T> {
-    fn into(self) -> &'a mut [T] {
-        self.components
-    }
+    fn into(self) -> &'a mut [T] { self.components }
 }
 
 impl<'a, T: Component> Deref for ComponentSliceMut<'a, T> {
     type Target = [T];
 
-    fn deref(&self) -> &Self::Target {
-        &self.components
-    }
+    fn deref(&self) -> &Self::Target { &self.components }
 }
 
 impl<'a, T: Component> DerefMut for ComponentSliceMut<'a, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.components
-    }
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.components }
 }
 
 impl<'a, T: Component> Index<ComponentIndex> for ComponentSliceMut<'a, T> {
     type Output = T;
-    fn index(&self, index: ComponentIndex) -> &Self::Output {
-        &self.components[index.0]
-    }
+    fn index(&self, index: ComponentIndex) -> &Self::Output { &self.components[index.0] }
 }
 
 impl<'a, T: Component> IndexMut<ComponentIndex> for ComponentSliceMut<'a, T> {
@@ -143,6 +125,10 @@ pub trait ComponentStorage<'a, T: Component>: UnknownComponentStorage + Default 
         ptr: *const T,
         len: usize,
     );
+
+    /// Ensures that the given spare capacity is available for component insertions. This is a performance hint and
+    /// should not be required before `extend_memcopy` is called.
+    fn ensure_capacity(&mut self, epoch: u64, archetype: ArchetypeIndex, space: usize);
 
     /// Gets the component slice for the specified archetype.
     fn get(&'a self, archetype: ArchetypeIndex) -> Option<ComponentSlice<'a, T>>;
@@ -210,9 +196,13 @@ impl Components {
             .map(|cell| unsafe { &mut *cell.get() }.deref_mut())
     }
 
-    pub fn get_multi_mut(&mut self) -> MultiMut {
-        MultiMut::new(self)
+    pub fn get_downcast_mut<T: Component>(&mut self) -> Option<&mut T::Storage> {
+        let type_id = ComponentTypeId::of::<T>();
+        self.get_mut(type_id)
+            .and_then(|storage| storage.downcast_mut())
     }
+
+    pub fn get_multi_mut(&mut self) -> MultiMut { MultiMut::new(self) }
 
     pub fn pack(&mut self, options: &PackOptions, epoch: u64) {
         let mut total_moved_bytes = 0;
@@ -227,6 +217,12 @@ impl Components {
                 break;
             }
         }
+    }
+}
+
+impl std::fmt::Debug for Components {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.storages.keys()).finish()
     }
 }
 

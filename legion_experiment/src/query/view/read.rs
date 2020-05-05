@@ -34,30 +34,25 @@ impl<'data, T: Component> View<'data> for Read<T> {
     fn validate() {}
 
     #[inline]
-    fn reads_types() -> Self::Read {
-        [ComponentTypeId::of::<T>()]
-    }
+    fn reads_types() -> Self::Read { [ComponentTypeId::of::<T>()] }
 
     #[inline]
-    fn writes_types() -> Self::Write {
-        []
-    }
+    fn writes_types() -> Self::Write { [] }
 
     #[inline]
-    fn reads<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
     #[inline]
-    fn writes<D: Component>() -> bool {
-        false
-    }
+    fn writes<D: Component>() -> bool { false }
 
     unsafe fn fetch(
         components: &'data Components,
         _: &'data [Archetype],
         query: QueryResult<'data>,
     ) -> Self::Iter {
+        if query.is_empty() {
+            return ReadIter::Empty;
+        };
         let components = components.get_downcast::<T>().unwrap();
         match query {
             QueryResult::Unordered(archetypes) => ReadIter::Indexed {
@@ -80,6 +75,7 @@ pub enum ReadIter<'a, T: Component> {
     Grouped {
         slices: <T::Storage as ComponentStorage<'a, T>>::Iter,
     },
+    Empty,
 }
 
 impl<'a, T: Component> Iterator for ReadIter<'a, T> {
@@ -92,6 +88,7 @@ impl<'a, T: Component> Iterator for ReadIter<'a, T> {
                 archetypes,
             } => archetypes.next().and_then(|i| components.get(*i)),
             Self::Grouped { slices } => slices.next(),
+            Self::Empty => return None,
         };
         components.map(|c| c.into())
     }
@@ -115,34 +112,26 @@ impl<'a, T: Component> IntoIndexableIter for ReadFetch<'a, T> {
     type Item = &'a T;
     type IntoIter = IndexedIter<&'a [T]>;
 
-    fn into_indexable_iter(self) -> Self::IntoIter {
-        IndexedIter::new(self.components)
-    }
+    fn into_indexable_iter(self) -> Self::IntoIter { IndexedIter::new(self.components) }
 }
 
 impl<'a, T: Component> IntoIterator for ReadFetch<'a, T> {
     type Item = <Self as IntoIndexableIter>::Item;
     type IntoIter = <Self as IntoIndexableIter>::IntoIter;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.into_indexable_iter()
-    }
+    fn into_iter(self) -> Self::IntoIter { self.into_indexable_iter() }
 }
 
 unsafe impl<'a, T: Component> ReadOnlyFetch for ReadFetch<'a, T> {
     #[inline]
-    fn get_components(&self) -> Self::Data {
-        self.components
-    }
+    fn get_components(&self) -> Self::Data { self.components }
 }
 
 impl<'a, T: Component> Fetch for ReadFetch<'a, T> {
     type Data = &'a [T];
 
     #[inline]
-    fn into_components(self) -> Self::Data {
-        self.components
-    }
+    fn into_components(self) -> Self::Data { self.components }
 
     #[inline]
     fn find<C: 'static>(&self) -> Option<&[C]> {
@@ -160,9 +149,7 @@ impl<'a, T: Component> Fetch for ReadFetch<'a, T> {
     }
 
     #[inline]
-    fn find_mut<C: 'static>(&mut self) -> Option<&mut [C]> {
-        None
-    }
+    fn find_mut<C: 'static>(&mut self) -> Option<&mut [C]> { None }
 
     #[inline]
     fn version<C: Component>(&self) -> Option<u64> {

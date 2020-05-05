@@ -5,7 +5,7 @@ use super::{
 };
 use crate::query::filter::LayoutFilter;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SearchIndex {
     component_layouts: SliceVec<ComponentTypeId>,
 }

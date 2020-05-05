@@ -15,6 +15,7 @@ use std::{
 };
 
 /// A memory allocation for an array of `T`.
+#[derive(Debug)]
 struct RawAlloc<T> {
     ptr: NonNull<T>,
     cap: usize,
@@ -87,6 +88,7 @@ impl<T> Drop for RawAlloc<T> {
     }
 }
 
+#[derive(Debug)]
 enum ComponentVec<T> {
     Packed {
         raw: Rc<RawAlloc<T>>,
@@ -270,13 +272,12 @@ impl<T> Drop for ComponentVec<T> {
 }
 
 static COMPONENT_VERSION: AtomicU64 = AtomicU64::new(0);
-pub(crate) fn next_component_version() -> u64 {
-    COMPONENT_VERSION.fetch_add(1, Ordering::SeqCst)
-}
+pub(crate) fn next_component_version() -> u64 { COMPONENT_VERSION.fetch_add(1, Ordering::SeqCst) }
 
 /// Stores a slice of components of type `T` for each archetype.
 /// Archetype slices are sorted according to the group that component `T` belongs to.
 /// Each slice _may_ be packed into a single allocation to optimise for group-based access.
+#[derive(Debug)]
 pub struct PackedStorage<T: Component> {
     // Sparse indirection table
     index: Vec<usize>,
@@ -385,9 +386,7 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
         }
     }
 
-    fn fragmentation(&self) -> f32 {
-        self.fragmentation / self.entity_len as f32
-    }
+    fn fragmentation(&self) -> f32 { self.fragmentation / self.entity_len as f32 }
 }
 
 impl<T: Component> Default for PackedStorage<T> {
@@ -421,6 +420,17 @@ impl<'a, T: Component> ComponentStorage<'a, T> for PackedStorage<T> {
         self.slices[slice_index] = allocation.as_raw_slice();
         self.fragmentation += allocation.estimate_fragmentation() - previous_fragmentation;
         self.entity_len += count;
+    }
+
+    fn ensure_capacity(
+        &mut self,
+        epoch: u64,
+        ArchetypeIndex(archetype): ArchetypeIndex,
+        capacity: usize,
+    ) {
+        let slice_index = self.index[archetype as usize];
+        let allocation = &mut self.allocations[slice_index];
+        allocation.ensure_capacity(epoch, capacity);
     }
 
     fn get(&'a self, ArchetypeIndex(archetype): ArchetypeIndex) -> Option<ComponentSlice<'a, T>> {
@@ -458,9 +468,7 @@ impl<'a, T: Component> ComponentStorage<'a, T> for PackedStorage<T> {
         }
     }
 
-    fn len(&self) -> usize {
-        self.allocations.len()
-    }
+    fn len(&self) -> usize { self.allocations.len() }
 }
 
 pub struct ComponentIter<'a, T> {
@@ -503,14 +511,10 @@ mod test {
     use super::*;
 
     #[test]
-    fn create_storage() {
-        let _ = PackedStorage::<usize>::default();
-    }
+    fn create_storage() { let _ = PackedStorage::<usize>::default(); }
 
     #[test]
-    fn create_zst_storage() {
-        let _ = PackedStorage::<()>::default();
-    }
+    fn create_zst_storage() { let _ = PackedStorage::<()>::default(); }
 
     #[test]
     fn insert_archetype() {

@@ -54,9 +54,7 @@ impl<'a> ArchetypeWriter<'a> {
         }
     }
 
-    pub fn push(&mut self, entity: Entity) {
-        self.archetype.entities_mut().push(entity);
-    }
+    pub fn push(&mut self, entity: Entity) { self.archetype.entities_mut().push(entity); }
 
     pub fn inserted<'b>(&'b self) -> impl Iterator<Item = (ComponentIndex, Entity)> + 'b {
         let start = self.initial_count;
@@ -87,12 +85,20 @@ impl<'a, T: Component> ComponentWriter<'a, T> {
         self.components
             .extend_memcopy(self.epoch, self.archetype, ptr, len)
     }
+
+    fn ensure_capacity(&mut self, space: usize) {
+        self.components
+            .ensure_capacity(self.epoch, self.archetype, space);
+    }
 }
 
-pub trait ComponentSource {
+pub trait ArchetypeSource {
     type Filter: LayoutFilter;
     fn filter(&self) -> Self::Filter;
     fn layout(&mut self) -> EntityLayout;
+}
+
+pub trait ComponentSource: ArchetypeSource {
     fn push_components<'a>(
         &mut self,
         writer: &mut ArchetypeWriter<'a>,
@@ -158,17 +164,13 @@ where
 {
     type Source = Aos<I::Item, I::IntoIter>;
 
-    fn into(self) -> Self::Source {
-        <Self::Source>::new(self.into_iter())
-    }
+    fn into(self) -> Self::Source { <Self::Source>::new(self.into_iter()) }
 }
 
 pub struct ComponentSourceFilter<T>(PhantomData<T>);
 
 impl<T> Default for ComponentSourceFilter<T> {
-    fn default() -> Self {
-        ComponentSourceFilter(PhantomData)
-    }
+    fn default() -> Self { ComponentSourceFilter(PhantomData) }
 }
 
 macro_rules! component_source {
@@ -249,7 +251,7 @@ macro_rules! impl_component_source {
             fn into(self) -> Self::Source { self }
         }
 
-        impl<$( $ty: Component ),*> ComponentSource for Soa<($( SoaElement<$ty>, )*)> {
+        impl<$( $ty: Component ),*> ArchetypeSource for Soa<($( SoaElement<$ty>, )*)> {
             type Filter = ComponentSourceFilter<($( $ty, )*)>;
 
             fn filter(&self) -> Self::Filter {
@@ -263,7 +265,9 @@ macro_rules! impl_component_source {
                 )*
                 layout
             }
+        }
 
+        impl<$( $ty: Component ),*> ComponentSource for Soa<($( SoaElement<$ty>, )*)> {
             paste::item! {
                 fn push_components<'a>(
                     &mut self,
@@ -313,7 +317,7 @@ macro_rules! impl_component_source {
         //     }
         // }
 
-        impl<Iter, $( $ty: Component ),*> ComponentSource for Aos<($( $ty, )*), Iter>
+        impl<Iter, $( $ty: Component ),*> ArchetypeSource for Aos<($( $ty, )*), Iter>
         where
             Iter: Iterator<Item = ($( $ty, )*)>
         {
@@ -330,7 +334,12 @@ macro_rules! impl_component_source {
                 )*
                 layout
             }
+        }
 
+        impl<Iter, $( $ty: Component ),*> ComponentSource for Aos<($( $ty, )*), Iter>
+        where
+            Iter: Iterator<Item = ($( $ty, )*)>
+        {
             paste::item! {
                 fn push_components<'a>(
                     &mut self,

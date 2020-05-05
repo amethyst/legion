@@ -1,12 +1,12 @@
 use crate::entity::{Entity, EntityAllocator, EntityLocation};
 use crate::hash::EntityHasher;
-use crate::insert::{ArchetypeWriter, ComponentSource, IntoComponentSource};
+use crate::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use crate::storage::{
     archetype::{Archetype, ArchetypeIndex, EntityLayout},
     component::ComponentTypeId,
     group::{Group, GroupDef},
     index::SearchIndex,
-    Components, PackOptions,
+    ComponentIndex, Components, PackOptions,
 };
 use itertools::Itertools;
 use std::{
@@ -21,9 +21,7 @@ pub struct Universe {
 }
 
 impl Universe {
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     pub fn sharded(n: u64, of: u64) -> Self {
         Self {
@@ -31,9 +29,7 @@ impl Universe {
         }
     }
 
-    pub fn create_world(&self) -> World {
-        self.create_world_with_options(WorldOptions::default())
-    }
+    pub fn create_world(&self) -> World { self.create_world_with_options(WorldOptions::default()) }
 
     pub fn create_world_with_options(&self, options: WorldOptions) -> World {
         World {
@@ -48,15 +44,11 @@ pub struct WorldId(u64);
 static WORLD_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl WorldId {
-    fn next() -> Self {
-        WorldId(WORLD_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
+    fn next() -> Self { WorldId(WORLD_ID_COUNTER.fetch_add(1, Ordering::Relaxed)) }
 }
 
 impl Default for WorldId {
-    fn default() -> Self {
-        Self::next()
-    }
+    fn default() -> Self { Self::next() }
 }
 
 #[derive(Default)]
@@ -64,6 +56,7 @@ pub struct WorldOptions {
     pub groups: Vec<Group>,
 }
 
+#[derive(Debug)]
 pub struct World {
     id: WorldId,
     index: SearchIndex,
@@ -78,15 +71,11 @@ pub struct World {
 }
 
 impl Default for World {
-    fn default() -> Self {
-        Self::with_options(WorldOptions::default())
-    }
+    fn default() -> Self { Self::with_options(WorldOptions::default()) }
 }
 
 impl World {
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new() -> Self { Self::default() }
 
     pub fn with_options(options: WorldOptions) -> Self {
         let mut group_members = HashMap::default();
@@ -116,21 +105,13 @@ impl World {
         }
     }
 
-    pub fn id(&self) -> WorldId {
-        self.id
-    }
+    pub fn id(&self) -> WorldId { self.id }
 
-    pub fn len(&self) -> usize {
-        self.entities.len()
-    }
+    pub fn len(&self) -> usize { self.entities.len() }
 
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
+    pub fn is_empty(&self) -> bool { self.len() == 0 }
 
-    pub fn contains(&self, entity: Entity) -> bool {
-        self.entities.contains_key(&entity)
-    }
+    pub fn contains(&self, entity: Entity) -> bool { self.entities.contains_key(&entity) }
 
     pub fn push<T>(&mut self, components: T) -> &[Entity]
     where
@@ -191,11 +172,10 @@ impl World {
     }
 
     pub fn entry_mut(&mut self, entity: Entity) -> Option<crate::entry::EntryMut> {
-        let components = &mut self.components;
-        let archetypes = &mut self.archetypes;
         self.entities
-            .get_mut(&entity)
-            .map(move |location| crate::entry::EntryMut::new(location, components, archetypes))
+            .get(&entity)
+            .copied()
+            .map(move |location| crate::entry::EntryMut::new(location, self))
     }
 
     pub fn pack(&mut self, options: PackOptions) {
@@ -203,21 +183,17 @@ impl World {
         self.epoch += 1;
     }
 
-    pub(crate) fn layout_index(&self) -> &SearchIndex {
-        &self.index
-    }
+    pub(crate) fn layout_index(&self) -> &SearchIndex { &self.index }
 
-    pub(crate) fn components(&self) -> &Components {
-        &self.components
-    }
+    pub(crate) fn components(&self) -> &Components { &self.components }
 
-    pub(crate) fn archetypes(&self) -> &[Archetype] {
-        &self.archetypes
-    }
+    pub(crate) fn components_mut(&mut self) -> &mut Components { &mut self.components }
 
-    pub(crate) fn groups(&self) -> &[Group] {
-        &self.groups
-    }
+    pub(crate) fn archetypes(&self) -> &[Archetype] { &self.archetypes }
+
+    pub(crate) fn groups(&self) -> &[Group] { &self.groups }
+
+    pub(crate) fn epoch(&self) -> u64 { self.epoch }
 
     pub(crate) fn group(&self, type_id: ComponentTypeId) -> Option<(usize, &Group)> {
         self.group_members
@@ -225,7 +201,62 @@ impl World {
             .map(|i| (*i, &self.groups[*i]))
     }
 
-    fn get_archetype<T: ComponentSource>(&mut self, components: &mut T) -> ArchetypeIndex {
+    pub(crate) unsafe fn transfer_archetype(
+        &mut self,
+        ArchetypeIndex(from): ArchetypeIndex,
+        ArchetypeIndex(to): ArchetypeIndex,
+        ComponentIndex(idx): ComponentIndex,
+    ) -> ComponentIndex {
+        if from == to {
+            return ComponentIndex(idx);
+        }
+
+        // find archetypes
+        let (from_arch, to_arch) = if from < to {
+            let (a, b) = self.archetypes.split_at_mut(to as usize);
+            (&mut a[from as usize], &mut b[0])
+        } else {
+            let (a, b) = self.archetypes.split_at_mut(from as usize);
+            (&mut b[0], &mut a[to as usize])
+        };
+
+        // move entity ID
+        let entity = from_arch.entities_mut().swap_remove(idx);
+        to_arch.entities_mut().push(entity);
+        self.entities.insert(
+            entity,
+            EntityLocation::new(
+                ArchetypeIndex(to),
+                ComponentIndex(to_arch.entities().len() - 1),
+            ),
+        );
+        if from_arch.entities().len() > idx {
+            let moved = from_arch.entities()[idx];
+            self.entities.insert(
+                moved,
+                EntityLocation::new(ArchetypeIndex(from), ComponentIndex(idx)),
+            );
+        }
+
+        // move components
+        let from_layout = from_arch.layout();
+        let to_layout = to_arch.layout();
+        for type_id in from_layout.component_types() {
+            let storage = self.components.get_mut(*type_id).unwrap();
+            if to_layout.component_types().contains(type_id) {
+                storage.move_component(self.epoch, ArchetypeIndex(from), idx, ArchetypeIndex(to));
+            } else {
+                storage.swap_remove(self.epoch, ArchetypeIndex(from), idx);
+            }
+        }
+
+        ComponentIndex(to_arch.entities().len() - 1)
+    }
+
+    pub(crate) fn get_archetype<T: ArchetypeSource>(
+        &mut self,
+        components: &mut T,
+    ) -> ArchetypeIndex {
         let index = self.index.search(&components.filter()).next();
         if let Some(index) = index {
             index
@@ -293,9 +324,7 @@ mod test {
     use crate::insert::IntoSoa;
 
     #[test]
-    fn create() {
-        let _ = World::default();
-    }
+    fn create() { let _ = World::default(); }
 
     #[test]
     fn create_in_universe() {

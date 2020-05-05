@@ -44,6 +44,16 @@ pub enum QueryResult<'a> {
     Ordered(&'a [ArchetypeIndex]),
 }
 
+impl<'a> QueryResult<'a> {
+    pub fn is_empty(&self) -> bool {
+        let archetypes = match self {
+            Self::Unordered(archetypes) => archetypes,
+            Self::Ordered(archetypes) => archetypes,
+        };
+        archetypes.is_empty()
+    }
+}
+
 enum Mode {
     Unordered {
         archetypes: Vec<ArchetypeIndex>,
@@ -111,7 +121,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     #[inline]
     pub fn iter<'a>(
         &'a mut self,
-        world: &'a mut World,
+        world: &'a World,
     ) -> std::iter::Flatten<
         ChunkIter<
             'a,
@@ -164,7 +174,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
                 for archetype in world.layout_index().search_from(&self.filter, *seen) {
                     archetypes.push(archetype);
                 }
-                *seen = world.archetypes().len();
+                *seen = world.archetypes().len() - 1;
                 (QueryResult::Unordered(&*archetypes), archetypes.as_slice())
             }
             Mode::Ordered { group, subgroup } => {
@@ -255,25 +265,17 @@ pub struct ChunkView<'a, F: Fetch> {
 }
 
 impl<'a, F: Fetch> ChunkView<'a, F> {
-    fn new(archetype: &'a Archetype, fetch: F) -> Self {
-        Self { archetype, fetch }
-    }
+    fn new(archetype: &'a Archetype, fetch: F) -> Self { Self { archetype, fetch } }
 
-    pub fn archetype(&self) -> &Archetype {
-        &self.archetype
-    }
+    pub fn archetype(&self) -> &Archetype { &self.archetype }
 
-    pub fn component_slice<T: Component>(&self) -> Option<&[T]> {
-        self.fetch.find::<T>()
-    }
+    pub fn component_slice<T: Component>(&self) -> Option<&[T]> { self.fetch.find::<T>() }
 
     pub fn component_slice_mut<T: Component>(&mut self) -> Option<&mut [T]> {
         self.fetch.find_mut::<T>()
     }
 
-    pub fn into_components(self) -> F::Data {
-        self.fetch.into_components()
-    }
+    pub fn into_components(self) -> F::Data { self.fetch.into_components() }
 
     pub fn get_components(&self) -> F::Data
     where
@@ -286,9 +288,7 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
 impl<'a, F: Fetch> IntoIterator for ChunkView<'a, F> {
     type IntoIter = <F as IntoIndexableIter>::IntoIter;
     type Item = <F as IntoIndexableIter>::Item;
-    fn into_iter(self) -> Self::IntoIter {
-        self.fetch.into_indexable_iter()
-    }
+    fn into_iter(self) -> Self::IntoIter { self.fetch.into_indexable_iter() }
 }
 
 pub struct ChunkIter<'world, 'query, I, D, F>
@@ -321,9 +321,7 @@ where
         None
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, Some(self.max_count))
-    }
+    fn size_hint(&self) -> (usize, Option<usize>) { (0, Some(self.max_count)) }
 }
 
 impl<'world, 'query, I, F> ExactSizeIterator for ChunkIter<'world, 'query, I, Passthrough, F>

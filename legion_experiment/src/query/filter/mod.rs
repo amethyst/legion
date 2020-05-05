@@ -25,13 +25,9 @@ pub mod filter_fns {
         Default::default()
     }
 
-    pub fn any() -> EntityFilterTuple<Any, Any> {
-        Default::default()
-    }
+    pub fn any() -> EntityFilterTuple<Any, Any> { Default::default() }
 
-    pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough> {
-        Default::default()
-    }
+    pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough> { Default::default() }
 }
 
 pub enum FilterResult {
@@ -73,19 +69,15 @@ impl FilterResult {
 
 impl std::ops::BitOr<FilterResult> for FilterResult {
     type Output = FilterResult;
-    fn bitor(self, other: FilterResult) -> Self::Output {
-        self.coalesce_or(other)
-    }
+    fn bitor(self, other: FilterResult) -> Self::Output { self.coalesce_or(other) }
 }
 
 impl std::ops::BitAnd<FilterResult> for FilterResult {
     type Output = FilterResult;
-    fn bitand(self, other: FilterResult) -> Self::Output {
-        self.coalesce_and(other)
-    }
+    fn bitand(self, other: FilterResult) -> Self::Output { self.coalesce_and(other) }
 }
 
-pub trait LayoutFilter: Default + Send + Sync {
+pub trait LayoutFilter: Send + Sync {
     fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult;
 }
 
@@ -103,7 +95,7 @@ pub trait GroupMatcher {
 }
 
 pub trait EntityFilter: Default + Send + Sync {
-    type Layout: LayoutFilter + GroupMatcher;
+    type Layout: LayoutFilter + GroupMatcher + Default;
     type Dynamic: DynamicFilter;
 
     fn layout_filter(&self) -> &Self::Layout;
@@ -132,12 +124,8 @@ impl<T: EntityFilter> DynamicFilter for T {
 }
 
 impl<T: EntityFilter> GroupMatcher for T {
-    fn can_match_group() -> bool {
-        T::Layout::can_match_group()
-    }
-    fn group_components() -> Vec<ComponentTypeId> {
-        T::Layout::group_components()
-    }
+    fn can_match_group() -> bool { T::Layout::can_match_group() }
+    fn group_components() -> Vec<ComponentTypeId> { T::Layout::group_components() }
 }
 
 #[derive(Clone, Default)]
@@ -155,13 +143,13 @@ impl<L: LayoutFilter, F: DynamicFilter> EntityFilterTuple<L, F> {
     }
 }
 
-impl<L: LayoutFilter + GroupMatcher, F: DynamicFilter> EntityFilter for EntityFilterTuple<L, F> {
+impl<L: LayoutFilter + GroupMatcher + Default, F: DynamicFilter> EntityFilter
+    for EntityFilterTuple<L, F>
+{
     type Layout = L;
     type Dynamic = F;
 
-    fn layout_filter(&self) -> &Self::Layout {
-        &self.layout_filter
-    }
+    fn layout_filter(&self) -> &Self::Layout { &self.layout_filter }
 
     fn filters(&mut self) -> (&Self::Layout, &mut Self::Dynamic) {
         (&self.layout_filter, &mut self.dynamic_filter)
