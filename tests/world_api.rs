@@ -249,7 +249,7 @@ fn delete_first() {
 }
 
 #[test]
-fn merge() {
+fn move_from() {
     let _ = tracing_subscriber::fmt::try_init();
 
     let universe = Universe::new();
@@ -272,7 +272,7 @@ fn merge() {
         world_2_entities.push(*e);
     }
 
-    world_1.merge(world_2);
+    world_1.move_from(world_2);
 
     for (i, e) in world_2_entities.iter().enumerate() {
         assert!(world_1.is_alive(*e));
