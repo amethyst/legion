@@ -56,12 +56,9 @@ impl<'a> ArchetypeWriter<'a> {
 
     pub fn push(&mut self, entity: Entity) { self.archetype.entities_mut().push(entity); }
 
-    pub fn inserted<'b>(&'b self) -> impl Iterator<Item = (ComponentIndex, Entity)> + 'b {
+    pub fn inserted(&self) -> (ComponentIndex, &[Entity]) {
         let start = self.initial_count;
-        self.archetype.entities()[start..]
-            .iter()
-            .enumerate()
-            .map(move |(i, e)| (ComponentIndex(i + start), *e))
+        (ComponentIndex(start), &self.archetype.entities()[start..])
     }
 }
 
@@ -352,9 +349,12 @@ macro_rules! impl_component_source {
                         let mut [<$ty _target>] = writer.claim_components::<$ty>();
                     )*
 
+                    let (min_size, _) = self.iter.size_hint();
+                    $( [<$ty _target>].ensure_capacity(min_size); )*
+
+                    let mut count = 0;
                     for ($( $ty, )*) in &mut self.iter {
-                        let entity = entities.next().unwrap();
-                        writer.push(entity);
+                        count += 1;
 
                         $(
                             unsafe {
@@ -362,6 +362,11 @@ macro_rules! impl_component_source {
                                 std::mem::forget($ty);
                             }
                         )*
+                    }
+
+                    for _ in 0..count {
+                        let entity = entities.next().unwrap();
+                        writer.push(entity);
                     }
                 }
             }

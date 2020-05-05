@@ -12,14 +12,14 @@ use crate::{
 use std::sync::Arc;
 
 pub struct Entry<'a> {
-    location: &'a EntityLocation,
+    location: EntityLocation,
     components: &'a Components,
     archetypes: &'a [Archetype],
 }
 
 impl<'a> Entry<'a> {
     pub(crate) fn new(
-        location: &'a EntityLocation,
+        location: EntityLocation,
         components: &'a Components,
         archetypes: &'a [Archetype],
     ) -> Self {
@@ -32,7 +32,7 @@ impl<'a> Entry<'a> {
 
     pub fn archetype(&self) -> &Archetype { &self.archetypes[self.location.archetype()] }
 
-    pub fn location(&self) -> EntityLocation { *self.location }
+    pub fn location(&self) -> EntityLocation { self.location }
 
     pub fn get_component<T: Component>(&self) -> Option<&T> {
         let component = self.location.component();

@@ -1,5 +1,5 @@
-use crate::entity::{Entity, EntityAllocator, EntityLocation};
-use crate::hash::EntityHasher;
+use crate::entity::{Entity, EntityAllocator, EntityLocation, LocationMap};
+use crate::hash::U64Hasher;
 use crate::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use crate::storage::{
     archetype::{Archetype, ArchetypeIndex, EntityLayout},
@@ -64,7 +64,7 @@ pub struct World {
     groups: Vec<Group>,
     group_members: HashMap<ComponentTypeId, usize>,
     archetypes: Vec<Archetype>,
-    entities: HashMap<Entity, EntityLocation, BuildHasherDefault<EntityHasher>>,
+    entities: LocationMap,
     entity_allocator: EntityAllocator,
     allocation_buffer: Vec<Entity>,
     epoch: u64,
@@ -98,7 +98,7 @@ impl World {
             groups: options.groups,
             group_members,
             archetypes: Vec::default(),
-            entities: HashMap::default(),
+            entities: LocationMap::default(),
             entity_allocator: EntityAllocator::default(),
             allocation_buffer: Vec::default(),
             epoch: 0,
@@ -111,7 +111,7 @@ impl World {
 
     pub fn is_empty(&self) -> bool { self.len() == 0 }
 
-    pub fn contains(&self, entity: Entity) -> bool { self.entities.contains_key(&entity) }
+    pub fn contains(&self, entity: Entity) -> bool { self.entities.contains(entity) }
 
     pub fn push<T>(&mut self, components: T) -> &[Entity]
     where
@@ -123,8 +123,6 @@ impl World {
     pub fn extend(&mut self, components: impl IntoComponentSource) -> &[Entity] {
         let mut components = components.into();
 
-        self.allocation_buffer.clear();
-
         let arch_index = self.get_archetype(&mut components);
         let archetype = &mut self.archetypes[arch_index.0 as usize];
         let mut writer = ArchetypeWriter::new(
@@ -135,17 +133,16 @@ impl World {
         );
         components.push_components(&mut writer, self.entity_allocator.iter());
 
-        for (i, e) in writer.inserted() {
-            let location = EntityLocation::new(arch_index, i);
-            self.entities.insert(e, location);
-            self.allocation_buffer.push(e);
-        }
+        let (base, entities) = writer.inserted();
+        self.entities.insert(entities, arch_index, base);
 
+        self.allocation_buffer.clear();
+        self.allocation_buffer.extend_from_slice(entities);
         &self.allocation_buffer
     }
 
     pub fn remove(&mut self, entity: Entity) -> bool {
-        let location = self.entities.remove(&entity);
+        let location = self.entities.remove(entity);
         if let Some(location) = location {
             let EntityLocation(arch_index, component_index) = location;
             let archetype = &mut self.archetypes[arch_index];
@@ -156,7 +153,7 @@ impl World {
             }
             if component_index.0 < archetype.entities().len() {
                 let swapped = archetype.entities()[component_index.0];
-                *self.entities.get_mut(&swapped).unwrap() = location
+                self.entities.set(swapped, location);
             }
 
             true
@@ -167,14 +164,13 @@ impl World {
 
     pub fn entry(&self, entity: Entity) -> Option<crate::entry::Entry> {
         self.entities
-            .get(&entity)
+            .get(entity)
             .map(|location| crate::entry::Entry::new(location, &self.components, &self.archetypes))
     }
 
     pub fn entry_mut(&mut self, entity: Entity) -> Option<crate::entry::EntryMut> {
         self.entities
-            .get(&entity)
-            .copied()
+            .get(entity)
             .map(move |location| crate::entry::EntryMut::new(location, self))
     }
 
@@ -223,7 +219,7 @@ impl World {
         // move entity ID
         let entity = from_arch.entities_mut().swap_remove(idx);
         to_arch.entities_mut().push(entity);
-        self.entities.insert(
+        self.entities.set(
             entity,
             EntityLocation::new(
                 ArchetypeIndex(to),
@@ -232,7 +228,7 @@ impl World {
         );
         if from_arch.entities().len() > idx {
             let moved = from_arch.entities()[idx];
-            self.entities.insert(
+            self.entities.set(
                 moved,
                 EntityLocation::new(ArchetypeIndex(from), ComponentIndex(idx)),
             );
