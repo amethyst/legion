@@ -39,7 +39,7 @@ impl<T> SliceVec<T> {
     }
 
     pub fn iter_from(&self, start: usize) -> SliceVecIter<T> {
-        let index = *self.indices.get(start).unwrap_or(&0);
+        let index = *self.indices.get(start).unwrap_or(&self.data.len());
         SliceVecIter {
             data: &self.data[index..],
             counts: &self.counts[start..],

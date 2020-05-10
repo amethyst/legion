@@ -374,4 +374,8 @@ macro_rules! impl_component_source {
     };
 }
 
+#[cfg(feature = "extended-tuple-impls")]
 component_source!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
+
+#[cfg(not(feature = "extended-tuple-impls"))]
+component_source!(A, B, C, D, E, F, G, H);

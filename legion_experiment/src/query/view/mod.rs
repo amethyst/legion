@@ -299,4 +299,8 @@ macro_rules! impl_view_tuple {
     };
 }
 
+#[cfg(feature = "extended-tuple-impls")]
 view_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
+
+#[cfg(not(feature = "extended-tuple-impls"))]
+view_tuple!(A, B, C, D, E, F, G, H);

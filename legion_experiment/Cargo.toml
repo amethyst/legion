@@ -11,6 +11,7 @@ edition = "2018"
 [features]
 default = ["par-iter"]
 par-iter = ["rayon"]
+extended-tuple-impls = []
 
 [dependencies]
 smallvec = "1.4"
