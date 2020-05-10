@@ -89,6 +89,7 @@ impl<T> Drop for RawAlloc<T> {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)] // it isn't dead - apparent rustc bug
 enum ComponentVec<T> {
     Packed {
         raw: Rc<RawAlloc<T>>,
@@ -452,19 +453,19 @@ impl<'a, T: Component> ComponentStorage<'a, T> for PackedStorage<T> {
         Some(ComponentSliceMut::new(slice, version))
     }
 
-    fn iter(&'a self, archetype_count: usize) -> Self::Iter {
+    fn iter(&'a self, start_inclusive: usize, end_exclusive: usize) -> Self::Iter {
         ComponentIter {
-            slices: self.slices[..archetype_count]
+            slices: self.slices[start_inclusive..end_exclusive]
                 .iter()
-                .zip(self.versions[..archetype_count].iter()),
+                .zip(self.versions[start_inclusive..end_exclusive].iter()),
         }
     }
 
-    unsafe fn iter_mut(&'a self, archetype_count: usize) -> Self::IterMut {
+    unsafe fn iter_mut(&'a self, start_inclusive: usize, end_exclusive: usize) -> Self::IterMut {
         ComponentIterMut {
-            slices: self.slices[..archetype_count]
+            slices: self.slices[start_inclusive..end_exclusive]
                 .iter()
-                .zip(self.versions[..archetype_count].iter()),
+                .zip(self.versions[start_inclusive..end_exclusive].iter()),
         }
     }
 

@@ -12,38 +12,26 @@ unsafe impl<'a, T> TrustedRandomAccess for &'a [T] {
     type Item = &'a T;
 
     #[inline]
-    fn len(&self) -> usize {
-        <[T]>::len(self)
-    }
+    fn len(&self) -> usize { <[T]>::len(self) }
 
     #[inline]
-    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item {
-        &*self.as_ptr().add(i)
-    }
+    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item { &*self.as_ptr().add(i) }
 
     #[inline]
-    fn split_at(self, index: usize) -> (Self, Self) {
-        <[T]>::split_at(self, index)
-    }
+    fn split_at(self, index: usize) -> (Self, Self) { <[T]>::split_at(self, index) }
 }
 
 unsafe impl<'a, T> TrustedRandomAccess for &'a mut [T] {
     type Item = &'a mut T;
 
     #[inline]
-    fn len(&self) -> usize {
-        <[T]>::len(self)
-    }
+    fn len(&self) -> usize { <[T]>::len(self) }
 
     #[inline]
-    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item {
-        &mut *self.as_mut_ptr().add(i)
-    }
+    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item { &mut *self.as_mut_ptr().add(i) }
 
     #[inline]
-    fn split_at(self, index: usize) -> (Self, Self) {
-        <[T]>::split_at_mut(self, index)
-    }
+    fn split_at(self, index: usize) -> (Self, Self) { <[T]>::split_at_mut(self, index) }
 }
 
 #[derive(Clone, Debug)]
@@ -86,9 +74,7 @@ impl<T: TrustedRandomAccess> Iterator for IndexedIter<T> {
     }
 
     #[inline]
-    fn count(self) -> usize {
-        <Self as ExactSizeIterator>::len(&self)
-    }
+    fn count(self) -> usize { <Self as ExactSizeIterator>::len(&self) }
 
     #[inline]
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
@@ -138,21 +124,17 @@ impl<T: TrustedRandomAccess> DoubleEndedIterator for IndexedIter<T> {
 
 impl<T: TrustedRandomAccess> ExactSizeIterator for IndexedIter<T> {
     #[inline]
-    fn len(&self) -> usize {
-        self.len - self.index
-    }
+    fn len(&self) -> usize { self.len - self.index }
 }
 
 unsafe impl<T: TrustedRandomAccess> TrustedRandomAccess for IndexedIter<T> {
     type Item = <Self as Iterator>::Item;
 
-    fn len(&self) -> usize {
-        <Self as ExactSizeIterator>::len(self)
-    }
+    #[inline]
+    fn len(&self) -> usize { <Self as ExactSizeIterator>::len(self) }
 
-    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item {
-        self.inner.get_unchecked(i)
-    }
+    #[inline]
+    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item { self.inner.get_unchecked(i) }
 
     fn split_at(self, index: usize) -> (Self, Self) {
         let (_, remaining) = self.inner.split_at(self.index);
@@ -220,82 +202,99 @@ macro_rules! impl_zip_slices {
 
 zip_slices!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
 
-// mod par_iter {
-//     use super::{IndexedIter, TrustedRandomAccess};
-//     use rayon::iter::plumbing::{
-//         bridge_unindexed, Folder, Producer, UnindexedConsumer, UnindexedProducer,
-//     };
-//     use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+#[cfg(feature = "par-iter")]
+pub mod par_iter {
+    use super::{IndexedIter, TrustedRandomAccess};
+    use rayon::iter::plumbing::{
+        bridge, bridge_unindexed, Consumer, Folder, Producer, ProducerCallback, UnindexedConsumer,
+        UnindexedProducer,
+    };
+    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 
-//     impl<T> Producer for IndexedIter<T>
-//     where
-//         T: TrustedRandomAccess + Send + Sync,
-//     {
-//         type Item = <Self as Iterator>::Item;
-//         type IntoIter = Self;
+    pub struct Par<T: TrustedRandomAccess> {
+        iter: IndexedIter<T>,
+    }
 
-//         fn into_iter(self) -> Self::IntoIter {
-//             self
-//         }
+    impl<T: TrustedRandomAccess> Par<T> {
+        pub fn new(iter: T) -> Self {
+            Self {
+                iter: IndexedIter::new(iter),
+            }
+        }
+    }
 
-//         fn split_at(self, index: usize) -> (Self, Self) {
-//             TrustedRandomAccess::split_at(self, index)
-//         }
-//     }
+    impl<T> Producer for Par<T>
+    where
+        T: TrustedRandomAccess + Send + Sync,
+    {
+        type Item = <IndexedIter<T> as Iterator>::Item;
+        type IntoIter = IndexedIter<T>;
 
-//     impl<T> UnindexedProducer for IndexedIter<T>
-//     where
-//         T: TrustedRandomAccess + Send + Sync,
-//     {
-//         type Item = <Self as Iterator>::Item;
+        fn into_iter(self) -> Self::IntoIter { self.iter }
 
-//         fn split(self) -> (Self, Option<Self>) {
-//             let len = ExactSizeIterator::len(&self);
-//             let index = len / 2;
-//             let (left, right) = TrustedRandomAccess::split_at(self, index);
-//             (
-//                 right,
-//                 if ExactSizeIterator::len(&left) > 0 {
-//                     Some(left)
-//                 } else {
-//                     None
-//                 },
-//             )
-//         }
+        fn split_at(self, index: usize) -> (Self, Self) {
+            let (left, right) = TrustedRandomAccess::split_at(self.iter, index);
+            (Par { iter: left }, Par { iter: right })
+        }
+    }
 
-//         fn fold_with<F>(self, folder: F) -> F
-//         where
-//             F: Folder<Self::Item>,
-//         {
-//             folder.consume_iter(self)
-//         }
-//     }
+    impl<T> UnindexedProducer for Par<T>
+    where
+        T: TrustedRandomAccess + Send + Sync,
+    {
+        type Item = <IndexedIter<T> as Iterator>::Item;
 
-//     impl<T> ParallelIterator for IndexedIter<T>
-//     where
-//         T: TrustedRandomAccess + Send + Sync,
-//         <T as TrustedRandomAccess>::Item: Send,
-//     {
-//         type Item = T::Item;
+        fn split(self) -> (Self, Option<Self>) {
+            let len = ExactSizeIterator::len(&self.iter);
+            let index = len / 2;
+            let (left, right) = TrustedRandomAccess::split_at(self.iter, index);
+            (
+                Par { iter: right },
+                if ExactSizeIterator::len(&left) > 0 {
+                    Some(Par { iter: left })
+                } else {
+                    None
+                },
+            )
+        }
 
-//         fn drive_unindexed<C>(self, consumer: C) -> C::Result
-//         where
-//             C: UnindexedConsumer<Self::Item>,
-//         {
-//             bridge_unindexed(self, consumer)
-//         }
-//     }
+        fn fold_with<F>(self, folder: F) -> F
+        where
+            F: Folder<Self::Item>,
+        {
+            folder.consume_iter(self.iter)
+        }
+    }
 
-//     impl<T> IndexedParallelIterator for IndexedIter<T>
-//     where
-//         T: TrustedRandomAccess + Send + Sync,
-//         <T as TrustedRandomAccess>::Item: Send,
-//     {
-//         fn len(&self) -> usize {
-//             ExactSizeIterator::len(self)
-//         }
-//     }
-// }
+    impl<T> ParallelIterator for Par<T>
+    where
+        T: TrustedRandomAccess + Send + Sync,
+        <T as TrustedRandomAccess>::Item: Send,
+    {
+        type Item = T::Item;
+
+        fn drive_unindexed<C>(self, consumer: C) -> C::Result
+        where
+            C: UnindexedConsumer<Self::Item>,
+        {
+            bridge_unindexed(self, consumer)
+        }
+    }
+
+    impl<T> IndexedParallelIterator for Par<T>
+    where
+        T: TrustedRandomAccess + Send + Sync,
+        <T as TrustedRandomAccess>::Item: Send,
+    {
+        fn len(&self) -> usize { ExactSizeIterator::len(&self.iter) }
+
+        fn drive<C: Consumer<Self::Item>>(self, consumer: C) -> C::Result { bridge(self, consumer) }
+
+        fn with_producer<CB: ProducerCallback<Self::Item>>(self, callback: CB) -> CB::Output {
+            callback.callback(self)
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {

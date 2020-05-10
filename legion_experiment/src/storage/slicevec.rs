@@ -9,6 +9,7 @@ use std::iter::{FusedIterator, IntoIterator};
 pub struct SliceVec<T> {
     data: Vec<T>,
     counts: Vec<usize>,
+    indices: Vec<usize>,
 }
 
 impl<T> SliceVec<T> {
@@ -20,6 +21,7 @@ impl<T> SliceVec<T> {
 
     /// Pushes a new slice onto the end of the vector.
     pub fn push<I: IntoIterator<Item = T>>(&mut self, items: I) {
+        self.indices.push(self.data.len());
         let mut count = 0;
         for item in items.into_iter() {
             self.data.push(item);
@@ -33,6 +35,14 @@ impl<T> SliceVec<T> {
         SliceVecIter {
             data: &self.data,
             counts: &self.counts,
+        }
+    }
+
+    pub fn iter_from(&self, start: usize) -> SliceVecIter<T> {
+        let index = *self.indices.get(start).unwrap_or(&0);
+        SliceVecIter {
+            data: &self.data[index..],
+            counts: &self.counts[start..],
         }
     }
 }

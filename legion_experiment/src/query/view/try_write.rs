@@ -35,24 +35,16 @@ impl<'data, T: Component> View<'data> for TryWrite<T> {
     fn validate() {}
 
     #[inline]
-    fn reads_types() -> Self::Read {
-        [ComponentTypeId::of::<T>()]
-    }
+    fn reads_types() -> Self::Read { [ComponentTypeId::of::<T>()] }
 
     #[inline]
-    fn writes_types() -> Self::Write {
-        [ComponentTypeId::of::<T>()]
-    }
+    fn writes_types() -> Self::Write { [ComponentTypeId::of::<T>()] }
 
     #[inline]
-    fn reads<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
     #[inline]
-    fn writes<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
     unsafe fn fetch(
         components: &'data Components,
@@ -60,10 +52,7 @@ impl<'data, T: Component> View<'data> for TryWrite<T> {
         query: QueryResult<'data>,
     ) -> Self::Iter {
         let components = components.get_downcast::<T>().unwrap();
-        let archetype_indexes = match query {
-            QueryResult::Unordered(archetypes) => archetypes.iter(),
-            QueryResult::Ordered(archetypes) => archetypes.iter(),
-        };
+        let archetype_indexes = query.index.iter();
         TryWriteIter {
             components,
             archetypes,
@@ -129,9 +118,7 @@ impl<'a, T: Component> IntoIterator for Slice<'a, T> {
     type Item = <Self as IntoIndexableIter>::Item;
     type IntoIter = <Self as IntoIndexableIter>::IntoIter;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.into_indexable_iter()
-    }
+    fn into_iter(self) -> Self::IntoIter { self.into_indexable_iter() }
 }
 
 impl<'a, T: Component> Fetch for Slice<'a, T> {

@@ -141,14 +141,14 @@ pub trait ComponentStorage<'a, T: Component>: UnknownComponentStorage + Default 
     unsafe fn get_mut(&'a self, archetype: ArchetypeIndex) -> Option<ComponentSliceMut<'a, T>>;
 
     /// Iterates through all archetype component slices.
-    fn iter(&'a self, archetype_count: usize) -> Self::Iter;
+    fn iter(&'a self, start_inclusive: usize, end_exclusive: usize) -> Self::Iter;
 
     /// Iterates through all mutable archetype component slices.
     ///
     /// # Safety
     /// Ensure that all requested archetype slices are not concurrently borrowed anywhere else such that memory
     /// is not mutably aliased.
-    unsafe fn iter_mut(&'a self, archetype_count: usize) -> Self::IterMut;
+    unsafe fn iter_mut(&'a self, start_inclusive: usize, end_exclusive: usize) -> Self::IterMut;
 }
 
 #[derive(Default)]

@@ -1,5 +1,4 @@
 use crate::entity::{Entity, EntityAllocator, EntityLocation, LocationMap};
-use crate::hash::U64Hasher;
 use crate::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use crate::storage::{
     archetype::{Archetype, ArchetypeIndex, EntityLayout},
@@ -11,7 +10,6 @@ use crate::storage::{
 use itertools::Itertools;
 use std::{
     collections::{hash_map::Entry, HashMap},
-    hash::BuildHasherDefault,
     sync::atomic::{AtomicU64, Ordering},
 };
 

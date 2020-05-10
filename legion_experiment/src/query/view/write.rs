@@ -35,24 +35,16 @@ impl<'data, T: Component> View<'data> for Write<T> {
     fn validate() {}
 
     #[inline]
-    fn reads_types() -> Self::Read {
-        [ComponentTypeId::of::<T>()]
-    }
+    fn reads_types() -> Self::Read { [ComponentTypeId::of::<T>()] }
 
     #[inline]
-    fn writes_types() -> Self::Write {
-        [ComponentTypeId::of::<T>()]
-    }
+    fn writes_types() -> Self::Write { [ComponentTypeId::of::<T>()] }
 
     #[inline]
-    fn reads<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
     #[inline]
-    fn writes<D: Component>() -> bool {
-        TypeId::of::<T>() == TypeId::of::<D>()
-    }
+    fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
     unsafe fn fetch(
         components: &'data Components,
@@ -60,14 +52,15 @@ impl<'data, T: Component> View<'data> for Write<T> {
         query: QueryResult<'data>,
     ) -> Self::Iter {
         let components = components.get_downcast::<T>().unwrap();
-        match query {
-            QueryResult::Unordered(archetypes) => WriteIter::Indexed {
+        if query.is_ordered() {
+            WriteIter::Grouped {
+                slices: components.iter_mut(query.range().start, query.range().end),
+            }
+        } else {
+            WriteIter::Indexed {
                 components,
-                archetypes: archetypes.iter(),
-            },
-            QueryResult::Ordered(archetypes) => WriteIter::Grouped {
-                slices: components.iter_mut(archetypes.len()),
-            },
+                archetypes: query.into_index().iter(),
+            }
         }
     }
 }
@@ -120,27 +113,21 @@ impl<'a, T: Component> IntoIndexableIter for WriteFetch<'a, T> {
     type Item = &'a mut T;
     type IntoIter = IndexedIter<&'a mut [T]>;
 
-    fn into_indexable_iter(self) -> Self::IntoIter {
-        IndexedIter::new(self.components)
-    }
+    fn into_indexable_iter(self) -> Self::IntoIter { IndexedIter::new(self.components) }
 }
 
 impl<'a, T: Component> IntoIterator for WriteFetch<'a, T> {
     type Item = <Self as IntoIndexableIter>::Item;
     type IntoIter = <Self as IntoIndexableIter>::IntoIter;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.into_indexable_iter()
-    }
+    fn into_iter(self) -> Self::IntoIter { self.into_indexable_iter() }
 }
 
 impl<'a, T: Component> Fetch for WriteFetch<'a, T> {
     type Data = &'a mut [T];
 
     #[inline]
-    fn into_components(self) -> Self::Data {
-        self.components
-    }
+    fn into_components(self) -> Self::Data { self.components }
 
     #[inline]
     fn find<C: 'static>(&self) -> Option<&[C]> {
@@ -182,7 +169,5 @@ impl<'a, T: Component> Fetch for WriteFetch<'a, T> {
     }
 
     #[inline]
-    fn accepted(&mut self) {
-        *self.version = self.next_version;
-    }
+    fn accepted(&mut self) { *self.version = self.next_version; }
 }

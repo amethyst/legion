@@ -54,14 +54,15 @@ impl<'data, T: Component> View<'data> for Read<T> {
             return ReadIter::Empty;
         };
         let components = components.get_downcast::<T>().unwrap();
-        match query {
-            QueryResult::Unordered(archetypes) => ReadIter::Indexed {
+        if query.is_ordered() {
+            ReadIter::Grouped {
+                slices: components.iter(query.range().start, query.range().end),
+            }
+        } else {
+            ReadIter::Indexed {
                 components,
-                archetypes: archetypes.iter(),
-            },
-            QueryResult::Ordered(archetypes) => ReadIter::Grouped {
-                slices: components.iter(archetypes.len()),
-            },
+                archetypes: query.into_index().iter(),
+            }
         }
     }
 }

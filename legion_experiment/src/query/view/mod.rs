@@ -32,7 +32,7 @@ pub trait DefaultFilter {
 
 /// A type which can pull entitiy data out of a world.
 pub trait View<'data>: DefaultFilter + Sized {
-    type Element;
+    type Element: Send + Sync;
     /// The fetch type yielded for each archetype.
     type Fetch: Fetch + IntoIndexableIter<Item = Self::Element> + 'data;
     /// The iterator type which pulls entity data out of a world.
@@ -70,14 +70,17 @@ pub trait View<'data>: DefaultFilter + Sized {
 }
 
 pub trait IntoIndexableIter {
-    type Item;
-    type IntoIter: Iterator<Item = Self::Item> + TrustedRandomAccess;
+    type Item: Send + Sync;
+    type IntoIter: Iterator<Item = Self::Item>
+        + TrustedRandomAccess<Item = Self::Item>
+        + Send
+        + Sync;
 
     fn into_indexable_iter(self) -> Self::IntoIter;
 }
 
 /// A type which holds onto a slice of entitiy data retrieved from a single archetype.
-pub trait Fetch: IntoIndexableIter {
+pub trait Fetch: IntoIndexableIter + Send + Sync {
     type Data;
 
     /// Converts the fetch into the retrieved component slices

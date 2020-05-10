@@ -1,4 +1,5 @@
 use crate::{
+    iter::indexed::TrustedRandomAccess,
     storage::{
         archetype::{Archetype, ArchetypeIndex},
         component::Component,
@@ -6,13 +7,9 @@ use crate::{
     },
     world::{World, WorldId},
 };
-use filter::{passthrough::Passthrough, DynamicFilter, EntityFilter, GroupMatcher};
-use std::{
-    collections::HashMap,
-    iter::{Copied, Zip},
-    marker::PhantomData,
-    slice::Iter,
-};
+use filter::{DynamicFilter, EntityFilter, GroupMatcher};
+use parking_lot::Mutex;
+use std::{collections::HashMap, marker::PhantomData, ops::Range, slice::Iter};
 use view::{Fetch, IntoIndexableIter, ReadOnlyFetch, View};
 
 pub mod filter;
@@ -28,7 +25,7 @@ impl<T: for<'a> View<'a>> IntoQuery for T {
 
         Query {
             _view: PhantomData,
-            filter: <Self::Filter as Default>::default(),
+            filter: Mutex::new(<Self::Filter as Default>::default()),
             layout_matches: HashMap::new(),
         }
     }
@@ -36,25 +33,59 @@ impl<T: for<'a> View<'a>> IntoQuery for T {
 
 /// Contains the result of an entity layout filter.
 #[derive(Debug, Clone)]
-pub enum QueryResult<'a> {
-    /// Archetypes must be fetched out-of-order.
-    Unordered(&'a [ArchetypeIndex]),
-    /// Archetypes can be assumed to be stored in components storage in the same
-    /// order as specified in this result.
-    Ordered(&'a [ArchetypeIndex]),
+pub struct QueryResult<'a> {
+    index: &'a [ArchetypeIndex],
+    range: Range<usize>,
+    is_ordered: bool,
 }
 
 impl<'a> QueryResult<'a> {
-    pub fn is_empty(&self) -> bool {
-        let archetypes = match self {
-            Self::Unordered(archetypes) => archetypes,
-            Self::Ordered(archetypes) => archetypes,
-        };
-        archetypes.is_empty()
+    fn unordered(index: &'a [ArchetypeIndex]) -> Self {
+        Self {
+            range: 0..index.len(),
+            index,
+            is_ordered: false,
+        }
+    }
+
+    fn ordered(index: &'a [ArchetypeIndex]) -> Self {
+        Self {
+            range: 0..index.len(),
+            index,
+            is_ordered: true,
+        }
+    }
+
+    pub fn into_index(self) -> &'a [ArchetypeIndex] { &self.index[self.range] }
+
+    pub fn index(&self) -> &[ArchetypeIndex] { &self.index[self.range.clone()] }
+
+    pub fn range(&self) -> &Range<usize> { &self.range }
+
+    pub fn is_ordered(&self) -> bool { self.is_ordered }
+
+    pub fn len(&self) -> usize { self.range.len() }
+
+    pub fn is_empty(&self) -> bool { self.index().is_empty() }
+
+    pub fn split_at(self, index: usize) -> (Self, Self) {
+        (
+            Self {
+                range: self.range.start..index,
+                index: self.index,
+                is_ordered: self.is_ordered,
+            },
+            Self {
+                range: index..self.range.end,
+                index: self.index,
+                is_ordered: self.is_ordered,
+            },
+        )
     }
 }
 
-enum Mode {
+#[derive(Debug, Clone)]
+enum Cache {
     Unordered {
         archetypes: Vec<ArchetypeIndex>,
         seen: usize,
@@ -67,8 +98,8 @@ enum Mode {
 
 pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
     _view: PhantomData<V>,
-    filter: F,
-    layout_matches: HashMap<WorldId, Mode>,
+    filter: Mutex<F>,
+    layout_matches: HashMap<WorldId, Cache>,
 }
 
 impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
@@ -80,7 +111,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     {
         Query {
             _view: self._view,
-            filter: self.filter & filter,
+            filter: Mutex::new(self.filter.into_inner() & filter),
             layout_matches: HashMap::default(),
         }
     }
@@ -89,48 +120,41 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub unsafe fn iter_unchecked<'a>(
         &'a mut self,
         world: &'a World,
-    ) -> std::iter::Flatten<
-        ChunkIter<
-            'a,
-            'a,
-            Zip<Copied<Iter<'a, ArchetypeIndex>>, <V as View<'a>>::Iter>,
-            F,
-            <V as View<'a>>::Fetch,
-        >,
-    > {
+    ) -> std::iter::Flatten<ChunkIter<'a, 'a, V, F>> {
         self.iter_chunks_unchecked(world).flatten()
+    }
+
+    #[cfg(feature = "par-iter")]
+    #[inline]
+    pub unsafe fn par_iter_unchecked<'a>(
+        &'a mut self,
+        world: &'a World,
+    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>> {
+        use rayon::iter::ParallelIterator;
+        self.par_iter_chunks_unchecked(world).flatten()
     }
 
     #[inline]
     pub fn iter_mut<'a>(
         &'a mut self,
         world: &'a mut World,
-    ) -> std::iter::Flatten<
-        ChunkIter<
-            'a,
-            'a,
-            Zip<Copied<Iter<'a, ArchetypeIndex>>, <V as View<'a>>::Iter>,
-            F,
-            <V as View<'a>>::Fetch,
-        >,
-    > {
+    ) -> std::iter::Flatten<ChunkIter<'a, 'a, V, F>> {
         // safety: we have exclusive access to world
         unsafe { self.iter_unchecked(world) }
     }
 
+    #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn iter<'a>(
+    pub fn par_iter_mut<'a>(
         &'a mut self,
-        world: &'a World,
-    ) -> std::iter::Flatten<
-        ChunkIter<
-            'a,
-            'a,
-            Zip<Copied<Iter<'a, ArchetypeIndex>>, <V as View<'a>>::Iter>,
-            F,
-            <V as View<'a>>::Fetch,
-        >,
-    >
+        world: &'a mut World,
+    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>> {
+        // safety: we have exclusive access to world
+        unsafe { self.par_iter_unchecked(world) }
+    }
+
+    #[inline]
+    pub fn iter<'a>(&'a mut self, world: &'a World) -> std::iter::Flatten<ChunkIter<'a, 'a, V, F>>
     where
         <V as View<'a>>::Fetch: ReadOnlyFetch,
     {
@@ -138,18 +162,22 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.iter_unchecked(world) }
     }
 
-    pub unsafe fn iter_chunks_unchecked<'a>(
+    #[cfg(feature = "par-iter")]
+    #[inline]
+    pub fn par_iter<'a>(
         &'a mut self,
         world: &'a World,
-    ) -> ChunkIter<
-        'a,
-        'a,
-        Zip<Copied<Iter<'a, ArchetypeIndex>>, <V as View<'a>>::Iter>,
-        F,
-        <V as View<'a>>::Fetch,
-    > {
-        let mode = self.layout_matches.entry(world.id()).or_insert_with(|| {
-            let mode = if F::can_match_group() {
+    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>>
+    where
+        <V as View<'a>>::Fetch: ReadOnlyFetch,
+    {
+        // safety: the view is readonly - it cannot create mutable aliases
+        unsafe { self.par_iter_unchecked(world) }
+    }
+
+    fn evaluate_query<'a>(&'a mut self, world: &'a World) -> (&mut Mutex<F>, QueryResult<'a>) {
+        let cache = self.layout_matches.entry(world.id()).or_insert_with(|| {
+            let cache = if F::can_match_group() {
                 let components = F::group_components();
                 components
                     .iter()
@@ -157,73 +185,94 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
                     .and_then(|t| world.group(*t))
                     .map(|(i, g)| (i, g.exact_match(&components)))
                     .and_then(|(group, subgroup)| {
-                        subgroup.map(|subgroup| Mode::Ordered { group, subgroup })
+                        subgroup.map(|subgroup| Cache::Ordered { group, subgroup })
                     })
             } else {
                 None
             };
 
-            mode.unwrap_or_else(|| Mode::Unordered {
+            cache.unwrap_or_else(|| Cache::Unordered {
                 archetypes: Vec::new(),
                 seen: 0,
             })
         });
 
-        let (result, indexes) = match mode {
-            Mode::Unordered { archetypes, seen } => {
-                for archetype in world.layout_index().search_from(&self.filter, *seen) {
+        let filter = self.filter.get_mut();
+        let result = match cache {
+            Cache::Unordered { archetypes, seen } => {
+                for archetype in world.layout_index().search_from(&*filter, *seen) {
                     archetypes.push(archetype);
                 }
-                *seen = world.archetypes().len() - 1;
-                (QueryResult::Unordered(&*archetypes), archetypes.as_slice())
+                *seen = world.archetypes().len();
+                QueryResult::unordered(archetypes.as_slice())
             }
-            Mode::Ordered { group, subgroup } => {
+            Cache::Ordered { group, subgroup } => {
                 let archetypes = &world.groups()[*group][*subgroup];
-                (QueryResult::Ordered(archetypes), archetypes)
+                QueryResult::ordered(archetypes)
             }
         };
 
+        (&mut self.filter, result)
+    }
+
+    pub unsafe fn iter_chunks_unchecked<'a>(
+        &'a mut self,
+        world: &'a World,
+    ) -> ChunkIter<'a, 'a, V, F> {
+        let (filter, result) = self.evaluate_query(world);
+        let indices = result.index.iter();
         let fetch = <V as View<'a>>::fetch(world.components(), world.archetypes(), result);
-        let inner = indexes.iter().copied().zip(fetch);
         ChunkIter {
-            inner,
-            filter: &mut self.filter,
+            inner: fetch,
+            filter: filter.get_mut(),
             archetypes: world.archetypes(),
-            max_count: indexes.len(),
+            max_count: indices.len(),
+            indices,
         }
     }
 
-    #[inline]
-    pub fn iter_chunks_mut<'a>(
+    #[cfg(feature = "par-iter")]
+    pub unsafe fn par_iter_chunks_unchecked<'a>(
         &'a mut self,
-        world: &'a mut World,
-    ) -> ChunkIter<
-        'a,
-        'a,
-        Zip<Copied<Iter<'a, ArchetypeIndex>>, <V as View<'a>>::Iter>,
-        F,
-        <V as View<'a>>::Fetch,
-    > {
+        world: &'a World,
+    ) -> par_iter::ParChunkIter<'a, V, F> {
+        let (filter, result) = self.evaluate_query(world);
+        par_iter::ParChunkIter::new(world, result, filter)
+    }
+
+    #[inline]
+    pub fn iter_chunks_mut<'a>(&'a mut self, world: &'a mut World) -> ChunkIter<'a, 'a, V, F> {
         // safety: we have exclusive access to world
         unsafe { self.iter_chunks_unchecked(world) }
     }
 
+    #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn iter_chunks<'a>(
+    pub fn par_iter_chunks_mut<'a>(
         &'a mut self,
-        world: &'a World,
-    ) -> ChunkIter<
-        'a,
-        'a,
-        Zip<Copied<Iter<'a, ArchetypeIndex>>, <V as View<'a>>::Iter>,
-        F,
-        <V as View<'a>>::Fetch,
-    >
+        world: &'a mut World,
+    ) -> par_iter::ParChunkIter<'a, V, F> {
+        // safety: we have exclusive access to world
+        unsafe { self.par_iter_chunks_unchecked(world) }
+    }
+
+    #[inline]
+    pub fn iter_chunks<'a>(&'a mut self, world: &'a World) -> ChunkIter<'a, 'a, V, F>
     where
         <V as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.iter_chunks_unchecked(world) }
+    }
+
+    #[cfg(feature = "par-iter")]
+    #[inline]
+    pub fn par_iter_chunks<'a>(&'a mut self, world: &'a World) -> par_iter::ParChunkIter<'a, V, F>
+    where
+        <V as View<'a>>::Fetch: ReadOnlyFetch,
+    {
+        // safety: the view is readonly - it cannot create mutable aliases
+        unsafe { self.par_iter_chunks_unchecked(world) }
     }
 
     #[inline]
@@ -239,6 +288,17 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         }
     }
 
+    #[cfg(feature = "par-iter")]
+    #[inline]
+    pub unsafe fn par_for_each_unchecked<'a, Body>(&'a mut self, world: &'a World, f: Body)
+    where
+        Body: Fn(<V as View<'a>>::Element) + Send + Sync,
+    {
+        use rayon::iter::{IntoParallelIterator, ParallelIterator};
+        self.par_iter_chunks_unchecked(world)
+            .for_each(move |chunk| chunk.into_par_iter().for_each(&f));
+    }
+
     #[inline]
     pub fn for_each_mut<'a, Body>(&'a mut self, world: &'a mut World, f: Body)
     where
@@ -246,6 +306,16 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     {
         // safety: we have exclusive access to world
         unsafe { self.for_each_unchecked(world, f) };
+    }
+
+    #[cfg(feature = "par-iter")]
+    #[inline]
+    pub fn par_for_each_mut<'a, Body>(&'a mut self, world: &'a mut World, f: Body)
+    where
+        Body: Fn(<V as View<'a>>::Element) + Send + Sync,
+    {
+        // safety: we have exclusive access to world
+        unsafe { self.par_for_each_unchecked(world, f) };
     }
 
     #[inline]
@@ -256,6 +326,17 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.for_each_unchecked(world, f) };
+    }
+
+    #[cfg(feature = "par-iter")]
+    #[inline]
+    pub fn par_for_each<'a, Body>(&'a mut self, world: &'a World, f: Body)
+    where
+        Body: Fn(<V as View<'a>>::Element) + Send + Sync,
+        <V as View<'a>>::Fetch: ReadOnlyFetch,
+    {
+        // safety: the view is readonly - it cannot create mutable aliases
+        unsafe { self.par_for_each_unchecked(world, f) };
     }
 }
 
@@ -291,31 +372,41 @@ impl<'a, F: Fetch> IntoIterator for ChunkView<'a, F> {
     fn into_iter(self) -> Self::IntoIter { self.fetch.into_indexable_iter() }
 }
 
-pub struct ChunkIter<'world, 'query, I, D, F>
+#[cfg(feature = "par-iter")]
+impl<'a, F: Fetch> rayon::iter::IntoParallelIterator for ChunkView<'a, F> {
+    type Iter = crate::iter::indexed::par_iter::Par<<F as IntoIndexableIter>::IntoIter>;
+    type Item = <<F as IntoIndexableIter>::IntoIter as TrustedRandomAccess>::Item;
+    fn into_par_iter(self) -> Self::Iter {
+        use crate::iter::indexed::par_iter::Par;
+        Par::new(self.fetch.into_indexable_iter())
+    }
+}
+
+pub struct ChunkIter<'world, 'query, V, D>
 where
-    I: Iterator<Item = (ArchetypeIndex, F)>,
-    F: Fetch,
+    V: View<'world>,
     D: DynamicFilter + 'query,
 {
-    inner: I,
+    inner: V::Iter,
+    indices: Iter<'query, ArchetypeIndex>,
     filter: &'query mut D,
     archetypes: &'world [Archetype],
     max_count: usize,
 }
 
-impl<'world, 'query, I, D, F> Iterator for ChunkIter<'world, 'query, I, D, F>
+impl<'world, 'query, V, D> Iterator for ChunkIter<'world, 'query, V, D>
 where
-    I: Iterator<Item = (ArchetypeIndex, F)>,
-    F: Fetch,
+    V: View<'world>,
     D: DynamicFilter + 'query,
 {
-    type Item = ChunkView<'world, F>;
+    type Item = ChunkView<'world, V::Fetch>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        for (index, mut fetch) in &mut self.inner {
+        for mut fetch in &mut self.inner {
+            let idx = self.indices.next().unwrap();
             if self.filter.matches_archetype(&fetch).is_pass() {
                 fetch.accepted();
-                return Some(ChunkView::new(&self.archetypes[index], fetch));
+                return Some(ChunkView::new(&self.archetypes[*idx], fetch));
             }
         }
         None
@@ -324,11 +415,180 @@ where
     fn size_hint(&self) -> (usize, Option<usize>) { (0, Some(self.max_count)) }
 }
 
-impl<'world, 'query, I, F> ExactSizeIterator for ChunkIter<'world, 'query, I, Passthrough, F>
-where
-    I: Iterator<Item = (ArchetypeIndex, F)>,
-    F: Fetch,
-{
+// impl<'world, 'query, I, F> Iterator for ChunkIter<'world, 'query, I, Passthrough, F>
+// where
+//     I: Iterator<Item = (ArchetypeIndex, F)>,
+//     F: Fetch,
+// {
+//     type Item = ChunkView<'world, F>;
+
+//     fn next(&mut self) -> Option<Self::Item> {
+//         for (index, mut fetch) in &mut self.inner {
+//             fetch.accepted();
+//             return Some(ChunkView::new(&self.archetypes[index], fetch));
+//         }
+//         None
+//     }
+
+//     fn size_hint(&self) -> (usize, Option<usize>) { (self.max_count, Some(self.max_count)) }
+// }
+
+// impl<'world, 'query, I, F> ExactSizeIterator for ChunkIter<'world, 'query, I, Passthrough, F>
+// where
+//     I: Iterator<Item = (ArchetypeIndex, F)> + ExactSizeIterator,
+//     F: Fetch,
+// {
+// }
+
+#[cfg(feature = "par-iter")]
+mod par_iter {
+    use super::*;
+    use crate::world::World;
+    use rayon::iter::plumbing::{bridge_unindexed, Folder, UnindexedConsumer, UnindexedProducer};
+    use rayon::iter::ParallelIterator;
+    use std::marker::PhantomData;
+
+    pub struct Iter<'world, 'query, V, D>
+    where
+        V: View<'world>,
+        D: DynamicFilter + 'query,
+    {
+        inner: V::Iter,
+        indices: std::slice::Iter<'query, ArchetypeIndex>,
+        filter: &'query Mutex<D>,
+        archetypes: &'world [Archetype],
+        max_count: usize,
+    }
+
+    impl<'world, 'query, V, D> Iterator for Iter<'world, 'query, V, D>
+    where
+        V: View<'world>,
+        D: DynamicFilter + 'query,
+    {
+        type Item = ChunkView<'world, V::Fetch>;
+
+        fn next(&mut self) -> Option<Self::Item> {
+            let mut filter = self.filter.lock();
+            for mut fetch in &mut self.inner {
+                let idx = self.indices.next().unwrap();
+                if filter.matches_archetype(&fetch).is_pass() {
+                    fetch.accepted();
+                    return Some(ChunkView::new(&self.archetypes[*idx], fetch));
+                }
+            }
+            None
+        }
+
+        fn size_hint(&self) -> (usize, Option<usize>) { (0, Some(self.max_count)) }
+    }
+
+    pub struct ParChunkIter<'a, V, D>
+    where
+        V: View<'a>,
+        D: DynamicFilter + 'a,
+    {
+        world: &'a World,
+        result: QueryResult<'a>,
+        filter: &'a Mutex<D>,
+        _view: PhantomData<V>,
+    }
+
+    impl<'a, V, D> ParChunkIter<'a, V, D>
+    where
+        V: View<'a>,
+        D: DynamicFilter + 'a,
+    {
+        pub fn new(world: &'a World, result: QueryResult<'a>, filter: &'a Mutex<D>) -> Self {
+            Self {
+                world,
+                result,
+                filter,
+                _view: PhantomData,
+            }
+        }
+    }
+
+    unsafe impl<'a, V, D> Send for ParChunkIter<'a, V, D>
+    where
+        V: View<'a>,
+        D: DynamicFilter + 'a,
+    {
+    }
+
+    unsafe impl<'a, V, D> Sync for ParChunkIter<'a, V, D>
+    where
+        V: View<'a>,
+        D: DynamicFilter + 'a,
+    {
+    }
+
+    impl<'a, V, D> UnindexedProducer for ParChunkIter<'a, V, D>
+    where
+        V: View<'a>,
+        D: DynamicFilter + 'a,
+    {
+        type Item = <Iter<'a, 'a, V, D> as Iterator>::Item;
+
+        fn split(self) -> (Self, Option<Self>) {
+            let index = self.result.len() / 2;
+            let (left, right) = self.result.split_at(index);
+            (
+                Self {
+                    world: self.world,
+                    result: right,
+                    filter: self.filter,
+                    _view: PhantomData,
+                },
+                if left.len() > 0 {
+                    Some(Self {
+                        world: self.world,
+                        result: left,
+                        filter: self.filter,
+                        _view: PhantomData,
+                    })
+                } else {
+                    None
+                },
+            )
+        }
+
+        fn fold_with<F>(self, folder: F) -> F
+        where
+            F: Folder<Self::Item>,
+        {
+            let indices = self.result.index.iter();
+            let fetch = unsafe {
+                <V as View<'a>>::fetch(
+                    self.world.components(),
+                    self.world.archetypes(),
+                    self.result,
+                )
+            };
+            let iter = Iter::<'a, 'a, V, D> {
+                inner: fetch,
+                filter: self.filter,
+                archetypes: self.world.archetypes(),
+                max_count: indices.len(),
+                indices,
+            };
+            folder.consume_iter(iter)
+        }
+    }
+
+    impl<'a, V, D> ParallelIterator for ParChunkIter<'a, V, D>
+    where
+        V: View<'a>,
+        D: DynamicFilter + 'a,
+    {
+        type Item = ChunkView<'a, V::Fetch>;
+
+        fn drive_unindexed<C>(self, consumer: C) -> C::Result
+        where
+            C: UnindexedConsumer<Self::Item>,
+        {
+            bridge_unindexed(self, consumer)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -350,5 +610,14 @@ mod test {
             let (x, y) = chunk.into_components();
             println!("{:?}, {:?}", x, y);
         }
+        println!("parallel");
+        query.par_for_each_mut(&mut world, |(x, y)| println!("{:?}, {:?}", x, y));
+        println!("par chunks");
+        use rayon::iter::ParallelIterator;
+        query.par_iter_chunks_mut(&mut world).for_each(|chunk| {
+            println!("arch {:?}", chunk.archetype());
+            let (x, y) = chunk.into_components();
+            println!("{:?}, {:?}", x, y);
+        })
     }
 }

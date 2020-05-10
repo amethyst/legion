@@ -4,6 +4,7 @@ use crate::{
 };
 use std::{
     collections::HashMap,
+    fmt::Debug,
     hash::BuildHasherDefault,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -11,7 +12,8 @@ use std::{
     },
 };
 
-const BLOCK_SIZE: u64 = 64;
+const BLOCK_SIZE: usize = 64;
+const BLOCK_SIZE_U64: u64 = BLOCK_SIZE as u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
@@ -30,10 +32,21 @@ impl EntityLocation {
     pub fn component(&self) -> ComponentIndex { self.1 }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct LocationMap {
     len: usize,
-    blocks: HashMap<u64, Vec<Option<EntityLocation>>, BuildHasherDefault<U64Hasher>>,
+    blocks: HashMap<u64, Box<[Option<EntityLocation>; BLOCK_SIZE]>, BuildHasherDefault<U64Hasher>>,
+}
+
+impl Debug for LocationMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let entries = self.blocks.iter().flat_map(|(base, locs)| {
+            locs.iter()
+                .enumerate()
+                .filter_map(move |(i, loc)| loc.map(|loc| (Entity(*base + i as u64), loc)))
+        });
+        f.debug_map().entries(entries).finish()
+    }
 }
 
 impl LocationMap {
@@ -50,16 +63,18 @@ impl LocationMap {
         let mut current_block = u64::MAX;
         let mut block_vec = None;
         for (i, entity) in ids.iter().enumerate() {
-            let block = entity.0 / BLOCK_SIZE;
+            let block = entity.0 / BLOCK_SIZE_U64;
             if current_block != block {
-                block_vec = Some(self.blocks.entry(block).or_insert_with(|| {
-                    std::iter::repeat(None).take(BLOCK_SIZE as usize).collect()
-                }));
+                block_vec = Some(
+                    self.blocks
+                        .entry(block)
+                        .or_insert_with(|| Box::new([None; BLOCK_SIZE])),
+                );
                 current_block = block;
             }
 
             if let Some(ref mut vec) = block_vec {
-                let idx = (entity.0 - block * BLOCK_SIZE) as usize;
+                let idx = (entity.0 - block * BLOCK_SIZE_U64) as usize;
                 if vec[idx]
                     .replace(EntityLocation(arch, ComponentIndex(base + i)))
                     .is_none()
@@ -75,8 +90,8 @@ impl LocationMap {
     }
 
     pub fn get(&self, entity: Entity) -> Option<EntityLocation> {
-        let block = entity.0 / BLOCK_SIZE;
-        let idx = (entity.0 - block * BLOCK_SIZE) as usize;
+        let block = entity.0 / BLOCK_SIZE_U64;
+        let idx = (entity.0 - block * BLOCK_SIZE_U64) as usize;
         if let Some(&result) = self.blocks.get(&block).and_then(|v| v.get(idx)) {
             result
         } else {
@@ -85,8 +100,8 @@ impl LocationMap {
     }
 
     pub fn remove(&mut self, entity: Entity) -> Option<EntityLocation> {
-        let block = entity.0 / BLOCK_SIZE;
-        let idx = (entity.0 - block * BLOCK_SIZE) as usize;
+        let block = entity.0 / BLOCK_SIZE_U64;
+        let idx = (entity.0 - block * BLOCK_SIZE_U64) as usize;
         if let Some(loc) = self.blocks.get_mut(&block).and_then(|v| v.get_mut(idx)) {
             let original = *loc;
             if original.is_some() {
@@ -110,8 +125,8 @@ impl EntityAllocator {
     pub fn new(offset: u64, stride: u64) -> Self {
         assert!(stride > 0);
         Self {
-            next: Arc::new(AtomicU64::new(offset * BLOCK_SIZE)),
-            stride: stride * BLOCK_SIZE,
+            next: Arc::new(AtomicU64::new(offset * BLOCK_SIZE_U64)),
+            stride: stride * BLOCK_SIZE_U64,
         }
     }
 
@@ -150,8 +165,8 @@ impl<'a> Iterator for Allocate<'a> {
         if self.count == 0 {
             self.base = self
                 .shared
-                .fetch_add(self.stride * BLOCK_SIZE, Ordering::Relaxed);
-            self.count = BLOCK_SIZE;
+                .fetch_add(self.stride * BLOCK_SIZE_U64, Ordering::Relaxed);
+            self.count = BLOCK_SIZE_U64;
         }
 
         self.count -= 1;

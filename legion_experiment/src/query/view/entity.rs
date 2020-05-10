@@ -28,37 +28,25 @@ impl<'data> View<'data> for Entity {
     fn validate() {}
 
     #[inline]
-    fn reads_types() -> Self::Read {
-        []
-    }
+    fn reads_types() -> Self::Read { [] }
 
     #[inline]
-    fn writes_types() -> Self::Write {
-        []
-    }
+    fn writes_types() -> Self::Write { [] }
 
     #[inline]
-    fn reads<D: Component>() -> bool {
-        false
-    }
+    fn reads<D: Component>() -> bool { false }
 
     #[inline]
-    fn writes<D: Component>() -> bool {
-        false
-    }
+    fn writes<D: Component>() -> bool { false }
 
     unsafe fn fetch(
         _: &'data Components,
         archetypes: &'data [Archetype],
         query: QueryResult<'data>,
     ) -> Self::Iter {
-        let indexes = match query {
-            QueryResult::Unordered(indexes) => indexes.iter(),
-            QueryResult::Ordered(indexes) => indexes.iter(),
-        };
         Iter {
             archetypes,
-            indexes,
+            indexes: query.index.iter(),
         }
     }
 }
@@ -86,51 +74,37 @@ pub struct EntityFetch<'a> {
 
 unsafe impl<'a> ReadOnlyFetch for EntityFetch<'a> {
     #[inline]
-    fn get_components(&self) -> Self::Data {
-        &self.entities
-    }
+    fn get_components(&self) -> Self::Data { &self.entities }
 }
 
 impl<'a> IntoIndexableIter for EntityFetch<'a> {
     type Item = &'a Entity;
     type IntoIter = IndexedIter<&'a [Entity]>;
 
-    fn into_indexable_iter(self) -> Self::IntoIter {
-        IndexedIter::new(self.entities)
-    }
+    fn into_indexable_iter(self) -> Self::IntoIter { IndexedIter::new(self.entities) }
 }
 
 impl<'a> IntoIterator for EntityFetch<'a> {
     type Item = <Self as IntoIndexableIter>::Item;
     type IntoIter = <Self as IntoIndexableIter>::IntoIter;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.into_indexable_iter()
-    }
+    fn into_iter(self) -> Self::IntoIter { self.into_indexable_iter() }
 }
 
 impl<'a> Fetch for EntityFetch<'a> {
     type Data = &'a [Entity];
 
     #[inline]
-    fn into_components(self) -> Self::Data {
-        self.entities
-    }
+    fn into_components(self) -> Self::Data { self.entities }
 
     #[inline]
-    fn find<C: 'static>(&self) -> Option<&[C]> {
-        None
-    }
+    fn find<C: 'static>(&self) -> Option<&[C]> { None }
 
     #[inline]
-    fn find_mut<C: 'static>(&mut self) -> Option<&mut [C]> {
-        None
-    }
+    fn find_mut<C: 'static>(&mut self) -> Option<&mut [C]> { None }
 
     #[inline]
-    fn version<C: Component>(&self) -> Option<u64> {
-        None
-    }
+    fn version<C: Component>(&self) -> Option<u64> { None }
 
     #[inline]
     fn accepted(&mut self) {}

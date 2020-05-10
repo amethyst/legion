@@ -28,11 +28,10 @@ impl SearchIndex {
         start: usize,
     ) -> impl Iterator<Item = ArchetypeIndex> + 'a {
         self.component_layouts
-            .iter()
-            .skip(start)
+            .iter_from(start)
             .enumerate()
             .filter(move |(_, components)| filter.matches_layout(components).is_pass())
-            .map(|(i, _)| ArchetypeIndex(i as u32))
+            .map(move |(i, _)| ArchetypeIndex((i + start) as u32))
     }
 
     pub fn search<'a, F: LayoutFilter>(
