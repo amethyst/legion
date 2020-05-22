@@ -1186,11 +1186,6 @@ where
     /// Returns a RefMapSet of all components of a given type. This simplifies getting a slice of
     /// references to all components of type T that match the filter. This can be useful for passing
     /// to other libraries or FFI.
-    ///
-    /// # Panics
-    ///
-    /// This method performs runtime borrow checking. It will panic if any other code is
-    /// concurrently writing to the data slice.
     pub fn components<'a, T: Component>(&self, world: &'a World) -> RefMapSet<'a, Vec<&'a T>> {
         if !V::reads::<T>() {
             panic!("data type not readable via this query");
@@ -1221,14 +1216,9 @@ where
 
     /// Returns a RefMapMutSet of all components of a given type. This simplifies getting a slice of
     /// mutable refs to all components of type T that match the filter.
-    ///
-    /// # Panics
-    ///
-    /// This method performs runtime borrow checking. It will panic if any other code is
-    /// concurrently accessing the data slice.
     pub fn components_mut<'a, T: Component>(
         &self,
-        world: &'a World,
+        world: &'a mut World,
     ) -> RefMapMutSet<'a, Vec<&'a mut T>> {
         if !V::writes::<T>() {
             panic!("data type not writable via this query");
@@ -1238,7 +1228,11 @@ where
         let mut refs = vec![];
 
         // The function takes a mutable world to ensure exclusivity. However, internally we want to
-        // work with an immutable reference to avoid borrow checker issues
+        // work with an immutable reference to avoid borrow checker issues. The issue with using
+        // mutable references is that we are going to iterate across archetypes and take mutable
+        // borrows from them. This would require taking multiple mutable borrows on world. While
+        // the mutable references we are gathering do not alias each other, the borrow-checker
+        // cannot prove this so we must use unsafe code.
         let world = &*world;
 
         unsafe {
@@ -1249,7 +1243,7 @@ where
                         .storage()
                         .archetypes()
                         .get_unchecked(archetype_index.0)
-                        .iter_data_slice_mut::<T>()
+                        .iter_data_slice_unchecked_mut::<T>()
                 })
                 .map(|x| x.deconstruct())
                 .for_each(|(borrow, slice)| {

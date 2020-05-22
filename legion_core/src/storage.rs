@@ -1226,13 +1226,13 @@ impl ArchetypeData {
         })
     }
 
-    pub(crate) fn iter_data_slice_mut<'a, T: Component>(
+    pub(crate) unsafe fn iter_data_slice_unchecked_mut<'a, T: Component>(
         &'a self,
     ) -> impl Iterator<Item = RefMapMut<&mut [T]>> + 'a {
         self.chunk_sets.iter().flat_map(move |set| {
             set.chunks.iter().map(move |chunk| {
                 let c = chunk.components(ComponentTypeId::of::<T>()).unwrap();
-                unsafe { c.data_slice_mut::<T>() }
+                c.data_slice_mut::<T>()
             })
         })
     }

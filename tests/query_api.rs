@@ -627,6 +627,6 @@ fn query_get_all_components() {
 
     let query_pos = Write::<Pos>::query();
     let query_rot = Write::<Rot>::query();
-    assert_eq!(2, query_pos.components_mut::<Pos>(&world).len());
-    assert_eq!(1, query_rot.components_mut::<Rot>(&world).len());
+    assert_eq!(2, query_pos.components_mut::<Pos>(&mut world).len());
+    assert_eq!(1, query_rot.components_mut::<Rot>(&mut world).len());
 }
