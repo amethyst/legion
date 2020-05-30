@@ -16,6 +16,7 @@ const BLOCK_SIZE: usize = 64;
 const BLOCK_SIZE_U64: u64 = BLOCK_SIZE as u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[repr(transparent)]
 pub struct Entity(u64);
 
