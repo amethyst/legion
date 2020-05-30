@@ -2,6 +2,8 @@ use crate::borrow::RefIter;
 use crate::borrow::RefIterMut;
 use crate::borrow::RefMap;
 use crate::borrow::RefMapMut;
+use crate::borrow::RefMapMutSet;
+use crate::borrow::RefMapSet;
 use crate::borrow::TryRefIter;
 use crate::borrow::TryRefIterMut;
 use crate::entity::Entity;
@@ -1179,6 +1181,78 @@ where
     {
         // safe because the &mut World ensures exclusivity
         unsafe { self.for_each_unchecked(world, f) };
+    }
+
+    /// Returns a RefMapSet of all components of a given type. This simplifies getting a slice of
+    /// references to all components of type T that match the filter. This can be useful for passing
+    /// to other libraries or FFI.
+    pub fn components<'a, T: Component>(&self, world: &'a World) -> RefMapSet<'a, Vec<&'a T>> {
+        if !V::reads::<T>() {
+            panic!("data type not readable via this query");
+        }
+
+        let mut borrows = vec![];
+        let mut refs = vec![];
+
+        unsafe {
+            self.filter
+                .iter_archetype_indexes(world.storage())
+                .flat_map(|archetype_index| {
+                    world
+                        .storage()
+                        .archetypes()
+                        .get_unchecked(archetype_index.0)
+                        .iter_data_slice::<T>()
+                })
+                .map(|x| x.deconstruct())
+                .for_each(|(borrow, slice)| {
+                    borrows.push(borrow);
+                    refs.extend(slice);
+                });
+        }
+
+        RefMapSet::new(borrows, refs)
+    }
+
+    /// Returns a RefMapMutSet of all components of a given type. This simplifies getting a slice of
+    /// mutable refs to all components of type T that match the filter.
+    pub fn components_mut<'a, T: Component>(
+        &self,
+        world: &'a mut World,
+    ) -> RefMapMutSet<'a, Vec<&'a mut T>> {
+        if !V::writes::<T>() {
+            panic!("data type not writable via this query");
+        }
+
+        let mut borrows = vec![];
+        let mut refs = vec![];
+
+        // The function takes a mutable world to ensure exclusivity. However, internally we want to
+        // work with an immutable reference to avoid borrow checker issues. The issue with using
+        // mutable references is that we are going to iterate across archetypes and take mutable
+        // borrows from them. This would require taking multiple mutable borrows on world. While
+        // the mutable references we are gathering do not alias each other, the borrow-checker
+        // cannot prove this so we must use unsafe code.
+        let world = &*world;
+
+        unsafe {
+            self.filter
+                .iter_archetype_indexes(world.storage())
+                .flat_map(|archetype_index| {
+                    world
+                        .storage()
+                        .archetypes()
+                        .get_unchecked(archetype_index.0)
+                        .iter_data_slice_unchecked_mut::<T>()
+                })
+                .map(|x| x.deconstruct())
+                .for_each(|(borrow, slice)| {
+                    borrows.push(borrow);
+                    refs.extend(slice);
+                });
+        }
+
+        RefMapMutSet::new(borrows, refs)
     }
 
     #[cfg(feature = "par-iter")]
