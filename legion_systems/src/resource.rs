@@ -16,7 +16,9 @@ pub struct ResourceTypeId(TypeId);
 #[cfg(not(feature = "ffi"))]
 impl ResourceTypeId {
     /// Gets the component type ID that represents type `T`.
-    pub fn of<T: Resource>() -> Self { Self(TypeId::of::<T>()) }
+    pub fn of<T: Resource>() -> Self {
+        Self(TypeId::of::<T>())
+    }
 }
 
 #[cfg(feature = "ffi")]
@@ -27,7 +29,9 @@ pub struct ResourceTypeId(TypeId, u32);
 #[cfg(feature = "ffi")]
 impl ResourceTypeId {
     /// Gets the component type ID that represents type `T`.
-    pub fn of<T: Resource>() -> Self { Self(TypeId::of::<T>(), 0) }
+    pub fn of<T: Resource>() -> Self {
+        Self(TypeId::of::<T>(), 0)
+    }
 }
 
 /// Trait which is implemented for tuples of resources and singular resources. This abstracts
@@ -96,12 +100,16 @@ pub struct PreparedRead<T: Resource> {
     resource: *const T,
 }
 impl<T: Resource> PreparedRead<T> {
-    pub(crate) unsafe fn new(resource: *const T) -> Self { Self { resource } }
+    pub(crate) unsafe fn new(resource: *const T) -> Self {
+        Self { resource }
+    }
 }
 impl<T: Resource> Deref for PreparedRead<T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target { unsafe { &*self.resource } }
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.resource }
+    }
 }
 unsafe impl<T: Resource> Send for PreparedRead<T> {}
 unsafe impl<T: Resource> Sync for PreparedRead<T> {}
@@ -119,14 +127,20 @@ pub struct PreparedWrite<T: Resource> {
 impl<T: Resource> Deref for PreparedWrite<T> {
     type Target = T;
 
-    fn deref(&self) -> &Self::Target { unsafe { &*self.resource } }
+    fn deref(&self) -> &Self::Target {
+        unsafe { &*self.resource }
+    }
 }
 
 impl<T: Resource> DerefMut for PreparedWrite<T> {
-    fn deref_mut(&mut self) -> &mut T { unsafe { &mut *self.resource } }
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.resource }
+    }
 }
 impl<T: Resource> PreparedWrite<T> {
-    pub(crate) unsafe fn new(resource: *mut T) -> Self { Self { resource } }
+    pub(crate) unsafe fn new(resource: *mut T) -> Self {
+        Self { resource }
+    }
 }
 unsafe impl<T: Resource> Send for PreparedWrite<T> {}
 unsafe impl<T: Resource> Sync for PreparedWrite<T> {}
