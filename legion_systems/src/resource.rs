@@ -263,10 +263,7 @@ impl Resources {
 
     /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
     /// the closure `f` is called to construct the object and it is then inserted into the store.
-    pub fn get_or_insert_with<T: Resource, F: FnOnce() -> T>(
-        &mut self,
-        f: F,
-    ) -> Option<Fetch<'_, T>> {
+    pub fn get_or_insert_with<T: Resource, F: FnOnce() -> T>(&mut self, f: F) -> Fetch<'_, T> {
         self.get_or_insert((f)())
     }
 
@@ -275,64 +272,64 @@ impl Resources {
     pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(
         &mut self,
         f: F,
-    ) -> Option<FetchMut<'_, T>> {
+    ) -> FetchMut<'_, T> {
         self.get_mut_or_insert((f)())
     }
 
     /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
     /// the provided value is inserted and then a reference to it is returned.
-    pub fn get_or_insert<T: Resource>(&mut self, value: T) -> Option<Fetch<'_, T>> {
-        Some(Fetch {
+    pub fn get_or_insert<T: Resource>(&mut self, value: T) -> Fetch<'_, T> {
+        Fetch {
             inner: self
                 .storage
                 .entry(ResourceTypeId::of::<T>())
                 .or_insert_with(|| AtomicRefCell::new(Box::new(value)))
                 .get(),
             _marker: Default::default(),
-        })
+        }
     }
 
     /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
     /// the provided value is inserted and then a reference to it is returned.
-    pub fn get_mut_or_insert<T: Resource>(&mut self, value: T) -> Option<FetchMut<'_, T>> {
-        Some(FetchMut {
+    pub fn get_mut_or_insert<T: Resource>(&mut self, value: T) -> FetchMut<'_, T> {
+        FetchMut {
             inner: self
                 .storage
                 .entry(ResourceTypeId::of::<T>())
                 .or_insert_with(|| AtomicRefCell::new(Box::new(value)))
                 .get_mut(),
             _marker: Default::default(),
-        })
+        }
     }
 
     /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
     /// the default constructor for `T` is called.
     ///
     /// `T` must implement `Default` for this method.
-    pub fn get_or_default<T: Resource + Default>(&mut self) -> Option<Fetch<'_, T>> {
-        Some(Fetch {
+    pub fn get_or_default<T: Resource + Default>(&mut self) -> Fetch<'_, T> {
+        Fetch {
             inner: self
                 .storage
                 .entry(ResourceTypeId::of::<T>())
                 .or_insert_with(|| AtomicRefCell::new(Box::new(T::default())))
                 .get(),
             _marker: Default::default(),
-        })
+        }
     }
 
     /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
     /// the default constructor for `T` is called.
     ///
     /// `T` must implement `Default` for this method.
-    pub fn get_mut_or_default<T: Resource + Default>(&mut self) -> Option<FetchMut<'_, T>> {
-        Some(FetchMut {
+    pub fn get_mut_or_default<T: Resource + Default>(&mut self) -> FetchMut<'_, T> {
+        FetchMut {
             inner: self
                 .storage
                 .entry(ResourceTypeId::of::<T>())
                 .or_insert_with(|| AtomicRefCell::new(Box::new(T::default())))
                 .get_mut(),
             _marker: Default::default(),
-        })
+        }
     }
 
     /// Performs merging of two resource storages, which occurs during a world merge.
@@ -419,32 +416,181 @@ impl_resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T,
 mod tests {
     use super::*;
 
+    #[derive(Clone, Debug, Default, PartialEq)]
+    struct TestOne {
+        value: String,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    struct TestTwo {
+        value: String,
+    }
+
     #[test]
-    fn simple_read_write_test() {
+    fn insert() {
         let _ = tracing_subscriber::fmt::try_init();
-
-        struct TestOne {
-            value: String,
-        }
-
-        struct TestTwo {
-            value: String,
-        }
 
         let mut resources = Resources::default();
         resources.insert(TestOne {
-            value: "poop".to_string(),
+            value: "one".to_string(),
         });
 
         resources.insert(TestTwo {
-            value: "balls".to_string(),
+            value: "two".to_string(),
         });
 
-        assert_eq!(resources.get::<TestOne>().unwrap().value, "poop");
-        assert_eq!(resources.get::<TestTwo>().unwrap().value, "balls");
+        assert_eq!(resources.contains::<TestOne>(), true);
+        assert_eq!(resources.contains::<TestTwo>(), true);
+        assert_eq!(resources.get::<TestOne>().unwrap().value, "one");
+        assert_eq!(resources.get::<TestTwo>().unwrap().value, "two");
+    }
 
-        // test re-ownership
-        let owned = resources.remove::<TestTwo>();
-        assert_eq!(owned.unwrap().value, "balls")
+    #[test]
+    fn insert_twice() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut resources = Resources::default();
+        resources.insert(TestOne {
+            value: "one".to_string(),
+        });
+
+        assert_eq!(resources.contains::<TestOne>(), true);
+        assert_eq!(resources.get::<TestOne>().unwrap().value, "one");
+
+        resources.insert(TestOne {
+            value: "one again".to_string(),
+        });
+
+        assert_eq!(resources.contains::<TestOne>(), true);
+        assert_eq!(resources.get::<TestOne>().unwrap().value, "one again");
+    }
+
+    #[test]
+    fn remove() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut resources = Resources::default();
+
+        assert!(resources.remove::<TestOne>().is_none());
+
+        resources.insert(TestOne {
+            value: "one".to_string(),
+        });
+
+        assert_eq!(resources.remove::<TestOne>().unwrap().value, "one");
+
+        assert!(!resources.contains::<TestOne>());
+        assert!(resources.get::<TestOne>().is_none());
+    }
+
+    #[test]
+    fn get_mut() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut resources = Resources::default();
+        resources.insert(TestOne {
+            value: "one".to_string(),
+        });
+
+        {
+            let mut mutable = resources.get_mut::<TestOne>().unwrap();
+            assert_eq!(mutable.value, "one");
+            mutable.value = "mutated".to_string();
+        }
+
+        assert_eq!(resources.get::<TestOne>().unwrap().value, "mutated");
+    }
+
+    #[test]
+    fn get_or_default() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut resources = Resources::default();
+        assert_eq!(*resources.get_or_default::<TestOne>(), TestOne::default());
+    }
+
+    #[test]
+    fn get_mut_or_default() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut resources = Resources::default();
+        {
+            let mut mutable = resources.get_mut_or_default::<TestOne>();
+            assert_eq!(*mutable, TestOne::default());
+            mutable.value = "mutated".to_string();
+        }
+
+        assert_eq!(resources.get_or_default::<TestOne>().value, "mutated");
+    }
+
+    #[test]
+    fn get_or_insert() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut resources = Resources::default();
+        let insert = TestOne {
+            value: "one".to_string(),
+        };
+        assert_eq!(*resources.get_or_insert::<TestOne>(insert.clone()), insert);
+    }
+
+    #[test]
+    fn get_mut_or_insert() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut resources = Resources::default();
+        let insert = TestOne {
+            value: "one".to_string(),
+        };
+        {
+            let mut mutable = resources.get_mut_or_insert::<TestOne>(insert.clone());
+            assert_eq!(*mutable, insert);
+            mutable.value = "mutated".to_string();
+        }
+
+        assert_eq!(resources.get_or_insert::<TestOne>(insert).value, "mutated");
+    }
+
+    #[test]
+    fn get_or_insert_with() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut resources = Resources::default();
+        assert_eq!(
+            *resources.get_or_insert_with(|| TestOne {
+                value: "one".to_string()
+            }),
+            TestOne {
+                value: "one".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn get_mut_or_insert_with() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let mut resources = Resources::default();
+        {
+            let mut mutable = resources.get_mut_or_insert_with(|| TestOne {
+                value: "one".to_string(),
+            });
+            assert_eq!(
+                *mutable,
+                TestOne {
+                    value: "one".to_string()
+                }
+            );
+            mutable.value = "mutated".to_string();
+        }
+
+        assert_eq!(
+            resources
+                .get_or_insert_with(|| TestOne {
+                    value: "one".to_string()
+                })
+                .value,
+            "mutated"
+        );
     }
 }
