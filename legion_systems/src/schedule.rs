@@ -2,11 +2,11 @@ use crate::{
     resource::{ResourceTypeId, Resources},
     system::SystemId,
 };
-use bit_set::BitSet;
 use legion_core::{
     borrow::RefMut,
     command::CommandBuffer,
     storage::ComponentTypeId,
+    subworld::ArchetypeAccess,
     world::{World, WorldId},
 };
 use std::cell::UnsafeCell;
@@ -35,26 +35,6 @@ use std::iter::repeat;
 /// This is automatically implemented for all types that implement `Runnable` which meet the requirements.
 pub trait Schedulable: Runnable + Send + Sync {}
 impl<T> Schedulable for T where T: Runnable + Send + Sync {}
-
-/// Describes which archetypes a system declares access to.
-pub enum ArchetypeAccess {
-    /// All archetypes.
-    All,
-    /// Some archetypes.
-    Some(BitSet),
-}
-
-impl ArchetypeAccess {
-    pub fn is_disjoint(&self, other: &ArchetypeAccess) -> bool {
-        match self {
-            Self::All => false,
-            Self::Some(mine) => match other {
-                Self::All => false,
-                Self::Some(theirs) => mine.is_disjoint(theirs),
-            },
-        }
-    }
-}
 
 /// Trait describing a schedulable type. This is implemented by `System`
 pub trait Runnable {
@@ -329,7 +309,11 @@ impl Executor {
                 match self.systems.len() {
                     1 => {
                         // safety: we have exlusive access to all systems, world and resources here
-                        unsafe { self.systems[0].get_mut().run(world, resources) };
+                        unsafe {
+                            let system = self.systems[0].get_mut();
+                            system.prepare(world);
+                            system.run(world, resources);
+                        };
                     }
                     _ => {
                         let systems = &mut self.systems;
@@ -635,10 +619,14 @@ mod tests {
         });
         let system_two = SystemBuilder::new("two")
             .with_query(Write::<TestComp>::query())
-            .build(move |_, world, _, query| assert_eq!(0, query.iter_mut(world).count()));
+            .build(move |_, world, _, query| {
+                assert_eq!(0, query.iter_mut(world).count());
+            });
         let system_three = SystemBuilder::new("three")
             .with_query(Write::<TestComp>::query())
-            .build(move |_, world, _, query| assert_eq!(1, query.iter_mut(world).count()));
+            .build(move |_, world, _, query| {
+                assert_eq!(1, query.iter_mut(world).count());
+            });
 
         let mut schedule = Schedule::builder()
             .add_system(system_one)
@@ -659,16 +647,14 @@ mod tests {
         #[derive(Clone, Copy, Debug, PartialEq)]
         struct TestComp(f32, f32, f32);
 
-        let mut entity = Arc::new(Mutex::new(None));
+        let entity = Arc::new(Mutex::new(None));
 
         {
-            let mut entity = entity.clone();
+            let entity = entity.clone();
 
             let system_one = SystemBuilder::new("one").build_thread_local(move |cmd, _, _, _| {
                 let mut entity = entity.lock().unwrap();
                 *entity = Some(cmd.insert((), vec![(TestComp(0.0, 0.0, 0.0),)])[0]);
-
-                println!("asddsadsd");
             });
 
             let mut schedule = Schedule::builder().add_thread_local(system_one).build();

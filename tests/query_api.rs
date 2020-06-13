@@ -622,11 +622,11 @@ fn query_get_all_components() {
 
     let query_pos = Read::<Pos>::query();
     let query_rot = Read::<Rot>::query();
-    assert_eq!(2, query_pos.components::<Pos>(&world).len());
-    assert_eq!(1, query_rot.components::<Rot>(&world).len());
+    assert_eq!(2, query_pos.components::<Pos, World>(&world).len());
+    assert_eq!(1, query_rot.components::<Rot, World>(&world).len());
 
     let query_pos = Write::<Pos>::query();
     let query_rot = Write::<Rot>::query();
-    assert_eq!(2, query_pos.components_mut::<Pos>(&mut world).len());
-    assert_eq!(1, query_rot.components_mut::<Rot>(&mut world).len());
+    assert_eq!(2, query_pos.components_mut::<Pos, World>(&mut world).len());
+    assert_eq!(1, query_rot.components_mut::<Rot, World>(&mut world).len());
 }
