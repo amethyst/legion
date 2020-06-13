@@ -722,6 +722,7 @@ mod tests {
                 state += 1;
             });
 
+        let _ = state;
         system.prepare(&world);
         system.run(&mut world, &mut resources);
     }

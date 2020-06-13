@@ -291,6 +291,7 @@ impl Executor {
     pub fn run_systems(&mut self, world: &mut World, resources: &mut Resources) {
         self.systems.iter_mut().for_each(|system| {
             let system = unsafe { system.get_mut() };
+            system.prepare(world);
             system.run(world, resources);
         });
     }
