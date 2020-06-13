@@ -81,7 +81,7 @@ impl<'a> ComponentAccess<'a> {
         }
 
         fn union(
-            a: &Cow<Access<ComponentTypeId>>,
+            a: &Access<ComponentTypeId>,
             mut b: Access<ComponentTypeId>,
         ) -> Access<ComponentTypeId> {
             for read in &a.reads {
@@ -98,10 +98,10 @@ impl<'a> ComponentAccess<'a> {
         }
 
         fn subtract(
-            a: &Cow<Access<ComponentTypeId>>,
+            a: &Access<ComponentTypeId>,
             b: Access<ComponentTypeId>,
         ) -> Access<ComponentTypeId> {
-            let mut a = a.to_owned().into_owned();
+            let mut a = a.to_owned();
             for read in &b.reads {
                 if let Some(i) = a.reads.iter().position(|t| t == read) {
                     a.reads.swap_remove(i);
@@ -191,6 +191,11 @@ pub struct SubWorld<'a> {
 }
 
 impl<'a> SubWorld<'a> {
+    /// Constructs a new SubWorld.
+    ///
+    /// # Safety
+    /// Queries assume that this type has been constructed correctly. Ensure that sub-worlds represent
+    /// disjoint portions of a world and that the world is not used while any of its sub-worlds are alive.
     pub unsafe fn new_unchecked(
         world: &'a World,
         access: &'a Access<ComponentTypeId>,
@@ -223,12 +228,12 @@ impl<'a> SubWorld<'a> {
             SubWorld {
                 world: self.world,
                 components: left,
-                archetypes: self.archetypes.clone(),
+                archetypes: self.archetypes,
             },
             SubWorld {
                 world: self.world,
                 components: right,
-                archetypes: self.archetypes.clone(),
+                archetypes: self.archetypes,
             },
         )
     }
