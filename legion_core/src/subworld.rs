@@ -1,7 +1,9 @@
 use crate::{
     borrow::{Ref, RefMut},
     entity::Entity,
+    filter::EntityFilter,
     index::ArchetypeIndex,
+    prelude::Query,
     query::View,
     storage::{Component, ComponentTypeId, Storage, Tag},
     world::{EntityStore, World},
@@ -62,7 +64,7 @@ impl<'a> ComponentAccess<'a> {
         }
     }
 
-    fn split(&mut self, access: Access<ComponentTypeId>) -> (Self, Self) {
+    pub(crate) fn split(&mut self, access: Access<ComponentTypeId>) -> (Self, Self) {
         fn invert(mut access: Access<ComponentTypeId>) -> Access<ComponentTypeId> {
             // reads are now denied writes
             let original_write_len = access.writes.len();
@@ -183,9 +185,9 @@ impl<'a> Deref for StorageAccessor<'a> {
 /// Provides access to a subset of the entities of a `World`.
 #[derive(Clone)]
 pub struct SubWorld<'a> {
-    world: &'a World,
-    components: ComponentAccess<'a>,
-    archetypes: Option<&'a BitSet>,
+    pub(crate) world: &'a World,
+    pub(crate) components: ComponentAccess<'a>,
+    pub(crate) archetypes: Option<&'a BitSet>,
 }
 
 impl<'a> SubWorld<'a> {
@@ -207,7 +209,7 @@ impl<'a> SubWorld<'a> {
 
     /// Splits the world into two. The left world allows access only to the data declared by the view;
     /// the right world allows access to all else.
-    pub fn split<'b, T: View<'a>>(&mut self) -> (SubWorld<'b>, SubWorld<'b>)
+    pub fn split<'b, T: for<'v> View<'v>>(&'b mut self) -> (SubWorld<'b>, SubWorld<'b>)
     where
         'a: 'b,
     {
@@ -229,6 +231,15 @@ impl<'a> SubWorld<'a> {
                 archetypes: self.archetypes.clone(),
             },
         )
+    }
+
+    /// Splits the world into two. The left world allows access only to the data declared by the query's view;
+    /// the right world allows access to all else.
+    pub fn split_for_query<'q, V: for<'v> View<'v>, F: EntityFilter>(
+        &mut self,
+        _: &'q Query<V, F>,
+    ) -> (SubWorld, SubWorld) {
+        self.split::<V>()
     }
 
     fn validate_archetype_access(&self, entity: Entity) -> bool {

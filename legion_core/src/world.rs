@@ -26,8 +26,9 @@ use crate::storage::TagMeta;
 use crate::storage::TagTypeId;
 use crate::storage::Tags;
 use crate::{
+    prelude::Query,
     query::View,
-    subworld::{ComponentAccessError, StorageAccessor, SubWorld},
+    subworld::{Access, ComponentAccess, ComponentAccessError, StorageAccessor, SubWorld},
     tuple::TupleEq,
 };
 use parking_lot::Mutex;
@@ -1101,9 +1102,34 @@ impl World {
 
     /// Splits the world into two. The left world allows access only to the data declared by the view;
     /// the right world allows access to all else.
-    pub fn split<'a, T: View<'a>>(&'a mut self) -> (SubWorld<'a>, SubWorld<'a>) {
-        let mut subworld: SubWorld<'a> = self.into();
-        subworld.split::<T>()
+    pub fn split<T: for<'v> View<'v>>(&mut self) -> (SubWorld, SubWorld) {
+        let access = Access {
+            reads: T::read_types(),
+            writes: T::write_types(),
+        };
+        let (left, right) = ComponentAccess::All.split(access);
+
+        (
+            SubWorld {
+                world: self,
+                components: left,
+                archetypes: None,
+            },
+            SubWorld {
+                world: self,
+                components: right,
+                archetypes: None,
+            },
+        )
+    }
+
+    /// Splits the world into two. The left world allows access only to the data declared by the query's view;
+    /// the right world allows access to all else.
+    pub fn split_for_query<'q, V: for<'v> View<'v>, F: EntityFilter>(
+        &mut self,
+        _: &'q Query<V, F>,
+    ) -> (SubWorld, SubWorld) {
+        self.split::<V>()
     }
 }
 

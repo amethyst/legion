@@ -1090,4 +1090,22 @@ mod tests {
             }
         });
     }
+
+    #[test]
+    fn split_world() {
+        let mut world = World::new();
+
+        let system = SystemBuilder::new("split worlds")
+            .with_query(Write::<usize>::query())
+            .with_query(Write::<bool>::query())
+            .build(|_, world, _, (query_a, query_b)| {
+                let (mut left, mut right) = world.split_for_query(&query_a);
+                for _ in query_a.iter_mut(&mut left) {
+                    let _ = query_b.iter_mut(&mut right);
+                }
+            });
+
+        let mut schedule = Schedule::builder().add_system(system).build();
+        schedule.execute(&mut world, &mut Resources::default());
+    }
 }
