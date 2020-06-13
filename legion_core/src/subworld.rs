@@ -197,7 +197,7 @@ impl<'a> SubWorld<'a> {
         archetypes: &'a ArchetypeAccess,
     ) -> Self {
         SubWorld {
-            world: world,
+            world,
             components: ComponentAccess::Allow(Cow::Borrowed(access)),
             archetypes: if let ArchetypeAccess::Some(ref bitset) = archetypes {
                 Some(bitset)
