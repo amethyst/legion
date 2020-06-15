@@ -13,6 +13,7 @@ use crate::{
         component::{Component, ComponentTypeId},
         Components,
     },
+    subworld::ComponentAccess,
 };
 use std::marker::PhantomData;
 
@@ -57,6 +58,9 @@ pub trait View<'data>: DefaultFilter + Sized {
 
     /// Determines if this view type is valid. Panics if checks fail.
     fn validate();
+
+    /// Determines if the given component access includes all permissions required by the view.
+    fn validate_access(access: &ComponentAccess) -> bool;
 
     fn reads_types() -> Self::Read;
 
@@ -185,6 +189,10 @@ macro_rules! impl_view_tuple {
                             }
                         }
                     }
+                }
+
+                fn validate_access(access: &ComponentAccess) -> bool {
+                    $( $ty::validate_access(access) )&&*
                 }
 
                 fn reads_types() -> Self::Read {

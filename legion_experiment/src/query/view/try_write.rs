@@ -11,6 +11,7 @@ use crate::{
         packed::next_component_version,
         ComponentSliceMut, ComponentStorage, Components,
     },
+    subworld::ComponentAccess,
 };
 use derivative::Derivative;
 use std::{any::TypeId, marker::PhantomData};
@@ -33,6 +34,11 @@ impl<'data, T: Component> View<'data> for TryWrite<T> {
 
     #[inline]
     fn validate() {}
+
+    #[inline]
+    fn validate_access(access: &ComponentAccess) -> bool {
+        access.allows_write(ComponentTypeId::of::<T>())
+    }
 
     #[inline]
     fn reads_types() -> Self::Read { [ComponentTypeId::of::<T>()] }

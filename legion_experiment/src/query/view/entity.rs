@@ -11,6 +11,7 @@ use crate::{
         component::{Component, ComponentTypeId},
         Components,
     },
+    subworld::ComponentAccess,
 };
 
 impl DefaultFilter for Entity {
@@ -26,6 +27,9 @@ impl<'data> View<'data> for Entity {
 
     #[inline]
     fn validate() {}
+
+    #[inline]
+    fn validate_access(_: &ComponentAccess) -> bool { true }
 
     #[inline]
     fn reads_types() -> Self::Read { [] }

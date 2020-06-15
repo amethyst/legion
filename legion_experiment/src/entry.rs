@@ -7,34 +7,52 @@ use crate::{
         component::{Component, ComponentTypeId},
         ComponentStorage, Components, UnknownComponentStorage,
     },
+    subworld::ComponentAccess,
     world::World,
 };
 use std::sync::Arc;
 
-pub struct Entry<'a> {
-    location: EntityLocation,
-    components: &'a Components,
-    archetypes: &'a [Archetype],
+/// Provides safe read-only access to an entity's components.
+pub struct EntryRef<'a> {
+    pub(crate) location: EntityLocation,
+    pub(crate) components: &'a Components,
+    pub(crate) archetypes: &'a [Archetype],
+    pub(crate) allowed_components: ComponentAccess<'a>,
 }
 
-impl<'a> Entry<'a> {
+impl<'a> EntryRef<'a> {
     pub(crate) fn new(
         location: EntityLocation,
         components: &'a Components,
         archetypes: &'a [Archetype],
+        allowed_components: ComponentAccess<'a>,
     ) -> Self {
         Self {
             location,
             components,
             archetypes,
+            allowed_components,
         }
     }
 
+    /// Gets the entity's archetype.
     pub fn archetype(&self) -> &Archetype { &self.archetypes[self.location.archetype()] }
 
+    /// Gets the entity's location.
     pub fn location(&self) -> EntityLocation { self.location }
 
+    /// Gets a reference to one of the entity's components.
     pub fn get_component<T: Component>(&self) -> Option<&T> {
+        if !self
+            .allowed_components
+            .allows_read(ComponentTypeId::of::<T>())
+        {
+            panic!("Attempted to read a component that this entry does not have declared access to. \
+                Consider adding a query which contains `{}` and this entity in its result set to the system, \
+                or use `SystemBuilder::read_component` to declare global access.",
+                std::any::type_name::<T>());
+        }
+
         let component = self.location.component();
         let archetype = self.location.archetype();
         self.components
@@ -43,7 +61,22 @@ impl<'a> Entry<'a> {
             .and_then(move |slice| slice.into_slice().get(component.0))
     }
 
+    /// Gets a mutable reference to one of the entity's components.
+    ///
+    /// # Safety
+    /// This function bypasses static borrow checking. The caller must ensure that the component reference
+    /// will not be mutably aliased.
     pub unsafe fn get_component_unchecked<T: Component>(&self) -> Option<&mut T> {
+        if !self
+            .allowed_components
+            .allows_write(ComponentTypeId::of::<T>())
+        {
+            panic!("Attempted to write a component that this entry does not have declared access to. \
+            Consider adding a query which contains `{}` and this entity in its result set to the system, \
+            or use `SystemBuilder::write_component` to declare global access.",
+            std::any::type_name::<T>());
+        }
+
         let component = self.location.component();
         let archetype = self.location.archetype();
         self.components
@@ -53,20 +86,104 @@ impl<'a> Entry<'a> {
     }
 }
 
+/// Provides safe read and write access to an entity's components.
 pub struct EntryMut<'a> {
+    pub(crate) location: EntityLocation,
+    pub(crate) components: &'a Components,
+    pub(crate) archetypes: &'a [Archetype],
+    pub(crate) allowed_components: ComponentAccess<'a>,
+}
+
+impl<'a> EntryMut<'a> {
+    pub(crate) unsafe fn new(
+        location: EntityLocation,
+        components: &'a Components,
+        archetypes: &'a [Archetype],
+        allowed_components: ComponentAccess<'a>,
+    ) -> Self {
+        Self {
+            location,
+            components,
+            archetypes,
+            allowed_components,
+        }
+    }
+
+    /// Gets the entity's archetype.
+    pub fn archetype(&self) -> &Archetype { &self.archetypes[self.location.archetype()] }
+
+    /// Gets the entity's location.
+    pub fn location(&self) -> EntityLocation { self.location }
+
+    /// Gets a reference to one of the entity's components.
+    pub fn get_component<T: Component>(&self) -> Option<&T> {
+        if !self
+            .allowed_components
+            .allows_read(ComponentTypeId::of::<T>())
+        {
+            panic!("Attempted to read a component that this entry does not have declared access to. \
+                Consider adding a query which contains `{}` and this entity in its result set to the system, \
+                or use `SystemBuilder::read_component` to declare global access.",
+                std::any::type_name::<T>());
+        }
+
+        let component = self.location.component();
+        let archetype = self.location.archetype();
+        self.components
+            .get_downcast::<T>()
+            .and_then(move |storage| storage.get(archetype))
+            .and_then(move |slice| slice.into_slice().get(component.0))
+    }
+
+    /// Gets a mutable reference to one of the entity's components.
+    ///
+    /// # Safety
+    /// The caller must ensure that the component reference will not be mutably aliased.
+    pub unsafe fn get_component_unchecked<T: Component>(&self) -> Option<&mut T> {
+        if !self
+            .allowed_components
+            .allows_write(ComponentTypeId::of::<T>())
+        {
+            panic!("Attempted to write a component that this entry does not have declared access to. \
+            Consider adding a query which contains `{}` and this entity in its result set to the system, \
+            or use `SystemBuilder::write_component` to declare global access.",
+            std::any::type_name::<T>());
+        }
+
+        let component = self.location.component();
+        let archetype = self.location.archetype();
+        self.components
+            .get_downcast::<T>()
+            .and_then(move |storage| storage.get_mut(archetype))
+            .and_then(move |slice| slice.into_slice().get_mut(component.0))
+    }
+
+    /// Gets a mutable reference to one of the entity's components.
+    pub fn get_component_mut<T: Component>(&mut self) -> Option<&mut T> {
+        // safety: we have exclusive access to the entry.
+        // the world must ensure that mut entries handed out are unique
+        unsafe { self.get_component_unchecked() }
+    }
+}
+
+/// Provides safe read and write access to an entity's components, and the ability to modify the entity.
+pub struct Entry<'a> {
     location: EntityLocation,
     world: &'a mut World,
 }
 
-impl<'a> EntryMut<'a> {
+impl<'a> Entry<'a> {
     pub(crate) fn new(location: EntityLocation, world: &'a mut World) -> Self {
         Self { location, world }
     }
 
+    /// Gets the entity's archetype.
     pub fn archetype(&self) -> &Archetype { &self.world.archetypes()[self.location.archetype()] }
 
+    /// Gets the entity's location.
     pub fn location(&self) -> EntityLocation { self.location }
 
+    /// Gets a reference to one of the entity's components.
     pub fn get_component<T: Component>(&self) -> Option<&T> {
         let component = self.location.component();
         let archetype = self.location.archetype();
@@ -77,10 +194,17 @@ impl<'a> EntryMut<'a> {
             .and_then(move |slice| slice.into_slice().get(component.0))
     }
 
+    /// Gets a mutable reference to one of the entity's components.
     pub fn get_component_mut<T: Component>(&mut self) -> Option<&mut T> {
+        // safety: we have exclusive access to both the entry and the world
         unsafe { self.get_component_unchecked() }
     }
 
+    /// Gets a mutable reference to one of the entity's components.
+    ///
+    /// # Safety
+    /// This function bypasses static borrow checking. The caller must ensure that the component reference
+    /// will not be mutably aliased.
     pub unsafe fn get_component_unchecked<T: Component>(&self) -> Option<&mut T> {
         let component = self.location.component();
         let archetype = self.location.archetype();
@@ -91,6 +215,7 @@ impl<'a> EntryMut<'a> {
             .and_then(move |slice| slice.into_slice().get_mut(component.0))
     }
 
+    /// Adds a new component to the entity.
     pub fn add_component<T: Component>(&mut self, component: T) {
         let target_arch = {
             let mut source = DynamicArchetype {
@@ -120,6 +245,7 @@ impl<'a> EntryMut<'a> {
         };
     }
 
+    /// Removes a component from the entity.
     pub fn remove_component<T: Component>(&mut self) {
         let target_arch = {
             let mut source = DynamicArchetype {
@@ -202,7 +328,7 @@ mod test {
         assert_eq!(before.len(), 0);
 
         {
-            let mut entry = world.entry_mut(entities[0]).unwrap();
+            let mut entry = world.entry(entities[0]).unwrap();
             assert_eq!(entry.get_component::<f32>(), None);
             entry.add_component(5f32);
             assert_eq!(entry.get_component::<f32>(), Some(&5f32));
@@ -226,7 +352,7 @@ mod test {
         assert_eq!(before[1], &2usize);
 
         {
-            let mut entry = world.entry_mut(entities[0]).unwrap();
+            let mut entry = world.entry(entities[0]).unwrap();
             assert_eq!(entry.get_component::<usize>(), Some(&1usize));
             entry.remove_component::<usize>();
             assert_eq!(entry.get_component::<usize>(), None);

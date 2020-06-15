@@ -10,6 +10,7 @@ use crate::{
         component::{Component, ComponentTypeId},
         ComponentSlice, ComponentStorage, Components,
     },
+    subworld::ComponentAccess,
 };
 use derivative::Derivative;
 use std::{any::TypeId, marker::PhantomData};
@@ -32,6 +33,11 @@ impl<'data, T: Component> View<'data> for TryRead<T> {
 
     #[inline]
     fn validate() {}
+
+    #[inline]
+    fn validate_access(access: &ComponentAccess) -> bool {
+        access.allows_read(ComponentTypeId::of::<T>())
+    }
 
     #[inline]
     fn reads_types() -> Self::Read { [ComponentTypeId::of::<T>()] }

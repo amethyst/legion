@@ -5,7 +5,7 @@ use crate::{
         component::Component,
         group::SubGroup,
     },
-    world::{World, WorldId},
+    world::{EntityStore, StorageAccessor, WorldId},
 };
 use filter::{DynamicFilter, EntityFilter, GroupMatcher};
 use parking_lot::Mutex;
@@ -117,27 +117,27 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     }
 
     #[inline]
-    pub unsafe fn iter_unchecked<'a>(
+    pub unsafe fn iter_unchecked<'a, T: EntityStore>(
         &'a mut self,
-        world: &'a World,
+        world: &'a T,
     ) -> std::iter::Flatten<ChunkIter<'a, 'a, V, F>> {
         self.iter_chunks_unchecked(world).flatten()
     }
 
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub unsafe fn par_iter_unchecked<'a>(
+    pub unsafe fn par_iter_unchecked<'a, T: EntityStore>(
         &'a mut self,
-        world: &'a World,
+        world: &'a T,
     ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>> {
         use rayon::iter::ParallelIterator;
         self.par_iter_chunks_unchecked(world).flatten()
     }
 
     #[inline]
-    pub fn iter_mut<'a>(
+    pub fn iter_mut<'a, T: EntityStore>(
         &'a mut self,
-        world: &'a mut World,
+        world: &'a mut T,
     ) -> std::iter::Flatten<ChunkIter<'a, 'a, V, F>> {
         // safety: we have exclusive access to world
         unsafe { self.iter_unchecked(world) }
@@ -145,16 +145,19 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_iter_mut<'a>(
+    pub fn par_iter_mut<'a, T: EntityStore>(
         &'a mut self,
-        world: &'a mut World,
+        world: &'a mut T,
     ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>> {
         // safety: we have exclusive access to world
         unsafe { self.par_iter_unchecked(world) }
     }
 
     #[inline]
-    pub fn iter<'a>(&'a mut self, world: &'a World) -> std::iter::Flatten<ChunkIter<'a, 'a, V, F>>
+    pub fn iter<'a, T: EntityStore>(
+        &'a mut self,
+        world: &'a T,
+    ) -> std::iter::Flatten<ChunkIter<'a, 'a, V, F>>
     where
         <V as View<'a>>::Fetch: ReadOnlyFetch,
     {
@@ -164,9 +167,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_iter<'a>(
+    pub fn par_iter<'a, T: EntityStore>(
         &'a mut self,
-        world: &'a World,
+        world: &'a T,
     ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>>
     where
         <V as View<'a>>::Fetch: ReadOnlyFetch,
@@ -175,7 +178,18 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.par_iter_unchecked(world) }
     }
 
-    fn evaluate_query<'a>(&'a mut self, world: &'a World) -> (&mut Mutex<F>, QueryResult<'a>) {
+    fn validate_archetype_access(storage: &StorageAccessor, archetypes: &[ArchetypeIndex]) {
+        for arch in archetypes {
+            if !storage.can_access_archetype(*arch) {
+                panic!("query attempted to access archetype which not available in subworld");
+            }
+        }
+    }
+
+    fn evaluate_query<'a>(
+        &'a mut self,
+        world: &StorageAccessor<'a>,
+    ) -> (&mut Mutex<F>, QueryResult<'a>) {
         let cache = self.layout_matches.entry(world.id()).or_insert_with(|| {
             let cache = if F::can_match_group() {
                 let components = F::group_components();
@@ -204,10 +218,12 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
                     archetypes.push(archetype);
                 }
                 *seen = world.archetypes().len();
+                Self::validate_archetype_access(world, archetypes.as_slice());
                 QueryResult::unordered(archetypes.as_slice())
             }
             Cache::Ordered { group, subgroup } => {
                 let archetypes = &world.groups()[*group][*subgroup];
+                Self::validate_archetype_access(world, archetypes);
                 QueryResult::ordered(archetypes)
             }
         };
@@ -215,49 +231,54 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         (&mut self.filter, result)
     }
 
-    pub unsafe fn iter_chunks_unchecked<'a>(
+    pub unsafe fn iter_chunks_unchecked<'a, T: EntityStore>(
         &'a mut self,
-        world: &'a World,
+        world: &'a T,
     ) -> ChunkIter<'a, 'a, V, F> {
-        let (filter, result) = self.evaluate_query(world);
+        let accessor = world.get_component_storage::<V>().unwrap();
+        let (filter, result) = self.evaluate_query(&accessor);
         let indices = result.index.iter();
-        let fetch = <V as View<'a>>::fetch(world.components(), world.archetypes(), result);
+        let fetch = <V as View<'a>>::fetch(accessor.components(), accessor.archetypes(), result);
         ChunkIter {
             inner: fetch,
             filter: filter.get_mut(),
-            archetypes: world.archetypes(),
+            archetypes: accessor.archetypes(),
             max_count: indices.len(),
             indices,
         }
     }
 
     #[cfg(feature = "par-iter")]
-    pub unsafe fn par_iter_chunks_unchecked<'a>(
+    pub unsafe fn par_iter_chunks_unchecked<'a, T: EntityStore>(
         &'a mut self,
-        world: &'a World,
+        world: &'a T,
     ) -> par_iter::ParChunkIter<'a, V, F> {
-        let (filter, result) = self.evaluate_query(world);
-        par_iter::ParChunkIter::new(world, result, filter)
+        let accessor = world.get_component_storage::<V>().unwrap();
+        let (filter, result) = self.evaluate_query(&accessor);
+        par_iter::ParChunkIter::new(accessor, result, filter)
     }
 
     #[inline]
-    pub fn iter_chunks_mut<'a>(&'a mut self, world: &'a mut World) -> ChunkIter<'a, 'a, V, F> {
+    pub fn iter_chunks_mut<'a, T: EntityStore>(
+        &'a mut self,
+        world: &'a mut T,
+    ) -> ChunkIter<'a, 'a, V, F> {
         // safety: we have exclusive access to world
         unsafe { self.iter_chunks_unchecked(world) }
     }
 
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_iter_chunks_mut<'a>(
+    pub fn par_iter_chunks_mut<'a, T: EntityStore>(
         &'a mut self,
-        world: &'a mut World,
+        world: &'a mut T,
     ) -> par_iter::ParChunkIter<'a, V, F> {
         // safety: we have exclusive access to world
         unsafe { self.par_iter_chunks_unchecked(world) }
     }
 
     #[inline]
-    pub fn iter_chunks<'a>(&'a mut self, world: &'a World) -> ChunkIter<'a, 'a, V, F>
+    pub fn iter_chunks<'a, T: EntityStore>(&'a mut self, world: &'a T) -> ChunkIter<'a, 'a, V, F>
     where
         <V as View<'a>>::Fetch: ReadOnlyFetch,
     {
@@ -267,7 +288,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_iter_chunks<'a>(&'a mut self, world: &'a World) -> par_iter::ParChunkIter<'a, V, F>
+    pub fn par_iter_chunks<'a, T: EntityStore>(
+        &'a mut self,
+        world: &'a T,
+    ) -> par_iter::ParChunkIter<'a, V, F>
     where
         <V as View<'a>>::Fetch: ReadOnlyFetch,
     {
@@ -276,8 +300,11 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     }
 
     #[inline]
-    pub unsafe fn for_each_unchecked<'a, Body>(&'a mut self, world: &'a World, mut f: Body)
-    where
+    pub unsafe fn for_each_unchecked<'a, T: EntityStore, Body>(
+        &'a mut self,
+        world: &'a T,
+        mut f: Body,
+    ) where
         Body: FnMut(<V as View<'a>>::Element),
     {
         // we use a nested loop because it is significantly faster than .flatten()
@@ -290,8 +317,11 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub unsafe fn par_for_each_unchecked<'a, Body>(&'a mut self, world: &'a World, f: Body)
-    where
+    pub unsafe fn par_for_each_unchecked<'a, T: EntityStore, Body>(
+        &'a mut self,
+        world: &'a T,
+        f: Body,
+    ) where
         Body: Fn(<V as View<'a>>::Element) + Send + Sync,
     {
         use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -300,7 +330,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     }
 
     #[inline]
-    pub fn for_each_mut<'a, Body>(&'a mut self, world: &'a mut World, f: Body)
+    pub fn for_each_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
     where
         Body: FnMut(<V as View<'a>>::Element),
     {
@@ -310,7 +340,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each_mut<'a, Body>(&'a mut self, world: &'a mut World, f: Body)
+    pub fn par_for_each_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
     where
         Body: Fn(<V as View<'a>>::Element) + Send + Sync,
     {
@@ -319,7 +349,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     }
 
     #[inline]
-    pub fn for_each<'a, Body>(&'a mut self, world: &'a World, f: Body)
+    pub fn for_each<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
     where
         Body: FnMut(<V as View<'a>>::Element),
         <V as View<'a>>::Fetch: ReadOnlyFetch,
@@ -330,7 +360,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     #[cfg(feature = "par-iter")]
     #[inline]
-    pub fn par_for_each<'a, Body>(&'a mut self, world: &'a World, f: Body)
+    pub fn par_for_each<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
     where
         Body: Fn(<V as View<'a>>::Element) + Send + Sync,
         <V as View<'a>>::Fetch: ReadOnlyFetch,
@@ -443,7 +473,6 @@ where
 #[cfg(feature = "par-iter")]
 mod par_iter {
     use super::*;
-    use crate::world::World;
     use rayon::iter::plumbing::{bridge_unindexed, Folder, UnindexedConsumer, UnindexedProducer};
     use rayon::iter::ParallelIterator;
     use std::marker::PhantomData;
@@ -487,7 +516,7 @@ mod par_iter {
         V: View<'a>,
         D: DynamicFilter + 'a,
     {
-        world: &'a World,
+        world: StorageAccessor<'a>,
         result: QueryResult<'a>,
         filter: &'a Mutex<D>,
         _view: PhantomData<V>,
@@ -498,7 +527,11 @@ mod par_iter {
         V: View<'a>,
         D: DynamicFilter + 'a,
     {
-        pub fn new(world: &'a World, result: QueryResult<'a>, filter: &'a Mutex<D>) -> Self {
+        pub fn new(
+            world: StorageAccessor<'a>,
+            result: QueryResult<'a>,
+            filter: &'a Mutex<D>,
+        ) -> Self {
             Self {
                 world,
                 result,
@@ -619,5 +652,64 @@ mod test {
             let (x, y) = chunk.into_components();
             println!("{:?}, {:?}", x, y);
         })
+    }
+
+    #[test]
+    fn query_split() {
+        let mut world = World::default();
+        world.extend(vec![(1usize, true), (2usize, true), (3usize, false)]);
+
+        let mut query_a = Write::<usize>::query();
+        let mut query_b = Write::<bool>::query();
+
+        let (mut left, mut right) = world.split::<Write<usize>>();
+
+        for x in query_a.iter_mut(&mut left) {
+            println!("{:}", x);
+        }
+
+        for x in query_b.iter_mut(&mut right) {
+            println!("{:}", x);
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn query_split_disallowd_component_left() {
+        let mut world = World::default();
+        world.extend(vec![(1usize, true), (2usize, true), (3usize, false)]);
+
+        let mut query_a = Write::<usize>::query();
+        let mut query_b = Write::<bool>::query();
+
+        let (mut left, _) = world.split::<Write<usize>>();
+
+        for x in query_a.iter_mut(&mut left) {
+            println!("{:}", x);
+        }
+
+        for x in query_b.iter_mut(&mut left) {
+            println!("{:}", x);
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn query_split_disallowd_component_right() {
+        let mut world = World::default();
+        world.extend(vec![(1usize, true), (2usize, true), (3usize, false)]);
+
+        let mut query_a = Write::<usize>::query();
+        let mut query_b = Write::<bool>::query();
+
+        let (_, mut right) = world.split::<Write<usize>>();
+
+        for x in query_a.iter_mut(&mut right) {
+            println!("{:}", x);
+        }
+
+        for x in query_b.iter_mut(&mut right) {
+            println!("{:}", x);
+        }
     }
 }

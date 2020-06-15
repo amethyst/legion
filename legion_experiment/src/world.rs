@@ -1,13 +1,19 @@
 use crate::entity::{Entity, EntityAllocator, EntityLocation, LocationMap};
 use crate::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
-use crate::storage::{
-    archetype::{Archetype, ArchetypeIndex, EntityLayout},
-    component::ComponentTypeId,
-    group::{Group, GroupDef},
-    index::SearchIndex,
-    ComponentIndex, Components, PackOptions,
+use crate::{
+    query::{filter::EntityFilter, view::View, Query},
+    storage::{
+        archetype::{Archetype, ArchetypeIndex, EntityLayout},
+        component::ComponentTypeId,
+        group::{Group, GroupDef},
+        index::SearchIndex,
+        ComponentIndex, Components, PackOptions,
+    },
+    subworld::{Access, ComponentAccess, SubWorld},
 };
+use bit_set::BitSet;
 use itertools::Itertools;
+use smallvec::SmallVec;
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::atomic::{AtomicU64, Ordering},
@@ -35,6 +41,17 @@ impl Universe {
             ..World::with_options(options)
         }
     }
+}
+
+#[derive(Debug)]
+pub struct ComponentAccessError;
+
+pub trait EntityStore {
+    fn entry_ref(&self, entity: Entity) -> Option<crate::entry::EntryRef>;
+    fn entry_mut(&mut self, entity: Entity) -> Option<crate::entry::EntryMut>;
+    fn get_component_storage<V: for<'b> View<'b>>(
+        &self,
+    ) -> Result<StorageAccessor, ComponentAccessError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -111,11 +128,11 @@ impl World {
 
     pub fn contains(&self, entity: Entity) -> bool { self.entities.contains(entity) }
 
-    pub fn push<T>(&mut self, components: T) -> &[Entity]
+    pub fn push<T>(&mut self, components: T) -> Entity
     where
         Vec<T>: IntoComponentSource,
     {
-        self.extend(vec![components])
+        self.extend(vec![components])[0]
     }
 
     pub fn extend(&mut self, components: impl IntoComponentSource) -> &[Entity] {
@@ -160,16 +177,21 @@ impl World {
         }
     }
 
-    pub fn entry(&self, entity: Entity) -> Option<crate::entry::Entry> {
+    pub fn entry(&mut self, entity: Entity) -> Option<crate::entry::Entry> {
         self.entities
             .get(entity)
-            .map(|location| crate::entry::Entry::new(location, &self.components, &self.archetypes))
+            .map(move |location| crate::entry::Entry::new(location, self))
     }
 
-    pub fn entry_mut(&mut self, entity: Entity) -> Option<crate::entry::EntryMut> {
-        self.entities
-            .get(entity)
-            .map(move |location| crate::entry::EntryMut::new(location, self))
+    pub(crate) unsafe fn entry_unchecked(&self, entity: Entity) -> Option<crate::entry::EntryMut> {
+        self.entities.get(entity).map(|location| {
+            crate::entry::EntryMut::new(
+                location,
+                &self.components,
+                &self.archetypes,
+                ComponentAccess::All,
+            )
+        })
     }
 
     pub fn pack(&mut self, options: PackOptions) {
@@ -177,23 +199,13 @@ impl World {
         self.epoch += 1;
     }
 
-    pub(crate) fn layout_index(&self) -> &SearchIndex { &self.index }
-
     pub(crate) fn components(&self) -> &Components { &self.components }
 
     pub(crate) fn components_mut(&mut self) -> &mut Components { &mut self.components }
 
     pub(crate) fn archetypes(&self) -> &[Archetype] { &self.archetypes }
 
-    pub(crate) fn groups(&self) -> &[Group] { &self.groups }
-
     pub(crate) fn epoch(&self) -> u64 { self.epoch }
-
-    pub(crate) fn group(&self, type_id: ComponentTypeId) -> Option<(usize, &Group)> {
-        self.group_members
-            .get(&type_id)
-            .map(|i| (*i, &self.groups[*i]))
-    }
 
     pub(crate) unsafe fn transfer_archetype(
         &mut self,
@@ -309,6 +321,135 @@ impl World {
         }
 
         arch_index
+    }
+
+    /// Splits the world into two. The left world allows access only to the data declared by the view;
+    /// the right world allows access to all else.
+    pub fn split<T: for<'v> View<'v>>(&mut self) -> (SubWorld, SubWorld) {
+        let access = Access {
+            reads: SmallVec::from_slice(T::reads_types().as_ref()),
+            writes: SmallVec::from_slice(T::writes_types().as_ref()),
+        };
+        let (left, right) = ComponentAccess::All.split(access);
+
+        // safety: exclusive access to world, and we have split each subworld into disjoint sections
+        unsafe {
+            (
+                SubWorld::new_unchecked(self, left, None),
+                SubWorld::new_unchecked(self, right, None),
+            )
+        }
+    }
+
+    /// Splits the world into two. The left world allows access only to the data declared by the query's view;
+    /// the right world allows access to all else.
+    pub fn split_for_query<'q, V: for<'v> View<'v>, F: EntityFilter>(
+        &mut self,
+        _: &'q Query<V, F>,
+    ) -> (SubWorld, SubWorld) {
+        self.split::<V>()
+    }
+}
+
+impl EntityStore for World {
+    fn entry_ref(&self, entity: Entity) -> Option<crate::entry::EntryRef> {
+        self.entities.get(entity).map(|location| {
+            crate::entry::EntryRef::new(
+                location,
+                &self.components,
+                &self.archetypes,
+                ComponentAccess::All,
+            )
+        })
+    }
+
+    fn entry_mut(&mut self, entity: Entity) -> Option<crate::entry::EntryMut> {
+        // safety: we have exclusive access to the world
+        unsafe { self.entry_unchecked(entity) }
+    }
+
+    fn get_component_storage<V: for<'b> crate::query::view::View<'b>>(
+        &self,
+    ) -> Result<StorageAccessor, ComponentAccessError> {
+        Ok(StorageAccessor::new(
+            self.id,
+            &self.index,
+            &self.components,
+            &self.archetypes,
+            &self.groups,
+            &self.group_members,
+            self.epoch,
+            None,
+        ))
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct StorageAccessor<'a> {
+    id: WorldId,
+    index: &'a SearchIndex,
+    components: &'a Components,
+    archetypes: &'a [Archetype],
+    groups: &'a [Group],
+    group_members: &'a HashMap<ComponentTypeId, usize>,
+    epoch: u64,
+    allowed_archetypes: Option<&'a BitSet>,
+}
+
+impl<'a> StorageAccessor<'a> {
+    pub fn new(
+        id: WorldId,
+        index: &'a SearchIndex,
+        components: &'a Components,
+        archetypes: &'a [Archetype],
+        groups: &'a [Group],
+        group_members: &'a HashMap<ComponentTypeId, usize>,
+        epoch: u64,
+        allowed_archetypes: Option<&'a BitSet>,
+    ) -> Self {
+        Self {
+            id,
+            index,
+            components,
+            archetypes,
+            groups,
+            group_members,
+            epoch,
+            allowed_archetypes,
+        }
+    }
+
+    pub(crate) fn with_allowed_archetypes(
+        mut self,
+        allowed_archetypes: Option<&'a BitSet>,
+    ) -> Self {
+        self.allowed_archetypes = allowed_archetypes;
+        self
+    }
+
+    pub fn id(&self) -> WorldId { self.id }
+
+    pub fn can_access_archetype(&self, ArchetypeIndex(archetype): ArchetypeIndex) -> bool {
+        match self.allowed_archetypes {
+            None => true,
+            Some(archetypes) => archetypes.contains(archetype as usize),
+        }
+    }
+
+    pub fn layout_index(&self) -> &'a SearchIndex { self.index }
+
+    pub fn components(&self) -> &'a Components { self.components }
+
+    pub fn archetypes(&self) -> &'a [Archetype] { self.archetypes }
+
+    pub fn groups(&self) -> &'a [Group] { self.groups }
+
+    pub fn epoch(&self) -> u64 { self.epoch }
+
+    pub fn group(&self, type_id: ComponentTypeId) -> Option<(usize, &'a Group)> {
+        self.group_members
+            .get(&type_id)
+            .map(|i| (*i, self.groups.get(*i).unwrap()))
     }
 }
 
