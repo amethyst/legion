@@ -67,7 +67,7 @@ impl<'data, T: Component> View<'data> for Read<T> {
         } else {
             ReadIter::Indexed {
                 components,
-                archetypes: query.into_index().iter(),
+                archetypes: query.index().iter(),
             }
         }
     }

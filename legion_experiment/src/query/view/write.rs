@@ -65,7 +65,7 @@ impl<'data, T: Component> View<'data> for Write<T> {
         } else {
             WriteIter::Indexed {
                 components,
-                archetypes: query.into_index().iter(),
+                archetypes: query.index().iter(),
             }
         }
     }

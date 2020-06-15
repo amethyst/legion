@@ -56,9 +56,11 @@ impl<'a> QueryResult<'a> {
         }
     }
 
-    pub fn into_index(self) -> &'a [ArchetypeIndex] { &self.index[self.range] }
-
-    pub fn index(&self) -> &[ArchetypeIndex] { &self.index[self.range.clone()] }
+    pub fn index(&self) -> &'a [ArchetypeIndex] {
+        let (_, slice) = self.index.split_at(self.range.start);
+        let (slice, _) = slice.split_at(self.range.len());
+        slice
+    }
 
     pub fn range(&self) -> &Range<usize> { &self.range }
 
@@ -186,6 +188,15 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         }
     }
 
+    pub fn find_archetypes<'a, T: EntityStore + 'a>(
+        &'a mut self,
+        world: &'a T,
+    ) -> &'a [ArchetypeIndex] {
+        let accessor = world.get_component_storage::<V>().unwrap();
+        let (_, result) = self.evaluate_query(&accessor);
+        result.index()
+    }
+
     fn evaluate_query<'a>(
         &'a mut self,
         world: &StorageAccessor<'a>,
@@ -218,15 +229,15 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
                     archetypes.push(archetype);
                 }
                 *seen = world.archetypes().len();
-                Self::validate_archetype_access(world, archetypes.as_slice());
                 QueryResult::unordered(archetypes.as_slice())
             }
             Cache::Ordered { group, subgroup } => {
                 let archetypes = &world.groups()[*group][*subgroup];
-                Self::validate_archetype_access(world, archetypes);
                 QueryResult::ordered(archetypes)
             }
         };
+
+        Self::validate_archetype_access(world, result.index());
 
         (&mut self.filter, result)
     }
@@ -412,15 +423,15 @@ impl<'a, F: Fetch> rayon::iter::IntoParallelIterator for ChunkView<'a, F> {
     }
 }
 
-pub struct ChunkIter<'world, 'query, V, D>
+pub struct ChunkIter<'data, 'index, V, D>
 where
-    V: View<'world>,
-    D: DynamicFilter + 'query,
+    V: View<'data>,
+    D: DynamicFilter + 'index,
 {
     inner: V::Iter,
-    indices: Iter<'query, ArchetypeIndex>,
-    filter: &'query mut D,
-    archetypes: &'world [Archetype],
+    indices: Iter<'index, ArchetypeIndex>,
+    filter: &'index mut D,
+    archetypes: &'data [Archetype],
     max_count: usize,
 }
 
