@@ -457,7 +457,6 @@ impl Builder {
     }
 
     /// Adds a thread local function to the schedule. This function will be executed on the main thread.
-    /// Previous systems are flushed before the thread local function runs.
     pub fn add_thread_local_fn<F: FnMut(&mut World, &mut Resources) + 'static>(
         mut self,
         f: F,
@@ -470,7 +469,6 @@ impl Builder {
     }
 
     /// Adds a thread local system to the schedule. This system will be executed on the main thread.
-    /// Previous systems are flushed before the thread local system runs.
     pub fn add_thread_local<S: Into<Box<dyn Runnable>>>(mut self, system: S) -> Self {
         self.finalize_executor();
         let system = system.into();
@@ -534,27 +532,29 @@ impl Schedule {
 
     /// Executes all of the steps in the schedule.
     pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
-        let mut waiting_flush: Vec<&mut Executor> = Vec::new();
-        let mut thread_local_systems: Vec<&mut Box<dyn Runnable>> = Vec::new();
+        enum ToFlush<'a> {
+            Executor(&'a mut Executor),
+            System(RefMut<'a, CommandBuffer>),
+        }
+
+        let mut waiting_flush: Vec<ToFlush> = Vec::new();
         for step in &mut self.steps {
             match step {
                 Step::Systems(executor) => {
                     executor.run_systems(world, resources);
-                    waiting_flush.push(executor);
+                    waiting_flush.push(ToFlush::Executor(executor));
                 }
                 Step::FlushCmdBuffers => {
-                    waiting_flush
-                        .drain(..)
-                        .for_each(|e| e.flush_command_buffers(world));
-                    thread_local_systems.drain(..).for_each(|system| {
-                        system.command_buffer_mut(world.id()).unwrap().write(world)
+                    waiting_flush.drain(..).for_each(|e| match e {
+                        ToFlush::Executor(exec) => exec.flush_command_buffers(world),
+                        ToFlush::System(mut cmd) => cmd.write(world),
                     });
                 }
                 Step::ThreadLocalFn(function) => function(world, resources),
                 Step::ThreadLocalSystem(system) => {
                     system.run(world, resources);
-                    if system.command_buffer_mut(world.id()).is_some() {
-                        thread_local_systems.push(system)
+                    if let Some(cmd) = system.command_buffer_mut(world.id()) {
+                        waiting_flush.push(ToFlush::System(cmd));
                     }
                 }
             }
