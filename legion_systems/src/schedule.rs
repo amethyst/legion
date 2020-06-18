@@ -457,6 +457,7 @@ impl Builder {
     }
 
     /// Adds a thread local function to the schedule. This function will be executed on the main thread.
+    /// Previous systems are flushed before the thread local function runs.
     pub fn add_thread_local_fn<F: FnMut(&mut World, &mut Resources) + 'static>(
         mut self,
         f: F,
@@ -469,7 +470,9 @@ impl Builder {
     }
 
     /// Adds a thread local system to the schedule. This system will be executed on the main thread.
+    /// Previous systems are flushed before the thread local system runs.
     pub fn add_thread_local<S: Into<Box<dyn Runnable>>>(mut self, system: S) -> Self {
+        self.finalize_executor();
         let system = system.into();
         self.steps.push(Step::ThreadLocalSystem(system));
         self
