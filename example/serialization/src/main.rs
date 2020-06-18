@@ -204,10 +204,10 @@ struct SerializeImpl {
 }
 impl legion::serialize::ser::WorldSerializer for SerializeImpl {
     fn can_serialize_tag(&self, ty: &TagTypeId, _meta: &TagMeta) -> bool {
-        self.tag_types.get(&ty.0).is_some()
+        self.tag_types.get(&ty.type_id()).is_some()
     }
     fn can_serialize_component(&self, ty: &ComponentTypeId, _meta: &ComponentMeta) -> bool {
-        self.comp_types.get(&ty.0).is_some()
+        self.comp_types.get(&ty.type_id()).is_some()
     }
     fn serialize_archetype_description<S: Serializer>(
         &self,
@@ -217,13 +217,13 @@ impl legion::serialize::ser::WorldSerializer for SerializeImpl {
         let tags_to_serialize = archetype_desc
             .tags()
             .iter()
-            .filter_map(|(ty, _)| self.tag_types.get(&ty.0))
+            .filter_map(|(ty, _)| self.tag_types.get(&ty.type_id()))
             .map(|reg| reg.uuid)
             .collect::<Vec<_>>();
         let components_to_serialize = archetype_desc
             .components()
             .iter()
-            .filter_map(|(ty, _)| self.comp_types.get(&ty.0))
+            .filter_map(|(ty, _)| self.comp_types.get(&ty.type_id()))
             .map(|reg| reg.uuid)
             .collect::<Vec<_>>();
         SerializedArchetypeDescription {
@@ -239,7 +239,7 @@ impl legion::serialize::ser::WorldSerializer for SerializeImpl {
         _component_meta: &ComponentMeta,
         components: &ComponentResourceSet,
     ) -> Result<S::Ok, S::Error> {
-        if let Some(reg) = self.comp_types.get(&component_type.0) {
+        if let Some(reg) = self.comp_types.get(&component_type.type_id()) {
             let result = RefCell::new(None);
             let serializer = RefCell::new(Some(serializer));
             {
@@ -265,7 +265,7 @@ impl legion::serialize::ser::WorldSerializer for SerializeImpl {
         _tag_meta: &TagMeta,
         tags: &TagStorage,
     ) -> Result<S::Ok, S::Error> {
-        if let Some(reg) = self.tag_types.get(&tag_type.0) {
+        if let Some(reg) = self.tag_types.get(&tag_type.type_id()) {
             let result = RefCell::new(None);
             let serializer = RefCell::new(Some(serializer));
             {
@@ -332,7 +332,7 @@ impl legion::serialize::de::WorldDeserializer for DeserializeImpl {
         _component_meta: &ComponentMeta,
         get_next_storage_fn: &mut dyn FnMut() -> Option<(NonNull<u8>, usize)>,
     ) -> Result<(), <D as Deserializer<'de>>::Error> {
-        if let Some(reg) = self.comp_types.get(&component_type.0) {
+        if let Some(reg) = self.comp_types.get(&component_type.type_id()) {
             let mut erased = erased_serde::Deserializer::erase(deserializer);
             (reg.comp_deserialize_fn)(&mut erased, get_next_storage_fn)
                 .map_err(<<D as serde::Deserializer<'de>>::Error as serde::de::Error>::custom)?;

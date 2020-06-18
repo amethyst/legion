@@ -63,12 +63,12 @@ impl<'a> ComponentAccess<'a> {
         ) {
             // reads are now denied writes
             for read in to_deny.reads() {
-                denied.push_write(read.clone());
+                denied.push_write(*read);
             }
 
             // writes are now entirely denied
             for write in to_deny.writes() {
-                denied.push(write.clone());
+                denied.push(*write);
             }
         }
 
@@ -78,12 +78,12 @@ impl<'a> ComponentAccess<'a> {
             let mut denied = Permissions::new();
             // if the current permission allows reads, then everything else must deny writes
             for read in permissions.read_only() {
-                denied.push_write(read.clone());
+                denied.push_write(*read);
             }
 
             // if the current permission allows writes, then everything else must deny all
             for write in permissions.writes() {
-                denied.push(write.clone());
+                denied.push(*write);
             }
 
             denied

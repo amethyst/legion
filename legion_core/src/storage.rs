@@ -63,6 +63,8 @@ impl ComponentTypeId {
             name: std::any::type_name::<T>(),
         }
     }
+
+    pub fn type_id(&self) -> TypeId { self.type_id }
 }
 
 impl Display for ComponentTypeId {
@@ -82,6 +84,8 @@ pub struct TagTypeId(pub TypeId);
 impl TagTypeId {
     /// Gets the tag type ID that represents type `T`.
     pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>()) }
+
+    pub fn type_id(&self) -> TypeId { self.0 }
 }
 
 #[cfg(feature = "ffi")]
@@ -93,6 +97,8 @@ pub struct TagTypeId(pub TypeId, pub u32);
 impl TagTypeId {
     /// Gets the tag type ID that represents type `T`.
     pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>(), 0) }
+
+    pub fn type_id(&self) -> TypeId { self.0 }
 }
 
 /// A `Component` is per-entity data that can be attached to a single entity.
