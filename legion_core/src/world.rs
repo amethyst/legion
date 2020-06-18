@@ -90,10 +90,15 @@ impl Universe {
 
 /// A queryable collection of entities.
 pub trait EntityStore {
-    /// Gets the entity component storage. Validates that the world can provide access to everything needed by the view.
-    fn get_component_storage<V: for<'a> View<'a>>(
-        &self,
-    ) -> Result<StorageAccessor, ComponentAccessError>;
+    /// Checks that the provided `Component` is present on a given entity.
+    ///
+    /// Returns true if it exists, otherwise false.
+    fn has_component<T: Component>(&self, entity: Entity) -> bool;
+
+    /// Checks that the provided `ComponentTypeId` is present on a given entity.
+    ///
+    /// Returns true if it exists, otherwise false.
+    fn has_component_by_id(&self, entity: Entity, component: ComponentTypeId) -> bool;
 
     /// Borrows component data for the given entity.
     ///
@@ -143,6 +148,11 @@ pub trait EntityStore {
 
     /// Determines if the given `Entity` is alive within this `World`.
     fn is_alive(&self, entity: Entity) -> bool;
+
+    /// Gets the entity component storage. Validates that the world can provide access to everything needed by the view.
+    fn get_component_storage<V: for<'a> View<'a>>(
+        &self,
+    ) -> Result<StorageAccessor, ComponentAccessError>;
 }
 
 #[derive(Default, Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -153,9 +163,13 @@ impl WorldId {
         Self(universe, NEXT_WORLD_ID.fetch_add(1, Ordering::SeqCst))
     }
 
-    pub fn index(self) -> usize { self.0 }
+    pub fn index(self) -> usize {
+        self.0
+    }
 
-    pub fn is_same_universe(self, other: WorldId) -> bool { self.0 == other.0 }
+    pub fn is_same_universe(self, other: WorldId) -> bool {
+        self.0 == other.0
+    }
 }
 
 /// Contains queryable collections of data associated with `Entity`s.
@@ -200,7 +214,9 @@ impl World {
     }
 
     #[inline]
-    pub fn command_buffer_size(&self) -> usize { self.command_buffer_size }
+    pub fn command_buffer_size(&self) -> usize {
+        self.command_buffer_size
+    }
 
     #[inline]
     pub fn set_command_buffer_size(&mut self, command_buffer_size: usize) {
@@ -236,12 +252,18 @@ impl World {
         self.storage_mut().subscribe(sender, filter);
     }
 
-    pub fn storage(&self) -> &Storage { unsafe { &*self.storage.get() } }
+    pub fn storage(&self) -> &Storage {
+        unsafe { &*self.storage.get() }
+    }
 
-    pub fn storage_mut(&mut self) -> &mut Storage { unsafe { &mut *self.storage.get() } }
+    pub fn storage_mut(&mut self) -> &mut Storage {
+        unsafe { &mut *self.storage.get() }
+    }
 
     /// Gets the unique ID of this world within its universe.
-    pub fn id(&self) -> WorldId { self.id }
+    pub fn id(&self) -> WorldId {
+        self.id
+    }
 
     pub fn get_entity_location(&self, entity: Entity) -> Option<EntityLocation> {
         if self.is_alive(entity) {
@@ -690,29 +712,6 @@ impl World {
         self.storage().chunk(location)
     }
 
-    /// Checks that the provided `ComponentTypeId` is present on a given entity.
-    ///
-    /// Returns true if it exists, otherwise false.
-    pub fn has_component_by_id(&self, entity: Entity, component: ComponentTypeId) -> bool {
-        if !self.is_alive(entity) {
-            return false;
-        }
-
-        if let Some(chunkset) = self.get_component_storage(entity) {
-            return chunkset.components(component).is_some();
-        }
-
-        false
-    }
-
-    /// Checks that the provided `Component` is present on a given entity.
-    ///
-    /// Returns true if it exists, otherwise false.
-    #[inline]
-    pub fn has_component<T: Component>(&self, entity: Entity) -> bool {
-        self.has_component_by_id(entity, ComponentTypeId::of::<T>())
-    }
-
     /// Returns the entity's component types, if the entity exists.
     pub fn entity_component_types(
         &self,
@@ -1132,6 +1131,23 @@ impl World {
 
 impl EntityStore for World {
     #[inline]
+    fn has_component<T: Component>(&self, entity: Entity) -> bool {
+        self.has_component_by_id(entity, ComponentTypeId::of::<T>())
+    }
+
+    fn has_component_by_id(&self, entity: Entity, component: ComponentTypeId) -> bool {
+        if !self.is_alive(entity) {
+            return false;
+        }
+
+        if let Some(chunkset) = self.get_component_storage(entity) {
+            return chunkset.components(component).is_some();
+        }
+
+        false
+    }
+
+    #[inline]
     fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<T>> {
         if !self.is_alive(entity) {
             return None;
@@ -1184,7 +1200,9 @@ impl EntityStore for World {
     }
 
     #[inline]
-    fn is_alive(&self, entity: Entity) -> bool { self.entity_allocator.is_alive(entity) }
+    fn is_alive(&self, entity: Entity) -> bool {
+        self.entity_allocator.is_alive(entity)
+    }
 
     #[inline]
     fn get_component_storage<V: for<'b> View<'b>>(
@@ -1195,7 +1213,9 @@ impl EntityStore for World {
 }
 
 impl Default for World {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Describes how to handle a `clone_from`. Allows the user to transform components from one type
@@ -1308,7 +1328,9 @@ impl<'s> EntityReplacePolicy<'s> for NoneEntityReplacePolicy {
         Box::new(std::iter::Empty::default())
     }
 
-    fn get_dst_entity(&self, _src_entity: Entity) -> Option<Entity> { None }
+    fn get_dst_entity(&self, _src_entity: Entity) -> Option<Entity> {
+        None
+    }
 }
 
 /// Default implementation of `CloneImplResult` that uses a hash map. Keys are entities in the
@@ -1459,7 +1481,9 @@ impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> IntoCompone
 {
     type Source = Self;
 
-    fn into(self) -> Self::Source { self }
+    fn into(self) -> Self::Source {
+        self
+    }
 }
 
 impl<I: Iterator<Item = Entity>, C: ComponentSource> PreallocComponentSource<Fuse<I>, C> {
@@ -1476,7 +1500,9 @@ impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentLa
 {
     type Filter = C::Filter;
 
-    fn get_filter(&mut self) -> &mut Self::Filter { self.components.get_filter() }
+    fn get_filter(&mut self) -> &mut Self::Filter {
+        self.components.get_filter()
+    }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         self.components.tailor_archetype(archetype)
@@ -1486,9 +1512,13 @@ impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentLa
 impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentSource
     for PreallocComponentSource<I, C>
 {
-    fn is_empty(&mut self) -> bool { self.components.is_empty() }
+    fn is_empty(&mut self) -> bool {
+        self.components.is_empty()
+    }
 
-    fn len(&self) -> usize { self.components.len() }
+    fn len(&self) -> usize {
+        self.components.len()
+    }
 
     fn write<T: Iterator<Item = Entity>>(
         &mut self,
@@ -1513,7 +1543,9 @@ impl<'a, T, A: Iterator<Item = T> + FusedIterator, B: Iterator<Item = T>> Iterat
 {
     type Item = T;
 
-    fn next(&mut self) -> Option<T> { self.a.next().or_else(|| self.b.next()) }
+    fn next(&mut self) -> Option<T> {
+        self.a.next().or_else(|| self.b.next())
+    }
 }
 
 pub struct ComponentTupleFilter<T> {
@@ -1768,7 +1800,9 @@ struct DynamicComponentLayout<'a> {
 impl<'a> ComponentLayout for DynamicComponentLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter { self }
+    fn get_filter(&mut self) -> &mut Self::Filter {
+        self
+    }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy components from existing archetype into new
@@ -1826,7 +1860,9 @@ unsafe impl<'a> Sync for DynamicTagLayout<'a> {}
 impl<'a> TagLayout for DynamicTagLayout<'a> {
     type Filter = Self;
 
-    fn get_filter(&mut self) -> &mut Self::Filter { self }
+    fn get_filter(&mut self) -> &mut Self::Filter {
+        self
+    }
 
     fn tailor_archetype(&self, archetype: &mut ArchetypeDescription) {
         // copy tags from existing archetype into new
@@ -1850,7 +1886,9 @@ impl<'a> TagLayout for DynamicTagLayout<'a> {
 impl<'a, 'b> Filter<ArchetypeFilterData<'b>> for DynamicTagLayout<'a> {
     type Iter = SliceVecIter<'b, TagTypeId>;
 
-    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter { source.tag_types.iter() }
+    fn collect(&self, source: ArchetypeFilterData<'b>) -> Self::Iter {
+        source.tag_types.iter()
+    }
 
     fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
         Some(

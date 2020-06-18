@@ -145,14 +145,20 @@ impl<'a> StorageAccessor<'a> {
         }
     }
 
-    pub fn inner(&self) -> &'a Storage { self.storage }
+    pub fn inner(&self) -> &'a Storage {
+        self.storage
+    }
 
-    pub fn into_inner(self) -> &'a Storage { self.storage }
+    pub fn into_inner(self) -> &'a Storage {
+        self.storage
+    }
 }
 
 impl<'a> Deref for StorageAccessor<'a> {
     type Target = Storage;
-    fn deref(&self) -> &Self::Target { self.storage }
+    fn deref(&self) -> &Self::Target {
+        self.storage
+    }
 }
 
 /// Provides access to a subset of the entities of a `World`.
@@ -246,6 +252,20 @@ impl<'a> SubWorld<'a> {
         }
     }
 
+    fn validate_reads_by_id(&self, entity: Entity, component: ComponentTypeId) {
+        let valid = match &self.components {
+            ComponentAccess::All => true,
+            ComponentAccess::Allow(restrictions) => restrictions.reads.contains(&component),
+            ComponentAccess::Disallow(restrictions) => !restrictions.reads.contains(&component),
+        };
+
+        if !valid || !self.validate_archetype_access(entity) {
+            panic!("Attempted to read a component that this system does not have declared access to. \
+                Consider adding a query which contains the component and this entity in its result set to the system, \
+                or use `SystemBuilder::read_component` to declare global access.");
+        }
+    }
+
     fn validate_writes<T: Component>(&self, entity: Entity) {
         let valid = match &self.components {
             ComponentAccess::All => true,
@@ -268,6 +288,18 @@ impl<'a> SubWorld<'a> {
 
 impl<'a> EntityStore for SubWorld<'a> {
     #[inline]
+    fn has_component<T: Component>(&self, entity: Entity) -> bool {
+        self.validate_reads::<T>(entity);
+        self.world.has_component::<T>(entity)
+    }
+
+    #[inline]
+    fn has_component_by_id(&self, entity: Entity, component: ComponentTypeId) -> bool {
+        self.validate_reads_by_id(entity, component);
+        self.world.has_component_by_id(entity, component)
+    }
+
+    #[inline]
     fn get_component<T: Component>(&self, entity: Entity) -> Option<Ref<T>> {
         self.validate_reads::<T>(entity);
         self.world.get_component::<T>(entity)
@@ -283,10 +315,14 @@ impl<'a> EntityStore for SubWorld<'a> {
     }
 
     #[inline]
-    fn get_tag<T: Tag>(&self, entity: Entity) -> Option<&T> { self.world.get_tag(entity) }
+    fn get_tag<T: Tag>(&self, entity: Entity) -> Option<&T> {
+        self.world.get_tag(entity)
+    }
 
     #[inline]
-    fn is_alive(&self, entity: Entity) -> bool { self.world.is_alive(entity) }
+    fn is_alive(&self, entity: Entity) -> bool {
+        self.world.is_alive(entity)
+    }
 
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
