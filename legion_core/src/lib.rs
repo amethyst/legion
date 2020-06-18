@@ -8,6 +8,7 @@ pub mod event;
 pub mod filter;
 pub mod index;
 pub mod iterator;
+pub mod permission;
 pub mod query;
 pub mod storage;
 pub mod subworld;

@@ -179,7 +179,6 @@ impl Executor {
                         trace!(system_index = n, "Added write dependency");
                         dependencies.insert(*n);
                     }
-                    resource_last_read.insert(*res, i);
                 }
                 for res in write_res {
                     trace!(resource = ?res, "Write resource");
@@ -193,20 +192,34 @@ impl Executor {
                         trace!(system_index = n, "Added write dependency");
                         dependencies.insert(*n);
                     }
+                }
 
+                // update access tracking
+                for res in read_res {
+                    resource_last_read.insert(*res, i);
+                }
+                for res in write_res {
+                    resource_last_read.insert(*res, i);
                     resource_last_mutated.insert(*res, i);
                 }
 
                 static_dependency_counts.push(AtomicUsize::from(dependencies.len()));
-                trace!(dependants = ?dependencies, "Computed static dependants");
-                for dep in dependencies {
-                    static_dependants[dep].push(i);
+                trace!(dependants = ?dependencies, dependency_counts = ?static_dependency_counts, "Computed static dependants");
+                for dep in &dependencies {
+                    static_dependants[*dep].push(i);
                 }
 
                 // find component access dependencies
                 let mut comp_dependencies = FxHashSet::default();
+                for comp in read_comp {
+                    trace!(component = ?comp, "Read component");
+                    if let Some(n) = component_last_mutated.get(comp) {
+                        trace!(system_index = n, "Added write dependency");
+                        comp_dependencies.insert(*n);
+                    }
+                }
                 for comp in write_comp {
-                    // Writes have to be exclusive, so we are dependent on reads too
+                    // writes have to be exclusive, so we are dependent on reads too
                     trace!(component = ?comp, "Write component");
                     if let Some(n) = component_last_read.get(comp) {
                         trace!(system_index = n, "Added read dependency");
@@ -216,17 +229,20 @@ impl Executor {
                         trace!(system_index = n, "Added write dependency");
                         comp_dependencies.insert(*n);
                     }
+                }
+
+                // update access tracking
+                for comp in read_comp {
+                    component_last_read.insert(*comp, i);
+                }
+                for comp in write_comp {
+                    component_last_read.insert(*comp, i);
                     component_last_mutated.insert(*comp, i);
                 }
 
-                // Do reads after writes to ensure we don't overwrite last_read
-                for comp in read_comp {
-                    trace!(component = ?comp, "Read component");
-                    if let Some(n) = component_last_mutated.get(comp) {
-                        trace!(system_index = n, "Added write dependency");
-                        comp_dependencies.insert(*n);
-                    }
-                    component_last_read.insert(*comp, i);
+                // remove dependencies which are already static from dynamic dependencies
+                for static_dep in &dependencies {
+                    comp_dependencies.remove(static_dep);
                 }
 
                 trace!(depentants = ?comp_dependencies, "Computed dynamic dependants");
@@ -357,14 +373,23 @@ impl Executor {
 
                         let awaiting = &self.awaiting;
 
+                        trace!(?awaiting, "Initialized await counts");
+
                         // execute all systems with no outstanding dependencies
                         (0..systems.len())
-                            .filter(|i| awaiting[*i].load(Ordering::SeqCst) == 0)
+                            .into_par_iter()
+                            .filter(|i| static_dependency_counts[*i].load(Ordering::SeqCst) == 0)
                             .for_each(|i| {
                                 // safety: we are at the root of the execution tree, so we know each
                                 // index is exclusive here
                                 unsafe { self.run_recursive(i, world, resources) };
                             });
+
+                        debug_assert!(
+                            awaiting.iter().all(|x| x.load(Ordering::SeqCst) == 0),
+                            "not all systems run: {:?}",
+                            awaiting
+                        );
                     }
                 }
             },
@@ -393,19 +418,9 @@ impl Executor {
         self.systems[i].get_mut().run_unsafe(world, resources);
 
         self.static_dependants[i].par_iter().for_each(|dep| {
-            match self.awaiting[*dep].compare_exchange(
-                1,
-                std::usize::MAX,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => {
-                    // safety: each dependency is unique, so run_recursive is safe to call
-                    self.run_recursive(*dep, world, resources);
-                }
-                Err(_) => {
-                    self.awaiting[*dep].fetch_sub(1, Ordering::Relaxed);
-                }
+            if self.awaiting[*dep].fetch_sub(1, Ordering::Relaxed) == 1 {
+                // safety: each dependency is unique, so run_recursive is safe to call
+                self.run_recursive(*dep, world, resources);
             }
         });
     }

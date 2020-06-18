@@ -28,7 +28,7 @@ use crate::storage::Tags;
 use crate::{
     prelude::Query,
     query::View,
-    subworld::{Access, ComponentAccess, ComponentAccessError, StorageAccessor, SubWorld},
+    subworld::{ComponentAccess, ComponentAccessError, StorageAccessor, SubWorld},
     tuple::TupleEq,
 };
 use parking_lot::Mutex;
@@ -1103,11 +1103,8 @@ impl World {
     /// Splits the world into two. The left world allows access only to the data declared by the view;
     /// the right world allows access to all else.
     pub fn split<T: for<'v> View<'v>>(&mut self) -> (SubWorld, SubWorld) {
-        let access = Access {
-            reads: T::read_types(),
-            writes: T::write_types(),
-        };
-        let (left, right) = ComponentAccess::All.split(access);
+        let permissions = T::requires_permissions();
+        let (left, right) = ComponentAccess::All.split(permissions);
 
         (
             SubWorld {

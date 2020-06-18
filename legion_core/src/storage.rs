@@ -23,7 +23,7 @@ use smallvec::SmallVec;
 use std::any::TypeId;
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 use std::mem::size_of;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -43,26 +43,34 @@ fn next_version() -> u64 {
         .unwrap()
 }
 
-#[cfg(not(feature = "ffi"))]
-/// A type ID identifying a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub struct ComponentTypeId(pub TypeId);
-
-#[cfg(not(feature = "ffi"))]
-impl ComponentTypeId {
-    /// Gets the component type ID that represents type `T`.
-    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>()) }
+pub struct ComponentTypeId {
+    type_id: TypeId,
+    #[cfg(feature = "ffi")]
+    discriminator: u32,
+    #[cfg(debug_assertions)]
+    name: &'static str,
 }
 
-#[cfg(feature = "ffi")]
-/// A type ID identifying a component type.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
-pub struct ComponentTypeId(pub TypeId, pub u32);
-
-#[cfg(feature = "ffi")]
 impl ComponentTypeId {
     /// Gets the component type ID that represents type `T`.
-    pub fn of<T: Component>() -> Self { Self(TypeId::of::<T>(), 0) }
+    pub fn of<T: Component>() -> Self {
+        Self {
+            type_id: TypeId::of::<T>(),
+            #[cfg(feature = "ffi")]
+            discriminator: 0,
+            #[cfg(debug_assertions)]
+            name: std::any::type_name::<T>(),
+        }
+    }
+}
+
+impl Display for ComponentTypeId {
+    #[cfg(debug_assertions)]
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.name) }
+
+    #[cfg(not(debug_assertions))]
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "{:?}", self.type_id) }
 }
 
 #[cfg(not(feature = "ffi"))]

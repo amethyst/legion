@@ -29,7 +29,7 @@ use crate::storage::ComponentTypeId;
 use crate::storage::Tag;
 use crate::storage::TagTypeId;
 use crate::subworld::{ComponentAccess, StorageAccessor};
-use crate::world::EntityStore;
+use crate::{permission::Permissions, world::EntityStore};
 use derivative::Derivative;
 use std::any::TypeId;
 use std::iter::Enumerate;
@@ -71,11 +71,8 @@ pub trait View<'a>: Sized + Send + Sync + 'static {
     /// Determines if the view writes to the specified data type.
     fn writes<T: Component>() -> bool;
 
-    /// Returns an array of the components read by this view
-    fn read_types() -> Vec<ComponentTypeId>;
-
-    /// Returns an array of the components written by this view
-    fn write_types() -> Vec<ComponentTypeId>;
+    /// Returns the set of permissions required by the view.
+    fn requires_permissions() -> Permissions<ComponentTypeId>;
 }
 
 /// A type which can construct a default entity filter.
@@ -161,12 +158,14 @@ impl<'a, T: Component> View<'a> for Read<T> {
 
     fn writes<D: Component>() -> bool { false }
 
-    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
-
-    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-
     fn validate_access(access: &ComponentAccess) -> bool {
         access.allows_read(ComponentTypeId::of::<T>())
+    }
+
+    fn requires_permissions() -> Permissions<ComponentTypeId> {
+        let mut permissions = Permissions::new();
+        permissions.push_read(ComponentTypeId::of::<T>());
+        permissions
     }
 }
 
@@ -218,9 +217,11 @@ impl<'a, T: Component> View<'a> for TryRead<T> {
 
     fn writes<D: Component>() -> bool { false }
 
-    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
-
-    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
+    fn requires_permissions() -> Permissions<ComponentTypeId> {
+        let mut permissions = Permissions::new();
+        permissions.push_read(ComponentTypeId::of::<T>());
+        permissions
+    }
 
     fn validate_access(access: &ComponentAccess) -> bool {
         access.allows_read(ComponentTypeId::of::<T>())
@@ -281,11 +282,11 @@ impl<'a, T: Component> View<'a> for Write<T> {
     #[inline]
     fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
-    #[inline]
-    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
-
-    #[inline]
-    fn write_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+    fn requires_permissions() -> Permissions<ComponentTypeId> {
+        let mut permissions = Permissions::new();
+        permissions.push(ComponentTypeId::of::<T>());
+        permissions
+    }
 
     fn validate_access(access: &ComponentAccess) -> bool {
         access.allows_write(ComponentTypeId::of::<T>())
@@ -340,11 +341,11 @@ impl<'a, T: Component> View<'a> for TryWrite<T> {
     #[inline]
     fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
-    #[inline]
-    fn read_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
-
-    #[inline]
-    fn write_types() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
+    fn requires_permissions() -> Permissions<ComponentTypeId> {
+        let mut permissions = Permissions::new();
+        permissions.push(ComponentTypeId::of::<T>());
+        permissions
+    }
 
     fn validate_access(access: &ComponentAccess) -> bool {
         access.allows_write(ComponentTypeId::of::<T>())
@@ -407,11 +408,7 @@ impl<'a, T: Tag> View<'a> for Tagged<T> {
     #[inline]
     fn writes<D: Component>() -> bool { false }
 
-    #[inline]
-    fn read_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
-
-    #[inline]
-    fn write_types() -> Vec<ComponentTypeId> { Vec::with_capacity(0) }
+    fn requires_permissions() -> Permissions<ComponentTypeId> { Permissions::new() }
 
     #[inline]
     fn validate_access(_: &ComponentAccess) -> bool { true }
@@ -485,16 +482,10 @@ macro_rules! impl_view_tuple {
                 $( $ty::writes::<Data>() )||*
             }
 
-            fn read_types() -> Vec<ComponentTypeId> {
-                let mut vec = vec![];
-                $( vec.extend($ty::read_types()); )*
-                vec
-            }
-
-            fn write_types() -> Vec<ComponentTypeId> {
-                let mut vec = vec![];
-                $( vec.extend($ty::write_types()); )*
-                vec
+            fn requires_permissions() -> Permissions<ComponentTypeId> {
+                let mut permissions = Permissions::new();
+                $( permissions.add($ty::requires_permissions()); )*
+                permissions
             }
         }
     };

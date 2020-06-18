@@ -3,13 +3,13 @@ use crate::{
     entity::Entity,
     filter::EntityFilter,
     index::ArchetypeIndex,
+    permission::Permissions,
     prelude::Query,
     query::View,
     storage::{Component, ComponentTypeId, Storage, Tag},
     world::{EntityStore, World},
 };
 use bit_set::BitSet;
-use derivative::Derivative;
 use std::{borrow::Cow, ops::Deref};
 
 /// Describes which archetypes are available for access.
@@ -32,117 +32,90 @@ impl ArchetypeAccess {
     }
 }
 
-/// Describes items that are accessed via reads or writes.
-#[derive(Derivative, Debug, Clone)]
-#[derivative(Default(bound = ""))]
-pub struct Access<T> {
-    pub reads: Vec<T>,
-    pub writes: Vec<T>,
-}
-
 #[derive(Clone)]
 pub enum ComponentAccess<'a> {
     All,
-    Allow(Cow<'a, Access<ComponentTypeId>>),
-    Disallow(Cow<'a, Access<ComponentTypeId>>),
+    Allow(Cow<'a, Permissions<ComponentTypeId>>),
+    Disallow(Cow<'a, Permissions<ComponentTypeId>>),
 }
 
 impl<'a> ComponentAccess<'a> {
     pub fn allows_read(&self, component: ComponentTypeId) -> bool {
         match self {
             Self::All => true,
-            Self::Allow(components) => components.reads.contains(&component),
-            Self::Disallow(components) => !components.reads.contains(&component),
+            Self::Allow(components) => components.reads().contains(&component),
+            Self::Disallow(components) => !components.reads().contains(&component),
         }
     }
 
     pub fn allows_write(&self, component: ComponentTypeId) -> bool {
         match self {
             Self::All => true,
-            Self::Allow(components) => components.writes.contains(&component),
-            Self::Disallow(components) => !components.writes.contains(&component),
+            Self::Allow(components) => components.writes().contains(&component),
+            Self::Disallow(components) => !components.writes().contains(&component),
         }
     }
 
-    pub(crate) fn split(&mut self, access: Access<ComponentTypeId>) -> (Self, Self) {
-        fn invert(mut access: Access<ComponentTypeId>) -> Access<ComponentTypeId> {
+    pub(crate) fn split(&mut self, access: Permissions<ComponentTypeId>) -> (Self, Self) {
+        fn append_incompatible(
+            denied: &mut Permissions<ComponentTypeId>,
+            to_deny: &Permissions<ComponentTypeId>,
+        ) {
             // reads are now denied writes
-            let original_write_len = access.writes.len();
-            for read in access.reads.drain(..) {
-                access.writes.push(read);
+            for read in to_deny.reads() {
+                denied.push_write(read.clone());
             }
 
             // writes are now entirely denied
-            for write in access.writes.iter().take(original_write_len) {
-                access.reads.push(*write);
+            for write in to_deny.writes() {
+                denied.push(write.clone());
             }
-
-            access
         }
 
-        fn union(
-            a: &Access<ComponentTypeId>,
-            mut b: Access<ComponentTypeId>,
-        ) -> Access<ComponentTypeId> {
-            for read in &a.reads {
-                if !b.reads.contains(read) {
-                    b.reads.push(*read);
-                }
+        fn incompatible(
+            permissions: &Permissions<ComponentTypeId>,
+        ) -> Permissions<ComponentTypeId> {
+            let mut denied = Permissions::new();
+            // if the current permission allows reads, then everything else must deny writes
+            for read in permissions.read_only() {
+                denied.push_write(read.clone());
             }
-            for write in &a.writes {
-                if !b.writes.contains(write) {
-                    b.writes.push(*write);
-                }
-            }
-            b
-        }
 
-        fn subtract(
-            a: &Access<ComponentTypeId>,
-            b: Access<ComponentTypeId>,
-        ) -> Access<ComponentTypeId> {
-            let mut a = a.to_owned();
-            for read in &b.reads {
-                if let Some(i) = a.reads.iter().position(|t| t == read) {
-                    a.reads.swap_remove(i);
-                }
+            // if the current permission allows writes, then everything else must deny all
+            for write in permissions.writes() {
+                denied.push(write.clone());
             }
-            for write in &b.writes {
-                if let Some(i) = a.writes.iter().position(|t| t == write) {
-                    a.writes.swap_remove(i);
-                }
-            }
-            a
+
+            denied
         }
 
         match self {
-            Self::All => (
-                Self::Allow(Cow::Owned(access.clone())),
-                Self::Disallow(Cow::Owned(invert(access))),
-            ),
-            Self::Allow(current) => {
-                if access.reads.iter().any(|t| !current.reads.contains(t))
-                    || access.writes.iter().any(|t| !current.writes.contains(t))
-                {
-                    panic!("view accesses components unavailable in this world");
-                }
-
+            Self::All => {
+                let denied = incompatible(&access);
                 (
-                    Self::Allow(Cow::Owned(access.clone())),
-                    Self::Allow(Cow::Owned(subtract(current, access))),
+                    Self::Allow(Cow::Owned(access)),
+                    Self::Disallow(Cow::Owned(denied)),
                 )
             }
-            Self::Disallow(current) => {
-                if access.reads.iter().any(|t| current.reads.contains(t))
-                    || access.writes.iter().any(|t| current.writes.contains(t))
-                {
-                    panic!("view accesses components unavailable in this world");
+            Self::Allow(allowed) => {
+                if !allowed.is_superset(&access) {
+                    panic!("view accesses components unavailable in this world: world allows only {}, view requires {}", allowed, access);
                 }
 
-                (
-                    Self::Allow(Cow::Owned(access.clone())),
-                    Self::Disallow(Cow::Owned(union(current, invert(access)))),
-                )
+                let mut allowed = allowed.clone();
+                allowed.to_mut().subtract(&access);
+
+                (Self::Allow(Cow::Owned(access)), Self::Allow(allowed))
+            }
+            Self::Disallow(denied) => {
+                if !denied.is_disjoint(&access) {
+                    panic!("view accesses components unavailable in this world: world disallows {}, view requires {}", denied, access);
+                }
+
+                let mut denied = denied.clone();
+                append_incompatible(denied.to_mut(), &access);
+
+                (Self::Allow(Cow::Owned(access)), Self::Disallow(denied))
             }
         }
     }
@@ -198,7 +171,7 @@ impl<'a> SubWorld<'a> {
     /// disjoint portions of a world and that the world is not used while any of its sub-worlds are alive.
     pub unsafe fn new_unchecked(
         world: &'a World,
-        access: &'a Access<ComponentTypeId>,
+        access: &'a Permissions<ComponentTypeId>,
         archetypes: &'a ArchetypeAccess,
     ) -> Self {
         SubWorld {
@@ -218,11 +191,8 @@ impl<'a> SubWorld<'a> {
     where
         'a: 'b,
     {
-        let access = Access {
-            reads: T::read_types(),
-            writes: T::write_types(),
-        };
-        let (left, right) = self.components.split(access);
+        let permissions = T::requires_permissions();
+        let (left, right) = self.components.split(permissions);
 
         (
             SubWorld {
@@ -261,10 +231,10 @@ impl<'a> SubWorld<'a> {
         let valid = match &self.components {
             ComponentAccess::All => true,
             ComponentAccess::Allow(restrictions) => {
-                restrictions.reads.contains(&ComponentTypeId::of::<T>())
+                restrictions.reads().contains(&ComponentTypeId::of::<T>())
             }
             ComponentAccess::Disallow(restrictions) => {
-                !restrictions.reads.contains(&ComponentTypeId::of::<T>())
+                !restrictions.reads().contains(&ComponentTypeId::of::<T>())
             }
         };
 
@@ -280,10 +250,10 @@ impl<'a> SubWorld<'a> {
         let valid = match &self.components {
             ComponentAccess::All => true,
             ComponentAccess::Allow(restrictions) => {
-                restrictions.writes.contains(&ComponentTypeId::of::<T>())
+                restrictions.writes().contains(&ComponentTypeId::of::<T>())
             }
             ComponentAccess::Disallow(restrictions) => {
-                !restrictions.writes.contains(&ComponentTypeId::of::<T>())
+                !restrictions.writes().contains(&ComponentTypeId::of::<T>())
             }
         };
 

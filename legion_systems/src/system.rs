@@ -9,9 +9,10 @@ use legion_core::{
     cons::{ConsAppend, ConsFlatten},
     filter::EntityFilter,
     index::ArchetypeIndex,
+    permission::Permissions,
     query::{Query, Read, View, Write},
     storage::{Component, ComponentTypeId, TagTypeId},
-    subworld::{Access, ArchetypeAccess, SubWorld},
+    subworld::{ArchetypeAccess, SubWorld},
     world::{World, WorldId},
 };
 use std::any::TypeId;
@@ -23,9 +24,9 @@ use tracing::{debug, info, span, Level};
 #[derive(Derivative, Debug, Clone)]
 #[derivative(Default(bound = ""))]
 pub struct SystemAccess {
-    pub resources: Access<ResourceTypeId>,
-    pub components: Access<ComponentTypeId>,
-    pub tags: Access<TagTypeId>,
+    pub resources: Permissions<ResourceTypeId>,
+    pub components: Permissions<ComponentTypeId>,
+    pub tags: Permissions<TagTypeId>,
 }
 
 /// This trait is for providing abstraction across tuples of queries for populating the type
@@ -178,12 +179,15 @@ where
     fn name(&self) -> &SystemId { &self.name }
 
     fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) {
-        (&self.access.resources.reads, &self.access.components.reads)
+        (
+            self.access.resources.reads(),
+            self.access.components.reads(),
+        )
     }
     fn writes(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) {
         (
-            &self.access.resources.writes,
-            &self.access.components.writes,
+            self.access.resources.writes(),
+            self.access.components.writes(),
         )
     }
 
@@ -306,8 +310,8 @@ pub struct SystemBuilder<Q = (), R = ()> {
     queries: Q,
     resources: R,
 
-    resource_access: Access<ResourceTypeId>,
-    component_access: Access<ComponentTypeId>,
+    resource_access: Permissions<ResourceTypeId>,
+    component_access: Permissions<ComponentTypeId>,
     access_all_archetypes: bool,
 }
 
@@ -321,8 +325,8 @@ impl SystemBuilder<(), ()> {
             name: name.into(),
             queries: (),
             resources: (),
-            resource_access: Access::default(),
-            component_access: Access::default(),
+            resource_access: Permissions::default(),
+            component_access: Permissions::default(),
             access_all_archetypes: false,
         }
     }
@@ -347,8 +351,7 @@ where
         F: 'static + EntityFilter,
         Q: ConsAppend<Query<V, F>>,
     {
-        self.component_access.reads.extend(V::read_types().iter());
-        self.component_access.writes.extend(V::write_types().iter());
+        self.component_access.add(V::requires_permissions());
 
         SystemBuilder {
             name: self.name,
@@ -370,7 +373,7 @@ where
         R: ConsAppend<Read<T>>,
         <R as ConsAppend<Read<T>>>::Output: ConsFlatten,
     {
-        self.resource_access.reads.push(ResourceTypeId::of::<T>());
+        self.resource_access.push_read(ResourceTypeId::of::<T>());
 
         SystemBuilder {
             name: self.name,
@@ -392,7 +395,7 @@ where
         R: ConsAppend<Write<T>>,
         <R as ConsAppend<Write<T>>>::Output: ConsFlatten,
     {
-        self.resource_access.writes.push(ResourceTypeId::of::<T>());
+        self.resource_access.push(ResourceTypeId::of::<T>());
 
         SystemBuilder {
             name: self.name,
@@ -418,7 +421,7 @@ where
     where
         T: Component,
     {
-        self.component_access.reads.push(ComponentTypeId::of::<T>());
+        self.component_access.push_read(ComponentTypeId::of::<T>());
         self.access_all_archetypes = true;
 
         self
@@ -438,9 +441,7 @@ where
     where
         T: Component,
     {
-        self.component_access
-            .writes
-            .push(ComponentTypeId::of::<T>());
+        self.component_access.push(ComponentTypeId::of::<T>());
         self.access_all_archetypes = true;
 
         self
@@ -479,7 +480,7 @@ where
             access: SystemAccess {
                 resources: self.resource_access,
                 components: self.component_access,
-                tags: Access::default(),
+                tags: Permissions::default(),
             },
             command_buffer: FxHashMap::default(),
         })
@@ -514,7 +515,7 @@ where
             access: SystemAccess {
                 resources: self.resource_access,
                 components: self.component_access,
-                tags: Access::default(),
+                tags: Permissions::default(),
             },
             command_buffer: FxHashMap::default(),
         })
@@ -1107,6 +1108,22 @@ mod tests {
             });
 
         let mut schedule = Schedule::builder().add_system(system).build();
+        schedule.execute(&mut world, &mut Resources::default());
+    }
+
+    #[test]
+    fn split_world2() {
+        let system = SystemBuilder::new("system")
+            .with_query(<(Read<usize>, Write<isize>)>::query())
+            .write_component::<bool>()
+            .build_thread_local(move |_, world, _, query| {
+                let (_, mut world) = world.split_for_query(&query);
+                let (_, _) = world.split::<Write<bool>>();
+            });
+
+        let mut schedule = Schedule::builder().add_thread_local(system).build();
+
+        let mut world = World::new();
         schedule.execute(&mut world, &mut Resources::default());
     }
 }
