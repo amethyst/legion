@@ -145,20 +145,14 @@ impl<'a> StorageAccessor<'a> {
         }
     }
 
-    pub fn inner(&self) -> &'a Storage {
-        self.storage
-    }
+    pub fn inner(&self) -> &'a Storage { self.storage }
 
-    pub fn into_inner(self) -> &'a Storage {
-        self.storage
-    }
+    pub fn into_inner(self) -> &'a Storage { self.storage }
 }
 
 impl<'a> Deref for StorageAccessor<'a> {
     type Target = Storage;
-    fn deref(&self) -> &Self::Target {
-        self.storage
-    }
+    fn deref(&self) -> &Self::Target { self.storage }
 }
 
 /// Provides access to a subset of the entities of a `World`.
@@ -255,8 +249,8 @@ impl<'a> SubWorld<'a> {
     fn validate_reads_by_id(&self, entity: Entity, component: ComponentTypeId) {
         let valid = match &self.components {
             ComponentAccess::All => true,
-            ComponentAccess::Allow(restrictions) => restrictions.reads.contains(&component),
-            ComponentAccess::Disallow(restrictions) => !restrictions.reads.contains(&component),
+            ComponentAccess::Allow(restrictions) => restrictions.reads().contains(&component),
+            ComponentAccess::Disallow(restrictions) => !restrictions.reads().contains(&component),
         };
 
         if !valid || !self.validate_archetype_access(entity) {
@@ -315,14 +309,10 @@ impl<'a> EntityStore for SubWorld<'a> {
     }
 
     #[inline]
-    fn get_tag<T: Tag>(&self, entity: Entity) -> Option<&T> {
-        self.world.get_tag(entity)
-    }
+    fn get_tag<T: Tag>(&self, entity: Entity) -> Option<&T> { self.world.get_tag(entity) }
 
     #[inline]
-    fn is_alive(&self, entity: Entity) -> bool {
-        self.world.is_alive(entity)
-    }
+    fn is_alive(&self, entity: Entity) -> bool { self.world.is_alive(entity) }
 
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
