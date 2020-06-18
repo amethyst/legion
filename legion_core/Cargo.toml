@@ -1,6 +1,6 @@
 [package]
 name = "legion-core"
-version = "0.2.2"
+version = "0.2.3"
 description = "High performance entity component system (ECS) library"
 authors = ["Thomas Gillen <thomas.gillen@googlemail.com>"]
 repository = "https://github.com/TomGillen/legion"
