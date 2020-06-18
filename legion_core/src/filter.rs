@@ -382,7 +382,7 @@ impl<'a, 'b, F: Filter<ArchetypeFilterData<'a>>> Iterator for FilterArchIter<'a,
     type Item = ArchetypeIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((i, data)) = self.archetypes.next() {
+        while let Some((i, data)) = self.archetypes.next() {
             if self.filter.is_match(&data).is_pass() {
                 return Some(ArchetypeIndex(i));
             }

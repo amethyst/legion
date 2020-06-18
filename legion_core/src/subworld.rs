@@ -12,6 +12,7 @@ use crate::{
 use bit_set::BitSet;
 use std::{borrow::Cow, ops::Deref};
 
+#[derive(Debug)]
 /// Describes which archetypes are available for access.
 pub enum ArchetypeAccess {
     /// All archetypes.

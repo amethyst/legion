@@ -218,7 +218,7 @@ where
             .entry(world.id())
             .or_insert_with(|| AtomicRefCell::new(CommandBuffer::new(world)));
 
-        info!("Running");
+        info!(permissions = ?self.access, archetypes = ?self.archetypes, "Running");
         use std::ops::DerefMut;
         let mut borrow = self.run_fn.get_mut();
         borrow.deref_mut().run(
@@ -714,16 +714,12 @@ mod tests {
             }
         }
 
-        let mut state = 0;
         let mut system = SystemBuilder::<()>::new("TestSystem")
             .read_resource::<TestResource>()
             .with_query(Read::<Pos>::query())
             .with_query(Read::<Vel>::query())
-            .build(move |_, _, _, _| {
-                state += 1;
-            });
+            .build(move |_, _, _, _| {});
 
-        let _ = state;
         system.prepare(&world);
         system.run(&mut world, &mut resources);
     }
@@ -1125,5 +1121,56 @@ mod tests {
 
         let mut world = World::new();
         schedule.execute(&mut world, &mut Resources::default());
+    }
+
+    #[test]
+    fn overlapped_reads() {
+        let _ = tracing_subscriber::fmt::try_init();
+
+        #[derive(Debug)]
+        struct Money(f64);
+        #[derive(Debug)]
+        struct Health(f64);
+        struct Food(f64);
+
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+
+        world.insert((), vec![(Money(5.0), Food(5.0))]);
+
+        world.insert(
+            (),
+            vec![
+                (Money(4.0), Health(3.0)),
+                (Money(4.0), Health(3.0)),
+                (Money(4.0), Health(3.0)),
+            ],
+        );
+
+        let show_me_the_money = SystemBuilder::new("money_show")
+            .with_query(<(Read<Money>, Read<Food>)>::query())
+            .build(|_, world, _, query| {
+                for (money, _food) in query.iter(world) {
+                    info!("Look at my money {:?}", money);
+                }
+            });
+
+        let health_conscious = SystemBuilder::new("healthy")
+            .with_query(<(Read<Money>, Read<Health>)>::query())
+            .build(|_, world, _, query| {
+                for (_money, health) in query.iter(world) {
+                    info!("So healthy {:?}", health);
+                }
+            });
+
+        let mut schedule = Schedule::builder()
+            .add_system(show_me_the_money)
+            .flush()
+            .add_system(health_conscious)
+            .flush()
+            .build();
+
+        let mut resources = Resources::default();
+        schedule.execute(&mut world, &mut resources);
     }
 }
