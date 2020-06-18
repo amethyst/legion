@@ -534,7 +534,7 @@ impl<'a, V: for<'b> View<'b>> Chunk<'a, V> {
 
     /// Get an iterator of all data contained within the chunk.
     #[inline]
-    pub fn iter(&mut self) -> <V as View<'a>>::Iter {
+    pub fn iter_mut(&mut self) -> <V as View<'a>>::Iter {
         V::fetch(
             self.archetype,
             self.components,
@@ -777,7 +777,7 @@ where
                 }
             }
             match self.iter.next() {
-                Some(mut inner) => self.frontier = Some(inner.iter()),
+                Some(mut inner) => self.frontier = Some(inner.iter_mut()),
                 None => return None,
             }
         }
@@ -1151,7 +1151,9 @@ where
         T: Fn((Entity, <<V as View<'data>>::Iter as Iterator>::Item)),
         W: EntityStore,
     {
-        self.iter_entities_unchecked(world).for_each(&mut f);
+        for mut chunk in self.iter_chunks_unchecked(world) {
+            chunk.iter_entities_mut().for_each(&mut f)
+        }
     }
 
     /// Iterates through all entity data that matches the query.
@@ -1192,7 +1194,9 @@ where
         T: Fn(<<V as View<'data>>::Iter as Iterator>::Item),
         W: EntityStore,
     {
-        self.iter_unchecked(world).for_each(&mut f);
+        for mut chunk in self.iter_chunks_unchecked(world) {
+            chunk.iter_mut().for_each(&mut f)
+        }
     }
 
     /// Iterates through all entity data that matches the query.
@@ -1437,7 +1441,7 @@ where
         W: EntityStore,
     {
         self.par_for_each_chunk_unchecked(world, |mut chunk| {
-            for data in chunk.iter() {
+            for data in chunk.iter_mut() {
                 f(data);
             }
         });
