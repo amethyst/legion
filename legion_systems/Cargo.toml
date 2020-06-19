@@ -1,6 +1,6 @@
 [package]
 name = "legion-systems"
-version = "0.2.3"
+version = "0.2.4"
 description = "High performance entity component system (ECS) library"
 authors = ["Thomas Gillen <thomas.gillen@googlemail.com>"]
 repository = "https://github.com/TomGillen/legion"
@@ -18,7 +18,7 @@ par-iter = ["rayon", "legion-core/par-iter"]
 par-schedule = ["rayon", "crossbeam-queue"]
 
 [dependencies]
-legion-core = { path = "../legion_core", version = "0.2.1", default-features = false }
+legion-core = { path = "../legion_core", version = "0.2.4", default-features = false }
 
 downcast-rs = "1.0"
 itertools = "0.8"
