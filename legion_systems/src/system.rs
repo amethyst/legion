@@ -1173,4 +1173,17 @@ mod tests {
         let mut resources = Resources::default();
         schedule.execute(&mut world, &mut resources);
     }
+
+    #[test]
+    fn thread_local_query() {
+        let mut world = World::default();
+        let _ = world.insert((), Some((1f32,)));
+
+        let system = SystemBuilder::new("system")
+            .with_query(<Write<f32>>::query())
+            .build_thread_local(move |_, world, _, query| for _ in query.iter_mut(world) {});
+
+        let mut schedule = Schedule::builder().add_thread_local(system).build();
+        schedule.execute(&mut world, &mut Resources::default());
+    }
 }

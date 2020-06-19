@@ -552,6 +552,7 @@ impl Schedule {
                 }
                 Step::ThreadLocalFn(function) => function(world, resources),
                 Step::ThreadLocalSystem(system) => {
+                    system.prepare(world);
                     system.run(world, resources);
                     if let Some(cmd) = system.command_buffer_mut(world.id()) {
                         waiting_flush.push(ToFlush::System(cmd));
