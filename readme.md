@@ -63,7 +63,7 @@ let entities: &[Entity] = world.insert(
 let query = <(Write<Position>, Read<Velocity>)>::query();
 
 // Iterate through all entities that match the query in the world
-for (mut pos, vel) in query.iter(&mut world) {
+for (mut pos, vel) in query.iter_mut(&mut world) {
     pos.x += vel.dx;
     pos.y += vel.dy;
 }
