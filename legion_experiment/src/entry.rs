@@ -216,7 +216,13 @@ impl<'a> Entry<'a> {
     }
 
     /// Adds a new component to the entity.
+    /// If the component already exists, its value will be replaced.
     pub fn add_component<T: Component>(&mut self, component: T) {
+        if let Some(comp) = self.get_component_mut::<T>() {
+            *comp = component;
+            return;
+        }
+
         let target_arch = {
             let mut source = DynamicArchetype {
                 base: self.world.archetypes()[self.location.archetype()]
@@ -246,7 +252,12 @@ impl<'a> Entry<'a> {
     }
 
     /// Removes a component from the entity.
+    /// Does nothing if the entity does not have the component.
     pub fn remove_component<T: Component>(&mut self) {
+        if !self.archetype().layout().has_component::<T>() {
+            return;
+        }
+
         let target_arch = {
             let mut source = DynamicArchetype {
                 base: self.world.archetypes()[self.location.archetype()]

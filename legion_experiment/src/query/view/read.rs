@@ -1,6 +1,7 @@
-use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnlyFetch, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
 use crate::{
     iter::indexed::IndexedIter,
+    permissions::Permissions,
     query::{
         filter::{component::ComponentFilter, passthrough::Passthrough, EntityFilterTuple},
         QueryResult,
@@ -18,7 +19,9 @@ use std::{any::TypeId, marker::PhantomData, slice::Iter};
 /// Reads a single entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
 #[derivative(Default(bound = ""))]
-pub struct Read<T: Component>(PhantomData<T>);
+pub struct Read<T>(PhantomData<T>);
+
+unsafe impl<T> ReadOnly for Read<T> {}
 
 impl<T: Component> DefaultFilter for Read<T> {
     type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough>;
@@ -50,6 +53,13 @@ impl<'data, T: Component> View<'data> for Read<T> {
 
     #[inline]
     fn writes<D: Component>() -> bool { false }
+
+    #[inline]
+    fn requires_permissions() -> Permissions<ComponentTypeId> {
+        let mut permissions = Permissions::default();
+        permissions.push_read(ComponentTypeId::of::<T>());
+        permissions
+    }
 
     unsafe fn fetch(
         components: &'data Components,

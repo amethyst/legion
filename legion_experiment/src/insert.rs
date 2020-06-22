@@ -103,6 +103,10 @@ pub trait ComponentSource: ArchetypeSource {
     );
 }
 
+pub trait KnownLength {
+    fn len(&self) -> usize;
+}
+
 pub trait IntoComponentSource {
     type Source: ComponentSource;
 
@@ -168,6 +172,55 @@ pub struct ComponentSourceFilter<T>(PhantomData<T>);
 
 impl<T> Default for ComponentSourceFilter<T> {
     fn default() -> Self { ComponentSourceFilter(PhantomData) }
+}
+
+impl LayoutFilter for ComponentSourceFilter<()> {
+    fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
+        FilterResult::Match(components.len() == 0)
+    }
+}
+
+impl<Iter> IntoComponentSource for Aos<(), Iter>
+where
+    Iter: Iterator,
+    Aos<(), Iter>: ComponentSource,
+{
+    type Source = Self;
+    fn into(self) -> Self::Source { self }
+}
+
+impl<Iter> ArchetypeSource for Aos<(), Iter>
+where
+    Iter: Iterator,
+{
+    type Filter = ComponentSourceFilter<()>;
+
+    fn filter(&self) -> Self::Filter { ComponentSourceFilter(PhantomData) }
+
+    fn layout(&mut self) -> EntityLayout { EntityLayout::default() }
+}
+
+impl<Iter> ComponentSource for Aos<(), Iter>
+where
+    Iter: Iterator,
+{
+    fn push_components<'a>(
+        &mut self,
+        writer: &mut ArchetypeWriter<'a>,
+        mut entities: impl Iterator<Item = Entity>,
+    ) {
+        for _ in &mut self.iter {
+            let entity = entities.next().unwrap();
+            writer.push(entity);
+        }
+    }
+}
+
+impl<Iter> KnownLength for Aos<(), Iter>
+where
+    Iter: ExactSizeIterator,
+{
+    fn len(&self) -> usize { self.iter.len() }
 }
 
 macro_rules! component_source {
@@ -292,6 +345,12 @@ macro_rules! impl_component_source {
             }
         }
 
+        impl<$( $ty: Component ),*> KnownLength for Soa<($( SoaElement<$ty>, )*)> {
+            fn len(&self) -> usize {
+                self.vecs.0.len
+            }
+        }
+
         impl<Iter, $( $ty: Component ),*> IntoComponentSource for Aos<($( $ty, )*), Iter>
         where
             Iter: Iterator<Item = ($( $ty, )*)>,
@@ -369,6 +428,15 @@ macro_rules! impl_component_source {
                         writer.push(entity);
                     }
                 }
+            }
+        }
+
+        impl<Iter, $( $ty: Component ),*> KnownLength for Aos<($( $ty, )*), Iter>
+        where
+            Iter: Iterator<Item = ($( $ty, )*)> + ExactSizeIterator
+        {
+            fn len(&self) -> usize {
+                self.iter.len()
             }
         }
     };

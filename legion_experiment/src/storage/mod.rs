@@ -11,7 +11,6 @@ use std::{
 
 pub mod archetype;
 pub mod component;
-pub mod filter;
 pub mod group;
 pub mod index;
 pub mod packed;

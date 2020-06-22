@@ -1,8 +1,10 @@
-mod entity;
+pub mod cons;
+pub mod entity;
 pub mod entry;
 mod hash;
 mod insert;
 mod iter;
+pub mod permissions;
 pub mod query;
 #[cfg(feature = "serialize")]
 pub mod serialize;

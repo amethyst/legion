@@ -1,6 +1,7 @@
-use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnlyFetch, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
 use crate::{
     iter::indexed::{IndexedIter, TrustedRandomAccess},
+    permissions::Permissions,
     query::{
         filter::{passthrough::Passthrough, EntityFilterTuple},
         QueryResult,
@@ -18,7 +19,9 @@ use std::{any::TypeId, marker::PhantomData};
 /// Reads a single entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
 #[derivative(Default(bound = ""))]
-pub struct TryRead<T: Component>(PhantomData<T>);
+pub struct TryRead<T>(PhantomData<T>);
+
+unsafe impl<T> ReadOnly for TryRead<T> {}
 
 impl<T: Component> DefaultFilter for TryRead<T> {
     type Filter = EntityFilterTuple<Passthrough, Passthrough>;
@@ -51,12 +54,19 @@ impl<'data, T: Component> View<'data> for TryRead<T> {
     #[inline]
     fn writes<D: Component>() -> bool { false }
 
+    #[inline]
+    fn requires_permissions() -> Permissions<ComponentTypeId> {
+        let mut permissions = Permissions::default();
+        permissions.push_read(ComponentTypeId::of::<T>());
+        permissions
+    }
+
     unsafe fn fetch(
         components: &'data Components,
         archetypes: &'data [Archetype],
         query: QueryResult<'data>,
     ) -> Self::Iter {
-        let components = components.get_downcast::<T>().unwrap();
+        let components = components.get_downcast::<T>();
         let archetype_indexes = query.index.iter();
         TryReadIter {
             components,
@@ -68,7 +78,7 @@ impl<'data, T: Component> View<'data> for TryRead<T> {
 
 /// A fetch iterator which pulls out shared component slices.
 pub struct TryReadIter<'a, T: Component> {
-    components: &'a T::Storage,
+    components: Option<&'a T::Storage>,
     archetype_indexes: std::slice::Iter<'a, ArchetypeIndex>,
     archetypes: &'a [Archetype],
 }
@@ -78,10 +88,12 @@ impl<'a, T: Component> Iterator for TryReadIter<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         self.archetype_indexes.next().map(|i| {
-            self.components.get(*i).map_or_else(
-                || Slice::Empty(self.archetypes[*i].entities().len()),
-                |c| c.into(),
-            )
+            self.components
+                .and_then(|components| components.get(*i))
+                .map_or_else(
+                    || Slice::Empty(self.archetypes[*i].entities().len()),
+                    |c| c.into(),
+                )
         })
     }
 }

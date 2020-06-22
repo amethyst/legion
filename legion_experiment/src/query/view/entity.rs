@@ -1,7 +1,8 @@
-use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnlyFetch, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
 use crate::{
     entity::Entity,
     iter::indexed::IndexedIter,
+    permissions::Permissions,
     query::{
         filter::{any::Any, passthrough::Passthrough, EntityFilterTuple},
         QueryResult,
@@ -13,6 +14,8 @@ use crate::{
     },
     subworld::ComponentAccess,
 };
+
+unsafe impl ReadOnly for Entity {}
 
 impl DefaultFilter for Entity {
     type Filter = EntityFilterTuple<Any, Passthrough>;
@@ -42,6 +45,9 @@ impl<'data> View<'data> for Entity {
 
     #[inline]
     fn writes<D: Component>() -> bool { false }
+
+    #[inline]
+    fn requires_permissions() -> Permissions<ComponentTypeId> { Permissions::default() }
 
     unsafe fn fetch(
         _: &'data Components,

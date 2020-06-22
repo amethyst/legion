@@ -8,6 +8,7 @@ use crate::{
         map::MapInto,
         zip::{multizip, Zip},
     },
+    permissions::Permissions,
     storage::{
         archetype::Archetype,
         component::{Component, ComponentTypeId},
@@ -71,6 +72,8 @@ pub trait View<'data>: DefaultFilter + Sized {
 
     /// Determines if the view writes to the specified data type.
     fn writes<T: Component>() -> bool;
+
+    fn requires_permissions() -> Permissions<ComponentTypeId>;
 }
 
 pub trait IntoIndexableIter {
@@ -145,6 +148,8 @@ macro_rules! view_tuple {
 
 macro_rules! impl_view_tuple {
     ( $( $ty: ident ),* ) => {
+        unsafe impl<$( $ty: ReadOnly ),*> ReadOnly for ($( $ty, )*) {}
+
         impl<$( $ty: DefaultFilter ),*> DefaultFilter for ($( $ty, )*) {
             type Filter = EntityFilterTuple<
                 And<($( <$ty::Filter as EntityFilter>::Layout, )*)>,
@@ -209,6 +214,12 @@ macro_rules! impl_view_tuple {
                     $( let [<$ty _reads>] = $ty::reads_types(); )*
                     $( let types = types.chain([<$ty _reads>].as_ref().iter()); )*
                     types.copied().collect()
+                }
+
+                fn requires_permissions() -> Permissions<ComponentTypeId> {
+                    let mut permissions = Permissions::new();
+                    $( permissions.add($ty::requires_permissions()); )*
+                    permissions
                 }
             }
 

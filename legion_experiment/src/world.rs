@@ -9,11 +9,10 @@ use crate::{
         index::SearchIndex,
         ComponentIndex, Components, PackOptions,
     },
-    subworld::{Access, ComponentAccess, SubWorld},
+    subworld::{ComponentAccess, SubWorld},
 };
 use bit_set::BitSet;
 use itertools::Itertools;
-use smallvec::SmallVec;
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::atomic::{AtomicU64, Ordering},
@@ -122,6 +121,8 @@ impl World {
 
     pub fn id(&self) -> WorldId { self.id }
 
+    pub fn entity_allocator(&self) -> &EntityAllocator { &self.entity_allocator }
+
     pub fn len(&self) -> usize { self.entities.len() }
 
     pub fn is_empty(&self) -> bool { self.len() == 0 }
@@ -130,9 +131,9 @@ impl World {
 
     pub fn push<T>(&mut self, components: T) -> Entity
     where
-        Vec<T>: IntoComponentSource,
+        Option<T>: IntoComponentSource,
     {
-        self.extend(vec![components])[0]
+        self.extend(Some(components))[0]
     }
 
     pub fn extend(&mut self, components: impl IntoComponentSource) -> &[Entity] {
@@ -326,11 +327,8 @@ impl World {
     /// Splits the world into two. The left world allows access only to the data declared by the view;
     /// the right world allows access to all else.
     pub fn split<T: for<'v> View<'v>>(&mut self) -> (SubWorld, SubWorld) {
-        let access = Access {
-            reads: SmallVec::from_slice(T::reads_types().as_ref()),
-            writes: SmallVec::from_slice(T::writes_types().as_ref()),
-        };
-        let (left, right) = ComponentAccess::All.split(access);
+        let permissions = T::requires_permissions();
+        let (left, right) = ComponentAccess::All.split(permissions);
 
         // safety: exclusive access to world, and we have split each subworld into disjoint sections
         unsafe {

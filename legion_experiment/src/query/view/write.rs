@@ -1,6 +1,7 @@
 use super::{DefaultFilter, Fetch, IntoIndexableIter, View};
 use crate::{
     iter::indexed::IndexedIter,
+    permissions::Permissions,
     query::{
         filter::{component::ComponentFilter, passthrough::Passthrough, EntityFilterTuple},
         QueryResult,
@@ -19,7 +20,7 @@ use std::{any::TypeId, marker::PhantomData, slice::Iter};
 /// Writes a single mutable entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
 #[derivative(Default(bound = ""))]
-pub struct Write<T: Component>(PhantomData<T>);
+pub struct Write<T>(PhantomData<T>);
 
 impl<T: Component> DefaultFilter for Write<T> {
     type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough>;
@@ -52,11 +53,21 @@ impl<'data, T: Component> View<'data> for Write<T> {
     #[inline]
     fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
 
+    #[inline]
+    fn requires_permissions() -> Permissions<ComponentTypeId> {
+        let mut permissions = Permissions::default();
+        permissions.push(ComponentTypeId::of::<T>());
+        permissions
+    }
+
     unsafe fn fetch(
         components: &'data Components,
         _: &'data [Archetype],
         query: QueryResult<'data>,
     ) -> Self::Iter {
+        if query.is_empty() {
+            return WriteIter::Empty;
+        };
         let components = components.get_downcast::<T>().unwrap();
         if query.is_ordered() {
             WriteIter::Grouped {
@@ -80,6 +91,7 @@ pub enum WriteIter<'a, T: Component> {
     Grouped {
         slices: <T::Storage as ComponentStorage<'a, T>>::IterMut,
     },
+    Empty,
 }
 
 impl<'a, T: Component> Iterator for WriteIter<'a, T> {
@@ -94,6 +106,7 @@ impl<'a, T: Component> Iterator for WriteIter<'a, T> {
                 .next()
                 .and_then(|i| unsafe { components.get_mut(*i) }),
             Self::Grouped { slices } => slices.next(),
+            Self::Empty => None,
         };
         components.map(|c| c.into())
     }

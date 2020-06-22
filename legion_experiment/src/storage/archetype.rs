@@ -97,6 +97,10 @@ impl EntityLayout {
     }
 
     pub fn has_component<T: Component>(&self) -> bool {
-        self.components.contains(&ComponentTypeId::of::<T>())
+        self.has_component_by_id(ComponentTypeId::of::<T>())
+    }
+
+    pub fn has_component_by_id(&self, type_id: ComponentTypeId) -> bool {
+        self.components.contains(&type_id)
     }
 }

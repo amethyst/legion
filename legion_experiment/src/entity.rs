@@ -131,16 +131,14 @@ impl EntityAllocator {
         }
     }
 
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = Entity> + 'a {
-        Allocate::new(&self.next, self.stride)
-    }
+    pub fn iter(&self) -> Allocate { Allocate::new(&self.next, self.stride) }
 }
 
 impl Default for EntityAllocator {
     fn default() -> Self { Self::new(0, 1) }
 }
 
-struct Allocate<'a> {
+pub struct Allocate<'a> {
     shared: &'a AtomicU64,
     stride: u64,
     base: u64,
