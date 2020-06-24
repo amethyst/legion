@@ -120,6 +120,7 @@ impl LocationMap {
 pub struct EntityAllocator {
     next: Arc<AtomicU64>,
     stride: u64,
+    offset: u64,
 }
 
 impl EntityAllocator {
@@ -127,11 +128,22 @@ impl EntityAllocator {
         assert!(stride > 0);
         Self {
             next: Arc::new(AtomicU64::new(offset * BLOCK_SIZE_U64)),
-            stride: stride * BLOCK_SIZE_U64,
+            stride,
+            offset,
         }
     }
 
-    pub fn iter(&self) -> Allocate { Allocate::new(&self.next, self.stride) }
+    pub fn iter(&self) -> Allocate { Allocate::new(&self) }
+
+    pub fn address_space_contains(&self, entity: Entity) -> bool {
+        let block = entity.0 / BLOCK_SIZE_U64;
+        ((block - self.offset) % self.stride) == 0
+    }
+
+    fn next_block(&self) -> u64 {
+        self.next
+            .fetch_add(self.stride * BLOCK_SIZE_U64, Ordering::Relaxed)
+    }
 }
 
 impl Default for EntityAllocator {
@@ -139,20 +151,24 @@ impl Default for EntityAllocator {
 }
 
 pub struct Allocate<'a> {
-    shared: &'a AtomicU64,
-    stride: u64,
+    allocator: &'a EntityAllocator,
     base: u64,
     count: u64,
 }
 
 impl<'a> Allocate<'a> {
-    fn new(shared: &'a AtomicU64, stride: u64) -> Self {
+    fn new(allocator: &'a EntityAllocator) -> Self {
         Self {
-            shared,
-            stride,
+            allocator,
             base: 0,
             count: 0,
         }
+    }
+
+    pub fn is_allocated(&mut self, Entity(entity): Entity) -> bool {
+        let ceiling = self.base + BLOCK_SIZE_U64;
+        let in_range = entity < self.base || (entity < ceiling && entity >= self.base + self.count);
+        in_range && self.allocator.address_space_contains(Entity(entity))
     }
 }
 
@@ -162,9 +178,7 @@ impl<'a> Iterator for Allocate<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         if self.count == 0 {
-            self.base = self
-                .shared
-                .fetch_add(self.stride * BLOCK_SIZE_U64, Ordering::Relaxed);
+            self.base = self.allocator.next_block();
             self.count = BLOCK_SIZE_U64;
         }
 

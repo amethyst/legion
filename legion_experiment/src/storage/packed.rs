@@ -1,6 +1,6 @@
 use super::{
-    archetype::ArchetypeIndex, component::Component, ComponentSlice, ComponentSliceMut,
-    ComponentStorage, UnknownComponentStorage,
+    archetype::ArchetypeIndex, component::Component, ComponentMeta, ComponentSlice,
+    ComponentSliceMut, ComponentStorage, UnknownComponentStorage,
 };
 use std::{
     alloc::Layout,
@@ -25,12 +25,12 @@ impl<T> RawAlloc<T> {
     fn new(min_capacity: usize) -> Self {
         if size_of::<T>() == 0 {
             Self {
-                ptr: NonNull::new(std::mem::align_of::<T>() as *mut _).unwrap(),
+                ptr: NonNull::dangling(),
                 cap: !0,
             }
         } else if min_capacity == 0 {
             Self {
-                ptr: NonNull::new(std::mem::align_of::<T>() as *mut _).unwrap(),
+                ptr: NonNull::dangling(),
                 cap: 0,
             }
         } else {
@@ -340,6 +340,26 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
         self.index[arch_index] = index;
     }
 
+    fn move_archetype(
+        &mut self,
+        src_archetype: ArchetypeIndex,
+        dst_archetype: ArchetypeIndex,
+        dst: &mut dyn UnknownComponentStorage,
+        dst_frame_counter: u64,
+    ) {
+        let dst = dst.downcast_mut::<Self>().unwrap();
+        let src_index = self.index[src_archetype.0 as usize];
+        let dst_index = dst.index[dst_archetype.0 as usize];
+        std::mem::swap(
+            &mut self.allocations[src_index],
+            &mut dst.allocations[dst_index],
+        );
+        self.allocations[src_index] = ComponentVec::<T>::new();
+        self.slices[src_index] = self.allocations[src_index].as_raw_slice();
+        dst.slices[dst_index] = dst.allocations[dst_index].as_raw_slice();
+        unsafe { *dst.versions[dst_index].get() = dst_frame_counter };
+    }
+
     fn swap_remove(
         &mut self,
         frame_counter: u64,
@@ -388,6 +408,42 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
     }
 
     fn fragmentation(&self) -> f32 { self.fragmentation / self.entity_len as f32 }
+
+    fn element_vtable(&self) -> ComponentMeta { ComponentMeta::of::<T>() }
+
+    fn get_raw(&self, ArchetypeIndex(archetype): ArchetypeIndex) -> Option<(*const u8, usize)> {
+        let slice_index = *self.index.get(archetype as usize)?;
+        let (ptr, len) = self.slices.get(slice_index)?;
+        Some((ptr.as_ptr() as *const u8, *len))
+    }
+
+    unsafe fn get_mut_raw(
+        &self,
+        epoch: u64,
+        ArchetypeIndex(archetype): ArchetypeIndex,
+    ) -> Option<(*mut u8, usize)> {
+        let slice_index = *self.index.get(archetype as usize)?;
+        let (ptr, len) = self.slices.get(slice_index)?;
+        *self.versions.get_unchecked(slice_index).get() = epoch;
+        Some((ptr.as_ptr() as *mut u8, *len))
+    }
+
+    unsafe fn extend_memcopy_raw(
+        &mut self,
+        epoch: u64,
+        ArchetypeIndex(archetype): ArchetypeIndex,
+        ptr: *const u8,
+        count: usize,
+    ) {
+        let slice_index = self.index[archetype as usize];
+        let allocation = &mut self.allocations[slice_index];
+        let previous_fragmentation = allocation.estimate_fragmentation();
+        allocation.extend_memcopy(epoch, ptr as *const T, count);
+        self.slices[slice_index] = allocation.as_raw_slice();
+        self.fragmentation += allocation.estimate_fragmentation() - previous_fragmentation;
+        self.entity_len += count;
+        *self.versions[slice_index].get() = epoch;
+    }
 }
 
 impl<T: Component> Default for PackedStorage<T> {
@@ -410,17 +466,11 @@ impl<'a, T: Component> ComponentStorage<'a, T> for PackedStorage<T> {
     unsafe fn extend_memcopy(
         &mut self,
         epoch: u64,
-        ArchetypeIndex(archetype): ArchetypeIndex,
+        archetype: ArchetypeIndex,
         ptr: *const T,
         count: usize,
     ) {
-        let slice_index = self.index[archetype as usize];
-        let allocation = &mut self.allocations[slice_index];
-        let previous_fragmentation = allocation.estimate_fragmentation();
-        allocation.extend_memcopy(epoch, ptr, count);
-        self.slices[slice_index] = allocation.as_raw_slice();
-        self.fragmentation += allocation.estimate_fragmentation() - previous_fragmentation;
-        self.entity_len += count;
+        self.extend_memcopy_raw(epoch, archetype, ptr as *const u8, count);
     }
 
     fn ensure_capacity(

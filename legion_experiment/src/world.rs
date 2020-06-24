@@ -1,13 +1,17 @@
 use crate::entity::{Entity, EntityAllocator, EntityLocation, LocationMap};
 use crate::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use crate::{
-    query::{filter::EntityFilter, view::View, Query},
+    query::{
+        filter::{filter_fns::any, EntityFilter, LayoutFilter},
+        view::View,
+        Query,
+    },
     storage::{
         archetype::{Archetype, ArchetypeIndex, EntityLayout},
-        component::ComponentTypeId,
+        component::{Component, ComponentTypeId},
         group::{Group, GroupDef},
         index::SearchIndex,
-        ComponentIndex, Components, PackOptions,
+        ComponentIndex, Components, PackOptions, UnknownComponentStorage,
     },
     subworld::{ComponentAccess, SubWorld},
 };
@@ -18,8 +22,21 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UniverseId(u64);
+static UNIVERSE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+impl UniverseId {
+    fn next() -> Self { UniverseId(UNIVERSE_ID_COUNTER.fetch_add(1, Ordering::Relaxed)) }
+}
+
+impl Default for UniverseId {
+    fn default() -> Self { Self::next() }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Universe {
+    id: UniverseId,
     entity_allocator: EntityAllocator,
 }
 
@@ -28,6 +45,7 @@ impl Universe {
 
     pub fn sharded(n: u64, of: u64) -> Self {
         Self {
+            id: UniverseId::next(),
             entity_allocator: EntityAllocator::new(n, of),
         }
     }
@@ -36,6 +54,7 @@ impl Universe {
 
     pub fn create_world_with_options(&self, options: WorldOptions) -> World {
         World {
+            id: WorldId::next(self.id),
             entity_allocator: self.entity_allocator.clone(),
             ..World::with_options(options)
         }
@@ -54,15 +73,18 @@ pub trait EntityStore {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WorldId(u64);
+pub struct WorldId(UniverseId, u64);
 static WORLD_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl WorldId {
-    fn next() -> Self { WorldId(WORLD_ID_COUNTER.fetch_add(1, Ordering::Relaxed)) }
+    fn next(universe: UniverseId) -> Self {
+        WorldId(universe, WORLD_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+    fn universe(&self) -> UniverseId { self.0 }
 }
 
 impl Default for WorldId {
-    fn default() -> Self { Self::next() }
+    fn default() -> Self { Self::next(UniverseId::default()) }
 }
 
 #[derive(Default)]
@@ -106,7 +128,7 @@ impl World {
             }
         }
         Self {
-            id: WorldId::next(),
+            id: WorldId::default(),
             index: SearchIndex::default(),
             components: Components::default(),
             groups: options.groups,
@@ -275,8 +297,8 @@ impl World {
     fn insert_archetype(&mut self, layout: EntityLayout) -> ArchetypeIndex {
         // create and insert new archetype
         self.index.push(&layout);
-        self.archetypes.push(Archetype::new(layout));
-        let arch_index = ArchetypeIndex(self.archetypes.len() as u32 - 1);
+        let arch_index = ArchetypeIndex(self.archetypes.len() as u32);
+        self.archetypes.push(Archetype::new(arch_index, layout));
         let archetype = &self.archetypes[self.archetypes.len() - 1];
 
         // find all groups which contain each component
@@ -346,6 +368,109 @@ impl World {
         _: &'q Query<V, F>,
     ) -> (SubWorld, SubWorld) {
         self.split::<V>()
+    }
+
+    pub fn move_from(&mut self, other: &mut World) -> Result<HashMap<Entity, Entity>, MergeError> {
+        self.merge_from(other, &any(), &mut Move, EntityPolicy::default())
+    }
+
+    pub fn clone_from(
+        &mut self,
+        other: &mut World,
+        cloner: &mut Duplicate,
+    ) -> Result<HashMap<Entity, Entity>, MergeError> {
+        self.merge_from(other, &any(), cloner, EntityPolicy::default())
+    }
+
+    pub fn merge_from<F: LayoutFilter, M: Merger>(
+        &mut self,
+        other: &mut World,
+        filter: &F,
+        merger: &mut M,
+        policy: EntityPolicy,
+    ) -> Result<HashMap<Entity, Entity>, MergeError> {
+        let mut entity_mappings = HashMap::new();
+        let mut to_push = Vec::new();
+
+        let shared_universe = self.id.universe() == other.id.universe();
+
+        for src_arch in other.archetypes.iter_mut().filter(|arch| {
+            filter
+                .matches_layout(arch.layout().component_types())
+                .is_pass()
+        }) {
+            let allocator_clone = self.entity_allocator.clone();
+            let mut allocator = allocator_clone.iter();
+
+            to_push.reserve(src_arch.entities().len());
+
+            match policy {
+                EntityPolicy::Move(ref conflict_policy) => {
+                    for src_entity in src_arch.entities() {
+                        let owns_address =
+                            self.entity_allocator.address_space_contains(*src_entity);
+                        let conflicted = (!shared_universe && owns_address)
+                            || self.entities.get(*src_entity).is_some();
+                        let entity = if conflicted {
+                            match conflict_policy {
+                                ConflictPolicy::Error => {
+                                    return Err(MergeError::ConflictingEntityIDs)
+                                }
+                                ConflictPolicy::Reallocate => {
+                                    let dst_entity = allocator.next().unwrap();
+                                    entity_mappings.insert(*src_entity, dst_entity);
+                                    dst_entity
+                                }
+                                ConflictPolicy::Replace => {
+                                    if owns_address && !allocator.is_allocated(*src_entity) {
+                                        return Err(MergeError::InvalidFutureEntityID);
+                                    }
+                                    self.remove(*src_entity);
+                                    *src_entity
+                                }
+                            }
+                        } else {
+                            *src_entity
+                        };
+
+                        to_push.push(entity);
+                    }
+                }
+                EntityPolicy::Reallocate => {
+                    for src_entity in src_arch.entities() {
+                        let dst_entity = allocator.next().unwrap();
+                        entity_mappings.insert(*src_entity, dst_entity);
+                        to_push.push(dst_entity);
+                    }
+                }
+            }
+
+            let layout = merger.convert_layout((**src_arch.layout()).clone());
+            let dst_arch_index = self.insert_archetype(layout);
+            let dst_arch = &mut self.archetypes[dst_arch_index.0 as usize];
+            let mut writer = ArchetypeWriter::new(
+                self.epoch,
+                dst_arch_index,
+                dst_arch,
+                self.components.get_multi_mut(),
+            );
+
+            for entity in to_push.drain(..) {
+                writer.push(entity);
+            }
+
+            merger.merge_archetype(
+                &mut other.entities,
+                src_arch,
+                &mut other.components,
+                &mut writer,
+            );
+
+            let (base, entities) = writer.inserted();
+            self.entities.insert(entities, dst_arch_index, base);
+        }
+
+        Ok(entity_mappings)
     }
 }
 
@@ -451,10 +576,201 @@ impl<'a> StorageAccessor<'a> {
     }
 }
 
+pub trait Merger {
+    fn convert_layout(&mut self, source_layout: EntityLayout) -> EntityLayout { source_layout }
+
+    fn merge_archetype(
+        &mut self,
+        src_entities: &mut LocationMap,
+        src_arch: &mut Archetype,
+        src_components: &mut Components,
+        dst: &mut ArchetypeWriter,
+    );
+}
+
+pub struct Move;
+
+impl Merger for Move {
+    fn merge_archetype(
+        &mut self,
+        src_entities: &mut LocationMap,
+        src_arch: &mut Archetype,
+        src_components: &mut Components,
+        dst: &mut ArchetypeWriter,
+    ) {
+        for component in src_arch.layout().component_types() {
+            let src_storage = src_components.get_mut(*component).unwrap();
+            let mut dst_storage = dst.claim_components_unknown(*component);
+            dst_storage.move_archetype(src_arch.index(), src_storage);
+        }
+
+        for entity in src_arch.entities_mut().drain(..) {
+            src_entities.remove(entity);
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Duplicate {
+    duplicate_fns: HashMap<
+        ComponentTypeId,
+        (
+            ComponentTypeId,
+            fn() -> Box<dyn UnknownComponentStorage>,
+            Box<dyn FnMut(&Archetype, &mut dyn UnknownComponentStorage, &mut ArchetypeWriter)>,
+        ),
+    >,
+}
+
+impl Duplicate {
+    pub fn new() -> Self { Self::default() }
+
+    pub fn register_copy<T: Component + Copy>(&mut self) {
+        use crate::storage::ComponentStorage;
+
+        let type_id = ComponentTypeId::of::<T>();
+        let constructor = || Box::new(T::Storage::default()) as Box<dyn UnknownComponentStorage>;
+        let convert = Box::new(
+            move |src_arch: &Archetype,
+                  src: &mut dyn UnknownComponentStorage,
+                  dst: &mut ArchetypeWriter| {
+                let src = src.downcast_ref::<T::Storage>().unwrap();
+                let mut dst = dst.claim_components::<T>();
+
+                let src_slice = src.get(src_arch.index()).unwrap().into_slice();
+                unsafe { dst.extend_memcopy(src_slice.as_ptr(), src_slice.len()) };
+            },
+        );
+
+        self.duplicate_fns
+            .insert(type_id, (type_id, constructor, convert));
+    }
+
+    pub fn register_clone<T: Component + Clone>(&mut self) {
+        self.register_convert::<T, T, _>(|source| source.clone());
+    }
+
+    pub fn register_convert<
+        Source: Component,
+        Target: Component,
+        F: FnMut(&Source) -> Target + 'static,
+    >(
+        &mut self,
+        mut convert: F,
+    ) {
+        use crate::storage::ComponentStorage;
+
+        let source_type = ComponentTypeId::of::<Source>();
+        let dest_type = ComponentTypeId::of::<Target>();
+        let constructor =
+            || Box::new(Target::Storage::default()) as Box<dyn UnknownComponentStorage>;
+        let convert = Box::new(
+            move |src_arch: &Archetype,
+                  src: &mut dyn UnknownComponentStorage,
+                  dst: &mut ArchetypeWriter| {
+                let src = src.downcast_ref::<Source::Storage>().unwrap();
+                let mut dst = dst.claim_components::<Target>();
+
+                let src_slice = src.get(src_arch.index()).unwrap().into_slice();
+                dst.ensure_capacity(src_slice.len());
+                for component in src_slice {
+                    let component = convert(component);
+
+                    unsafe {
+                        dst.extend_memcopy(&component as *const Target, 1);
+                        std::mem::forget(component);
+                    }
+                }
+            },
+        );
+
+        self.duplicate_fns
+            .insert(source_type, (dest_type, constructor, convert));
+    }
+
+    pub fn register_convert_raw(
+        &mut self,
+        src_type: ComponentTypeId,
+        dst_type: ComponentTypeId,
+        constructor: fn() -> Box<dyn UnknownComponentStorage>,
+        duplicate_fn: Box<
+            dyn FnMut(&Archetype, &mut dyn UnknownComponentStorage, &mut ArchetypeWriter),
+        >,
+    ) {
+        self.duplicate_fns
+            .insert(src_type, (dst_type, constructor, duplicate_fn));
+    }
+}
+
+impl Merger for Duplicate {
+    fn convert_layout(&mut self, source_layout: EntityLayout) -> EntityLayout {
+        let mut layout = EntityLayout::new();
+        for src_type in source_layout.component_types() {
+            if let Some((dst_type, constructor, _)) = self.duplicate_fns.get(src_type) {
+                unsafe { layout.register_component_raw(*dst_type, *constructor) };
+            }
+        }
+
+        layout
+    }
+
+    fn merge_archetype(
+        &mut self,
+        _: &mut LocationMap,
+        src_arch: &mut Archetype,
+        src_components: &mut Components,
+        dst: &mut ArchetypeWriter,
+    ) {
+        for src_type in src_arch.layout().component_types() {
+            if let Some((_, _, convert)) = self.duplicate_fns.get_mut(src_type) {
+                let src_storage = src_components.get_mut(*src_type).unwrap();
+                convert(src_arch, src_storage, dst);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum MergeError {
+    ConflictingEntityIDs,
+    InvalidFutureEntityID,
+}
+
+/// Determines how world merges handle entity IDs.
+pub enum EntityPolicy {
+    /// Entity IDs will be moved from the source world into the destination.
+    Move(ConflictPolicy),
+    /// Entity IDs will be re-allocated in the destination world.
+    Reallocate,
+}
+
+impl Default for EntityPolicy {
+    fn default() -> Self { Self::Move(ConflictPolicy::default()) }
+}
+
+/// Determines how world merges handle entity ID conflicts.
+pub enum ConflictPolicy {
+    /// Return an error result.
+    Error,
+    /// Keep the ID, replacing any existing entity in the destination with the source entity.
+    Replace,
+    /// Allocate a new ID for the source entity, leaving any existing entities in the destination as-is.
+    Reallocate,
+}
+
+impl Default for ConflictPolicy {
+    fn default() -> Self { Self::Error }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::insert::IntoSoa;
+    use crate::{insert::IntoSoa, query::filter::filter_fns::any};
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Pos(f32, f32, f32);
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Rot(f32, f32, f32);
 
     #[test]
     fn create() { let _ = World::default(); }
@@ -598,5 +914,231 @@ mod test {
         }
 
         assert_eq!(count, 30000);
+    }
+
+    #[test]
+    fn move_from() {
+        let universe = Universe::new();
+        let mut a = universe.create_world();
+        let mut b = universe.create_world();
+
+        let entity_a = a.extend(vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ])[0];
+
+        let entity_b = b.extend(vec![
+            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
+            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
+        ])[0];
+
+        b.merge_from(&mut a, &any(), &mut Move, EntityPolicy::default())
+            .unwrap();
+
+        assert!(a.entry(entity_a).is_none());
+        assert_eq!(
+            *b.entry(entity_b).unwrap().get_component::<Pos>().unwrap(),
+            Pos(7., 8., 9.)
+        );
+        assert_eq!(
+            *b.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
+            Pos(1., 2., 3.)
+        );
+    }
+
+    #[test]
+    fn clone_from() {
+        let universe = Universe::new();
+        let mut a = universe.create_world();
+        let mut b = universe.create_world();
+
+        let entity_a = a.extend(vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ])[0];
+
+        let entity_b = b.extend(vec![
+            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
+            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
+        ])[0];
+
+        let mut merger = Duplicate::default();
+        merger.register_copy::<Pos>();
+        merger.register_clone::<Rot>();
+
+        b.merge_from(
+            &mut a,
+            &any(),
+            &mut merger,
+            EntityPolicy::Move(ConflictPolicy::Error),
+        )
+        .unwrap();
+
+        assert_eq!(
+            *a.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
+            Pos(1., 2., 3.)
+        );
+        assert_eq!(
+            *b.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
+            Pos(1., 2., 3.)
+        );
+        assert_eq!(
+            *b.entry(entity_b).unwrap().get_component::<Pos>().unwrap(),
+            Pos(7., 8., 9.)
+        );
+
+        assert_eq!(
+            *a.entry(entity_a).unwrap().get_component::<Rot>().unwrap(),
+            Rot(0.1, 0.2, 0.3)
+        );
+        assert_eq!(
+            *b.entry(entity_a).unwrap().get_component::<Rot>().unwrap(),
+            Rot(0.1, 0.2, 0.3)
+        );
+        assert_eq!(
+            *b.entry(entity_b).unwrap().get_component::<Rot>().unwrap(),
+            Rot(0.7, 0.8, 0.9)
+        );
+    }
+
+    #[test]
+    fn clone_from_convert() {
+        let universe = Universe::new();
+        let mut a = universe.create_world();
+        let mut b = universe.create_world();
+
+        let entity_a = a.extend(vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ])[0];
+
+        b.extend(vec![
+            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
+            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
+        ]);
+
+        let mut merger = Duplicate::default();
+        merger.register_convert::<Pos, f32, _>(|comp| comp.0 as f32);
+
+        b.merge_from(
+            &mut a,
+            &any(),
+            &mut merger,
+            EntityPolicy::Move(ConflictPolicy::Error),
+        )
+        .unwrap();
+
+        assert_eq!(
+            *a.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
+            Pos(1., 2., 3.)
+        );
+        assert_eq!(
+            *b.entry(entity_a).unwrap().get_component::<f32>().unwrap(),
+            1f32
+        );
+
+        assert_eq!(
+            *a.entry(entity_a).unwrap().get_component::<Rot>().unwrap(),
+            Rot(0.1, 0.2, 0.3)
+        );
+        assert!(b.entry(entity_a).unwrap().get_component::<Rot>().is_none());
+    }
+
+    #[test]
+    fn move_conflict_reallocate() {
+        let mut a = World::default();
+        let mut b = World::default();
+
+        let entity_a = a.extend(vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ])[0];
+
+        let entity_b = b.extend(vec![
+            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
+            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
+        ])[0];
+
+        let mappings = b
+            .merge_from(
+                &mut a,
+                &any(),
+                &mut Move,
+                EntityPolicy::Move(ConflictPolicy::Reallocate),
+            )
+            .unwrap();
+
+        assert_eq!(mappings.len(), 2);
+        assert!(a.entry(entity_a).is_none());
+        assert_eq!(
+            *b.entry(entity_b).unwrap().get_component::<Pos>().unwrap(),
+            Pos(7., 8., 9.)
+        );
+        assert_eq!(
+            *b.entry(*mappings.get(&entity_a).unwrap())
+                .unwrap()
+                .get_component::<Pos>()
+                .unwrap(),
+            Pos(1., 2., 3.)
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn move_conflict_error() {
+        let mut a = World::default();
+        let mut b = World::default();
+
+        a.extend(vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ]);
+
+        b.extend(vec![
+            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
+            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
+        ]);
+
+        b.merge_from(
+            &mut a,
+            &any(),
+            &mut Move,
+            EntityPolicy::Move(ConflictPolicy::Error),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn move_conflict_replace() {
+        let mut a = World::default();
+        let mut b = World::default();
+
+        let entity = a.extend(vec![
+            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
+            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
+        ])[0];
+
+        b.extend(vec![
+            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
+            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
+        ]);
+
+        assert_eq!(
+            *b.entry(entity).unwrap().get_component::<Pos>().unwrap(),
+            Pos(7., 8., 9.)
+        );
+
+        b.merge_from(
+            &mut a,
+            &any(),
+            &mut Move,
+            EntityPolicy::Move(ConflictPolicy::Replace),
+        )
+        .unwrap();
+
+        assert_eq!(
+            *b.entry(entity).unwrap().get_component::<Pos>().unwrap(),
+            Pos(1., 2., 3.)
+        );
     }
 }

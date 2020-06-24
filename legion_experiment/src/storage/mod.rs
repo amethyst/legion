@@ -16,11 +16,49 @@ pub mod index;
 pub mod packed;
 pub mod slicevec;
 
+pub struct ComponentMeta {
+    size: usize,
+    align: usize,
+    drop_fn: Option<fn(*mut u8)>,
+}
+
+impl ComponentMeta {
+    /// Gets the component meta of component type `T`.
+    pub fn of<T: Component>() -> Self {
+        ComponentMeta {
+            size: std::mem::size_of::<T>(),
+            align: std::mem::align_of::<T>(),
+            drop_fn: if std::mem::needs_drop::<T>() {
+                Some(|ptr| unsafe { std::ptr::drop_in_place(ptr as *mut T) })
+            } else {
+                None
+            },
+        }
+    }
+
+    pub fn size(&self) -> usize { self.size }
+
+    pub fn align(&self) -> usize { self.align }
+
+    pub unsafe fn drop(&self, value: *mut u8) {
+        if let Some(drop_fn) = self.drop_fn {
+            drop_fn(value)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct ComponentIndex(pub(crate) usize);
 
 pub trait UnknownComponentStorage: Downcast {
     fn insert_archetype(&mut self, archetype: ArchetypeIndex, index: Option<usize>);
+    fn move_archetype(
+        &mut self,
+        src_archetype: ArchetypeIndex,
+        dst_archetype: ArchetypeIndex,
+        dst: &mut dyn UnknownComponentStorage,
+        dst_frame_counter: u64,
+    );
     fn move_component(
         &mut self,
         epoch: u64,
@@ -31,6 +69,17 @@ pub trait UnknownComponentStorage: Downcast {
     fn swap_remove(&mut self, epoch: u64, archetype: ArchetypeIndex, index: usize);
     fn pack(&mut self, epoch_threshold: u64) -> usize;
     fn fragmentation(&self) -> f32;
+    fn element_vtable(&self) -> ComponentMeta;
+    fn get_raw(&self, archetype: ArchetypeIndex) -> Option<(*const u8, usize)>;
+    unsafe fn get_mut_raw(&self, epoch: u64, archetype: ArchetypeIndex)
+        -> Option<(*mut u8, usize)>;
+    unsafe fn extend_memcopy_raw(
+        &mut self,
+        epoch: u64,
+        archetype: ArchetypeIndex,
+        ptr: *const u8,
+        len: usize,
+    );
 }
 impl_downcast!(UnknownComponentStorage);
 
@@ -278,5 +327,20 @@ impl<'a> MultiMut<'a> {
             .storages
             .get(&type_id)
             .and_then(|cell| { &mut *cell.get() }.downcast_mut())
+    }
+
+    pub unsafe fn claim_unknown(
+        &mut self,
+        type_id: ComponentTypeId,
+    ) -> Option<&'a mut dyn UnknownComponentStorage> {
+        #[cfg(debug_assertions)]
+        {
+            assert!(!self.claimed.contains(&type_id));
+            self.claimed.insert(type_id);
+        }
+        self.components
+            .storages
+            .get(&type_id)
+            .map(|cell| &mut **cell.get())
     }
 }

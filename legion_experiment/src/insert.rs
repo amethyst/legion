@@ -3,7 +3,7 @@ use crate::query::filter::{FilterResult, LayoutFilter};
 use crate::storage::{
     archetype::{Archetype, ArchetypeIndex, EntityLayout},
     component::{Component, ComponentTypeId},
-    ComponentIndex, ComponentStorage, MultiMut,
+    ComponentIndex, ComponentStorage, MultiMut, UnknownComponentStorage,
 };
 use std::marker::PhantomData;
 
@@ -34,8 +34,9 @@ impl<'a> ArchetypeWriter<'a> {
         }
     }
 
-    pub fn claim_components<T: Component>(&mut self) -> ComponentWriter<'a, T> {
-        let type_id = ComponentTypeId::of::<T>();
+    pub fn archetype(&self) -> &Archetype { &self.archetype }
+
+    fn mark_claimed(&mut self, type_id: ComponentTypeId) {
         let component_index = self
             .archetype
             .layout()
@@ -46,9 +47,27 @@ impl<'a> ArchetypeWriter<'a> {
         let mask = 1u128 << component_index;
         assert!(self.claimed & mask == 0, "component type already claimed");
         self.claimed |= mask;
+    }
+
+    pub fn claim_components<T: Component>(&mut self) -> ComponentWriter<'a, T> {
+        let type_id = ComponentTypeId::of::<T>();
+        self.mark_claimed(type_id);
 
         ComponentWriter {
             components: unsafe { self.components.claim::<T>() }.unwrap(),
+            archetype: self.arch_index,
+            epoch: self.epoch,
+        }
+    }
+
+    pub fn claim_components_unknown(
+        &mut self,
+        type_id: ComponentTypeId,
+    ) -> UnknownComponentWriter<'a> {
+        self.mark_claimed(type_id);
+
+        UnknownComponentWriter {
+            components: unsafe { self.components.claim_unknown(type_id) }.unwrap(),
             archetype: self.arch_index,
             epoch: self.epoch,
         }
@@ -78,14 +97,30 @@ pub struct ComponentWriter<'a, T: Component> {
 }
 
 impl<'a, T: Component> ComponentWriter<'a, T> {
-    unsafe fn extend_memcopy(&mut self, ptr: *const T, len: usize) {
+    pub unsafe fn extend_memcopy(&mut self, ptr: *const T, len: usize) {
         self.components
             .extend_memcopy(self.epoch, self.archetype, ptr, len)
     }
 
-    fn ensure_capacity(&mut self, space: usize) {
+    pub fn ensure_capacity(&mut self, space: usize) {
         self.components
             .ensure_capacity(self.epoch, self.archetype, space);
+    }
+}
+
+pub struct UnknownComponentWriter<'a> {
+    components: &'a mut dyn UnknownComponentStorage,
+    archetype: ArchetypeIndex,
+    epoch: u64,
+}
+
+impl<'a> UnknownComponentWriter<'a> {
+    pub fn move_archetype(
+        &mut self,
+        src_archetype: ArchetypeIndex,
+        src: &mut dyn UnknownComponentStorage,
+    ) {
+        src.move_archetype(src_archetype, self.archetype, self.components, self.epoch);
     }
 }
 

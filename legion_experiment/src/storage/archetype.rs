@@ -38,17 +38,21 @@ impl IndexMut<ArchetypeIndex> for Vec<Archetype> {
 
 #[derive(Debug)]
 pub struct Archetype {
+    index: ArchetypeIndex,
     entities: Vec<Entity>,
     layout: Arc<EntityLayout>,
 }
 
 impl Archetype {
-    pub fn new(layout: EntityLayout) -> Self {
+    pub fn new(index: ArchetypeIndex, layout: EntityLayout) -> Self {
         Self {
+            index,
             layout: Arc::new(layout),
             entities: Vec::new(),
         }
     }
+
+    pub fn index(&self) -> ArchetypeIndex { self.index }
 
     pub fn layout(&self) -> &Arc<EntityLayout> { &self.layout }
 
@@ -57,7 +61,7 @@ impl Archetype {
     pub fn entities_mut(&mut self) -> &mut Vec<Entity> { &mut self.entities }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct EntityLayout {
     components: Vec<ComponentTypeId>,
     component_constructors: Vec<fn() -> Box<dyn UnknownComponentStorage>>,
