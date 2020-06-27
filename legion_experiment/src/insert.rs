@@ -115,12 +115,29 @@ pub struct UnknownComponentWriter<'a> {
 }
 
 impl<'a> UnknownComponentWriter<'a> {
-    pub fn move_archetype(
+    pub fn move_archetype_from(
         &mut self,
         src_archetype: ArchetypeIndex,
         src: &mut dyn UnknownComponentStorage,
     ) {
-        src.move_archetype(src_archetype, self.archetype, self.components, self.epoch);
+        src.transfer_archetype(src_archetype, self.archetype, self.components, self.epoch);
+    }
+
+    pub fn move_component_from(
+        &mut self,
+        src_archetype: ArchetypeIndex,
+        src_component: ComponentIndex,
+        src_epoch: u64,
+        src: &mut dyn UnknownComponentStorage,
+    ) {
+        src.transfer_component(
+            src_archetype,
+            src_component,
+            self.archetype,
+            self.components,
+            src_epoch,
+            self.epoch,
+        );
     }
 }
 

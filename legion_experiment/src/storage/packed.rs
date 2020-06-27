@@ -1,5 +1,5 @@
 use super::{
-    archetype::ArchetypeIndex, component::Component, ComponentMeta, ComponentSlice,
+    archetype::ArchetypeIndex, component::Component, ComponentIndex, ComponentMeta, ComponentSlice,
     ComponentSliceMut, ComponentStorage, UnknownComponentStorage,
 };
 use std::{
@@ -290,32 +290,62 @@ pub struct PackedStorage<T: Component> {
     versions: Vec<UnsafeCell<u64>>,
     // Ordered allocation metadata
     allocations: Vec<ComponentVec<T>>,
-    // An estimate of the performance lost due to archetype fragmentation
-    fragmentation: f32,
+}
+
+impl<T: Component> PackedStorage<T> {
+    fn swap_remove_internal(
+        &mut self,
+        frame_counter: u64,
+        ArchetypeIndex(archetype): ArchetypeIndex,
+        ComponentIndex(index): ComponentIndex,
+    ) -> T {
+        let slice_index = self.index[archetype as usize];
+        let allocation = &mut self.allocations[slice_index];
+        let component = allocation.swap_remove(frame_counter, index as usize);
+        self.update_slice(slice_index);
+        self.entity_len -= 1;
+        component
+    }
+
+    #[inline]
+    fn update_slice(&mut self, slice_index: usize) {
+        self.slices[slice_index] = self.allocations[slice_index].as_raw_slice();
+    }
+
+    fn index(&self, ArchetypeIndex(archetype): ArchetypeIndex) -> usize {
+        self.index[archetype as usize]
+    }
 }
 
 impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
     fn move_component(
         &mut self,
         epoch: u64,
-        ArchetypeIndex(source): ArchetypeIndex,
-        index: usize,
-        ArchetypeIndex(dst): ArchetypeIndex,
+        source: ArchetypeIndex,
+        index: ComponentIndex,
+        dst: ArchetypeIndex,
     ) {
-        let src_slice_index = self.index[source as usize];
-        let dst_slice_index = self.index[dst as usize];
+        // find archetype locations
+        let src_slice_index = self.index(source);
+        let dst_slice_index = self.index(dst);
+
+        // remove component from source slice
         let src_allocation = &mut self.allocations[src_slice_index];
-        let previous_fragmentation = src_allocation.estimate_fragmentation();
-        let value = src_allocation.swap_remove(epoch, index);
-        self.fragmentation += src_allocation.estimate_fragmentation() - previous_fragmentation;
+        let value = src_allocation.swap_remove(epoch, index.0 as usize);
+
+        // insert component into destination slice
+        let dst_allocation = &mut self.allocations[dst_slice_index];
         unsafe {
-            let dst_allocation = &mut self.allocations[dst_slice_index];
-            let previous_fragmentation = dst_allocation.estimate_fragmentation();
             dst_allocation.extend_memcopy(epoch, &value as *const _, 1);
-            std::mem::forget(value);
             *self.versions[dst_slice_index].get() = next_component_version();
-            self.fragmentation += dst_allocation.estimate_fragmentation() - previous_fragmentation;
         }
+
+        // update slice pointers
+        self.update_slice(src_slice_index);
+        self.update_slice(dst_slice_index);
+
+        // forget component to prevent it being dropped (we copied it into the destination)
+        std::mem::forget(value);
     }
 
     fn insert_archetype(&mut self, archetype: ArchetypeIndex, index: Option<usize>) {
@@ -340,7 +370,7 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
         self.index[arch_index] = index;
     }
 
-    fn move_archetype(
+    fn transfer_archetype(
         &mut self,
         src_archetype: ArchetypeIndex,
         dst_archetype: ArchetypeIndex,
@@ -348,31 +378,69 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
         dst_frame_counter: u64,
     ) {
         let dst = dst.downcast_mut::<Self>().unwrap();
-        let src_index = self.index[src_archetype.0 as usize];
-        let dst_index = dst.index[dst_archetype.0 as usize];
-        std::mem::swap(
-            &mut self.allocations[src_index],
-            &mut dst.allocations[dst_index],
-        );
-        self.allocations[src_index] = ComponentVec::<T>::new();
-        self.slices[src_index] = self.allocations[src_index].as_raw_slice();
-        dst.slices[dst_index] = dst.allocations[dst_index].as_raw_slice();
-        unsafe { *dst.versions[dst_index].get() = dst_frame_counter };
+        let src_index = self.index(src_archetype);
+        let dst_index = dst.index(dst_archetype);
+
+        // update total counts
+        let count = self.allocations[src_index].len();
+        self.entity_len -= count;
+        dst.entity_len += count;
+
+        if dst.allocations[dst_index].len() == 0 {
+            // fast path:
+            // swap the allocations
+            std::mem::swap(
+                &mut self.allocations[src_index],
+                &mut dst.allocations[dst_index],
+            );
+
+            // bump destination version
+            unsafe { *dst.versions[dst_index].get() = dst_frame_counter };
+        } else {
+            // memcopy components into the destination
+            let (ptr, len) = self.get_raw(src_archetype).unwrap();
+            unsafe { dst.extend_memcopy_raw(dst_frame_counter, dst_archetype, ptr, len) };
+
+            // clear and forget source
+            let mut swapped = ComponentVec::<T>::new();
+            std::mem::swap(&mut self.allocations[src_index], &mut swapped);
+            std::mem::forget(swapped);
+        }
+
+        // update slice pointers
+        self.update_slice(src_index);
+        dst.update_slice(dst_index);
+    }
+
+    /// Moves a component to a new storage.
+    fn transfer_component(
+        &mut self,
+        src_archetype: ArchetypeIndex,
+        src_component: ComponentIndex,
+        dst_archetype: ArchetypeIndex,
+        dst: &mut dyn UnknownComponentStorage,
+        src_epoch: u64,
+        dst_epoch: u64,
+    ) {
+        let component = self.swap_remove_internal(src_epoch, src_archetype, src_component);
+        unsafe {
+            dst.extend_memcopy_raw(
+                dst_epoch,
+                dst_archetype,
+                &component as *const T as *const u8,
+                1,
+            )
+        };
+        std::mem::forget(component);
     }
 
     fn swap_remove(
         &mut self,
         frame_counter: u64,
-        ArchetypeIndex(archetype): ArchetypeIndex,
-        index: usize,
+        archetype: ArchetypeIndex,
+        index: ComponentIndex,
     ) {
-        let slice_index = self.index[archetype as usize];
-        let allocation = &mut self.allocations[slice_index];
-        let previous_fragmentation = allocation.estimate_fragmentation();
-        allocation.swap_remove(frame_counter, index);
-        self.slices[slice_index] = allocation.as_raw_slice();
-        self.fragmentation += allocation.estimate_fragmentation() - previous_fragmentation;
-        self.entity_len -= 1;
+        self.swap_remove_internal(frame_counter, archetype, index);
     }
 
     fn pack(&mut self, epoch_threshold: u64) -> usize {
@@ -407,7 +475,12 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
         }
     }
 
-    fn fragmentation(&self) -> f32 { self.fragmentation / self.entity_len as f32 }
+    fn fragmentation(&self) -> f32 {
+        self.allocations
+            .iter()
+            .fold(0f32, |x, y| x + y.estimate_fragmentation())
+            / self.entity_len as f32
+    }
 
     fn element_vtable(&self) -> ComponentMeta { ComponentMeta::of::<T>() }
 
@@ -437,10 +510,8 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
     ) {
         let slice_index = self.index[archetype as usize];
         let allocation = &mut self.allocations[slice_index];
-        let previous_fragmentation = allocation.estimate_fragmentation();
         allocation.extend_memcopy(epoch, ptr as *const T, count);
         self.slices[slice_index] = allocation.as_raw_slice();
-        self.fragmentation += allocation.estimate_fragmentation() - previous_fragmentation;
         self.entity_len += count;
         *self.versions[slice_index].get() = epoch;
     }
@@ -453,7 +524,6 @@ impl<T: Component> Default for PackedStorage<T> {
             slices: Vec::new(),
             versions: Vec::new(),
             allocations: Vec::new(),
-            fragmentation: 0f32,
             entity_len: 0,
         }
     }
@@ -623,7 +693,7 @@ mod test {
             std::mem::forget(components);
         }
 
-        storage.swap_remove(0, ArchetypeIndex(0), 0);
+        storage.swap_remove(0, ArchetypeIndex(0), ComponentIndex(0));
 
         unsafe {
             let slice = storage.get_mut(ArchetypeIndex(0)).unwrap();
@@ -643,7 +713,7 @@ mod test {
             std::mem::forget(components);
         }
 
-        storage.swap_remove(0, ArchetypeIndex(0), 2);
+        storage.swap_remove(0, ArchetypeIndex(0), ComponentIndex(2));
 
         unsafe {
             let slice = storage.get_mut(ArchetypeIndex(0)).unwrap();

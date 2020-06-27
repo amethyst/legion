@@ -51,24 +51,47 @@ impl ComponentMeta {
 pub struct ComponentIndex(pub(crate) usize);
 
 pub trait UnknownComponentStorage: Downcast {
+    /// Inserts a new empty component slice for an archetype into this storage.
     fn insert_archetype(&mut self, archetype: ArchetypeIndex, index: Option<usize>);
-    fn move_archetype(
+
+    /// Moves an archetype's component slice to a new storage.
+    fn transfer_archetype(
         &mut self,
         src_archetype: ArchetypeIndex,
         dst_archetype: ArchetypeIndex,
         dst: &mut dyn UnknownComponentStorage,
-        dst_frame_counter: u64,
+        dst_epoch: u64,
     );
+
+    /// Moves a component to a new storage.
+    fn transfer_component(
+        &mut self,
+        src_archetype: ArchetypeIndex,
+        src_component: ComponentIndex,
+        dst_archetype: ArchetypeIndex,
+        dst: &mut dyn UnknownComponentStorage,
+        src_epoch: u64,
+        dst_epoch: u64,
+    );
+
+    /// Moves a component from one archetype to another.
     fn move_component(
         &mut self,
         epoch: u64,
         source: ArchetypeIndex,
-        index: usize,
+        index: ComponentIndex,
         dst: ArchetypeIndex,
     );
-    fn swap_remove(&mut self, epoch: u64, archetype: ArchetypeIndex, index: usize);
+
+    /// Removes a component from an archetype slice, swapping it with the last component in the slice.
+    fn swap_remove(&mut self, epoch: u64, archetype: ArchetypeIndex, index: ComponentIndex);
+
+    /// Packs archetype slices.
     fn pack(&mut self, epoch_threshold: u64) -> usize;
+
+    /// A heuristic estimating cache misses for an iteration through all components due to archetype fragmentation.
     fn fragmentation(&self) -> f32;
+
     fn element_vtable(&self) -> ComponentMeta;
     fn get_raw(&self, archetype: ArchetypeIndex) -> Option<(*const u8, usize)>;
     unsafe fn get_mut_raw(&self, epoch: u64, archetype: ArchetypeIndex)

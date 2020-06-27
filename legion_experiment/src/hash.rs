@@ -1,7 +1,7 @@
 use std::hash::Hasher;
 
 #[derive(Default)]
-pub(super) struct ComponentTypeIdHasher(u64);
+pub struct ComponentTypeIdHasher(u64);
 
 impl Hasher for ComponentTypeIdHasher {
     fn finish(&self) -> u64 { self.0 }
@@ -13,7 +13,7 @@ impl Hasher for ComponentTypeIdHasher {
 }
 
 #[derive(Default)]
-pub(super) struct U64Hasher(u64);
+pub struct U64Hasher(u64);
 
 impl Hasher for U64Hasher {
     fn finish(&self) -> u64 { self.0 }

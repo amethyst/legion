@@ -33,10 +33,12 @@ impl EntityLocation {
     pub fn component(&self) -> ComponentIndex { self.1 }
 }
 
+pub type EntityHasher = BuildHasherDefault<U64Hasher>;
+
 #[derive(Clone, Default)]
 pub struct LocationMap {
     len: usize,
-    blocks: HashMap<u64, Box<[Option<EntityLocation>; BLOCK_SIZE]>, BuildHasherDefault<U64Hasher>>,
+    blocks: HashMap<u64, Box<[Option<EntityLocation>; BLOCK_SIZE]>, EntityHasher>,
 }
 
 impl Debug for LocationMap {

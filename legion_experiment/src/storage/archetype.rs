@@ -2,7 +2,10 @@ use super::{
     component::{Component, ComponentTypeId},
     UnknownComponentStorage,
 };
-use crate::entity::Entity;
+use crate::{
+    entity::Entity,
+    query::filter::{FilterResult, LayoutFilter},
+};
 use std::{
     ops::{Index, IndexMut},
     sync::Arc,
@@ -106,5 +109,14 @@ impl EntityLayout {
 
     pub fn has_component_by_id(&self, type_id: ComponentTypeId) -> bool {
         self.components.contains(&type_id)
+    }
+}
+
+impl LayoutFilter for EntityLayout {
+    fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
+        FilterResult::Match(
+            components.len() == self.components.len()
+                && self.components.iter().all(|t| components.contains(t)),
+        )
     }
 }
