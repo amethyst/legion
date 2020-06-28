@@ -6,9 +6,8 @@ use std::{
 };
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct ComponentTypeId {
-    type_id: TypeId,
+    pub(crate) type_id: TypeId,
     #[cfg(debug_assertions)]
     name: &'static str,
 }
@@ -19,6 +18,14 @@ impl ComponentTypeId {
             type_id: TypeId::of::<T>(),
             #[cfg(debug_assertions)]
             name: std::any::type_name::<T>(),
+        }
+    }
+
+    pub(crate) fn of_id(type_id: TypeId) -> Self {
+        Self {
+            type_id,
+            #[cfg(debug_assertions)]
+            name: "<unknown>",
         }
     }
 }

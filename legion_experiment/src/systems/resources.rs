@@ -14,7 +14,6 @@ use std::{
 };
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct ResourceTypeId {
     type_id: TypeId,
     #[cfg(debug_assertions)]
