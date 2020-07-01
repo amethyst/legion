@@ -104,7 +104,6 @@ pub struct World {
     entities: LocationMap,
     entity_allocator: EntityAllocator,
     allocation_buffer: Vec<Entity>,
-    epoch: u64,
 }
 
 impl Default for World {
@@ -138,7 +137,6 @@ impl World {
             entities: LocationMap::default(),
             entity_allocator: EntityAllocator::default(),
             allocation_buffer: Vec::default(),
-            epoch: 0,
         }
     }
 
@@ -164,12 +162,8 @@ impl World {
 
         let arch_index = self.get_archetype(&mut components);
         let archetype = &mut self.archetypes[arch_index.0 as usize];
-        let mut writer = ArchetypeWriter::new(
-            self.epoch,
-            arch_index,
-            archetype,
-            self.components.get_multi_mut(),
-        );
+        let mut writer =
+            ArchetypeWriter::new(arch_index, archetype, self.components.get_multi_mut());
         components.push_components(&mut writer, self.entity_allocator.iter());
 
         let (base, entities) = writer.inserted();
@@ -188,7 +182,7 @@ impl World {
             archetype.entities_mut().swap_remove(component_index.0);
             for type_id in archetype.layout().component_types() {
                 let storage = self.components.get_mut(*type_id).unwrap();
-                storage.swap_remove(self.epoch, arch_index, component_index);
+                storage.swap_remove(arch_index, component_index);
             }
             if component_index.0 < archetype.entities().len() {
                 let swapped = archetype.entities()[component_index.0];
@@ -218,10 +212,7 @@ impl World {
         })
     }
 
-    pub fn pack(&mut self, options: PackOptions) {
-        self.components.pack(&options, self.epoch);
-        self.epoch += 1;
-    }
+    pub fn pack(&mut self, options: PackOptions) { self.components.pack(&options); }
 
     pub(crate) fn components(&self) -> &Components { &self.components }
 
@@ -229,7 +220,9 @@ impl World {
 
     pub(crate) fn archetypes(&self) -> &[Archetype] { &self.archetypes }
 
-    pub(crate) fn epoch(&self) -> u64 { self.epoch }
+    pub(crate) fn archetypes_mut(&mut self) -> &mut [Archetype] { &mut self.archetypes }
+
+    pub(crate) fn entities_mut(&mut self) -> &mut LocationMap { &mut self.entities }
 
     pub(crate) unsafe fn transfer_archetype(
         &mut self,
@@ -275,13 +268,12 @@ impl World {
             let storage = self.components.get_mut(*type_id).unwrap();
             if to_layout.component_types().contains(type_id) {
                 storage.move_component(
-                    self.epoch,
                     ArchetypeIndex(from),
                     ComponentIndex(idx),
                     ArchetypeIndex(to),
                 );
             } else {
-                storage.swap_remove(self.epoch, ArchetypeIndex(from), ComponentIndex(idx));
+                storage.swap_remove(ArchetypeIndex(from), ComponentIndex(idx));
             }
         }
 
@@ -300,7 +292,7 @@ impl World {
         }
     }
 
-    fn insert_archetype(&mut self, layout: EntityLayout) -> ArchetypeIndex {
+    pub(crate) fn insert_archetype(&mut self, layout: EntityLayout) -> ArchetypeIndex {
         // create and insert new archetype
         self.index.push(&layout);
         let arch_index = ArchetypeIndex(self.archetypes.len() as u32);
@@ -470,12 +462,8 @@ impl World {
             };
             let dst_arch_index = dst_arch_index.unwrap_or_else(|| self.insert_archetype(layout));
             let dst_arch = &mut self.archetypes[dst_arch_index.0 as usize];
-            let mut writer = ArchetypeWriter::new(
-                self.epoch,
-                dst_arch_index,
-                dst_arch,
-                self.components.get_multi_mut(),
-            );
+            let mut writer =
+                ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
             for entity in to_push.drain(..) {
                 writer.push(entity);
@@ -486,7 +474,6 @@ impl World {
                 &mut source.entities,
                 src_arch,
                 &mut source.components,
-                source.epoch,
                 &mut writer,
             );
 
@@ -544,12 +531,8 @@ impl World {
         let layout = merger.convert_layout((**src_arch.layout()).clone());
         let dst_arch_index = self.insert_archetype(layout);
         let dst_arch = &mut self.archetypes[dst_arch_index.0 as usize];
-        let mut writer = ArchetypeWriter::new(
-            self.epoch,
-            dst_arch_index,
-            dst_arch,
-            self.components.get_multi_mut(),
-        );
+        let mut writer =
+            ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
         writer.push(dst_entity);
 
@@ -559,7 +542,6 @@ impl World {
             &mut source.entities,
             src_arch,
             &mut source.components,
-            source.epoch,
             &mut writer,
         );
 
@@ -597,7 +579,6 @@ impl EntityStore for World {
             &self.archetypes,
             &self.groups,
             &self.group_members,
-            self.epoch,
             None,
         ))
     }
@@ -611,7 +592,6 @@ pub struct StorageAccessor<'a> {
     archetypes: &'a [Archetype],
     groups: &'a [Group],
     group_members: &'a HashMap<ComponentTypeId, usize>,
-    epoch: u64,
     allowed_archetypes: Option<&'a BitSet>,
 }
 
@@ -623,7 +603,6 @@ impl<'a> StorageAccessor<'a> {
         archetypes: &'a [Archetype],
         groups: &'a [Group],
         group_members: &'a HashMap<ComponentTypeId, usize>,
-        epoch: u64,
         allowed_archetypes: Option<&'a BitSet>,
     ) -> Self {
         Self {
@@ -633,7 +612,6 @@ impl<'a> StorageAccessor<'a> {
             archetypes,
             groups,
             group_members,
-            epoch,
             allowed_archetypes,
         }
     }
@@ -663,8 +641,6 @@ impl<'a> StorageAccessor<'a> {
 
     pub fn groups(&self) -> &'a [Group] { self.groups }
 
-    pub fn epoch(&self) -> u64 { self.epoch }
-
     pub fn group(&self, type_id: ComponentTypeId) -> Option<(usize, &'a Group)> {
         self.group_members
             .get(&type_id)
@@ -685,7 +661,6 @@ pub trait Merger {
         src_entities: &mut LocationMap,
         src_arch: &mut Archetype,
         src_components: &mut Components,
-        src_epoch: u64,
         dst: &mut ArchetypeWriter,
     );
 }
@@ -701,7 +676,6 @@ impl Merger for Move {
         src_entities: &mut LocationMap,
         src_arch: &mut Archetype,
         src_components: &mut Components,
-        src_epoch: u64,
         dst: &mut ArchetypeWriter,
     ) {
         if src_entity_range.len() == src_arch.entities().len() {
@@ -725,7 +699,6 @@ impl Merger for Move {
                     dst_storage.move_component_from(
                         src_arch.index(),
                         ComponentIndex(entity_index),
-                        src_epoch,
                         src_storage,
                     );
                 }
@@ -868,7 +841,6 @@ impl Merger for Duplicate {
         _: &mut LocationMap,
         src_arch: &mut Archetype,
         src_components: &mut Components,
-        _: u64,
         dst: &mut ArchetypeWriter,
     ) {
         for src_type in src_arch.layout().component_types() {

@@ -50,7 +50,14 @@ impl ComponentMeta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct ComponentIndex(pub(crate) usize);
 
+pub type Epoch = u64;
+
+pub type Version = u64;
+
 pub trait UnknownComponentStorage: Downcast {
+    /// Notifies the storage of the start of a new epoch.
+    fn increment_epoch(&mut self);
+
     /// Inserts a new empty component slice for an archetype into this storage.
     fn insert_archetype(&mut self, archetype: ArchetypeIndex, index: Option<usize>);
 
@@ -60,7 +67,6 @@ pub trait UnknownComponentStorage: Downcast {
         src_archetype: ArchetypeIndex,
         dst_archetype: ArchetypeIndex,
         dst: &mut dyn UnknownComponentStorage,
-        dst_epoch: u64,
     );
 
     /// Moves a component to a new storage.
@@ -70,49 +76,42 @@ pub trait UnknownComponentStorage: Downcast {
         src_component: ComponentIndex,
         dst_archetype: ArchetypeIndex,
         dst: &mut dyn UnknownComponentStorage,
-        src_epoch: u64,
-        dst_epoch: u64,
     );
 
     /// Moves a component from one archetype to another.
     fn move_component(
         &mut self,
-        epoch: u64,
         source: ArchetypeIndex,
         index: ComponentIndex,
         dst: ArchetypeIndex,
     );
 
     /// Removes a component from an archetype slice, swapping it with the last component in the slice.
-    fn swap_remove(&mut self, epoch: u64, archetype: ArchetypeIndex, index: ComponentIndex);
+    fn swap_remove(&mut self, archetype: ArchetypeIndex, index: ComponentIndex);
 
     /// Packs archetype slices.
-    fn pack(&mut self, epoch_threshold: u64) -> usize;
+    fn pack(&mut self, epoch_threshold: Epoch) -> usize;
 
     /// A heuristic estimating cache misses for an iteration through all components due to archetype fragmentation.
     fn fragmentation(&self) -> f32;
 
     fn element_vtable(&self) -> ComponentMeta;
+
     fn get_raw(&self, archetype: ArchetypeIndex) -> Option<(*const u8, usize)>;
-    unsafe fn get_mut_raw(&self, epoch: u64, archetype: ArchetypeIndex)
-        -> Option<(*mut u8, usize)>;
-    unsafe fn extend_memcopy_raw(
-        &mut self,
-        epoch: u64,
-        archetype: ArchetypeIndex,
-        ptr: *const u8,
-        len: usize,
-    );
+
+    unsafe fn get_mut_raw(&self, archetype: ArchetypeIndex) -> Option<(*mut u8, usize)>;
+
+    unsafe fn extend_memcopy_raw(&mut self, archetype: ArchetypeIndex, ptr: *const u8, len: usize);
 }
 impl_downcast!(UnknownComponentStorage);
 
 pub struct ComponentSlice<'a, T: Component> {
     pub components: &'a [T],
-    pub version: &'a u64,
+    pub version: &'a Version,
 }
 
 impl<'a, T: Component> ComponentSlice<'a, T> {
-    pub fn new(components: &'a [T], version: &'a u64) -> Self {
+    pub fn new(components: &'a [T], version: &'a Version) -> Self {
         Self {
             components,
             version,
@@ -139,11 +138,11 @@ impl<'a, T: Component> Index<ComponentIndex> for ComponentSlice<'a, T> {
 
 pub struct ComponentSliceMut<'a, T: Component> {
     pub components: &'a mut [T],
-    pub version: &'a mut u64,
+    pub version: &'a mut Version,
 }
 
 impl<'a, T: Component> ComponentSliceMut<'a, T> {
-    pub fn new(components: &'a mut [T], version: &'a mut u64) -> Self {
+    pub fn new(components: &'a mut [T], version: &'a mut Version) -> Self {
         Self {
             components,
             version,
@@ -189,17 +188,11 @@ pub trait ComponentStorage<'a, T: Component>: UnknownComponentStorage + Default 
     /// # Safety
     /// The components located at `ptr` are memcopied into the storage. If `T` is not `Copy`, then the
     /// previous memory location should no longer be accessed.
-    unsafe fn extend_memcopy(
-        &mut self,
-        epoch: u64,
-        archetype: ArchetypeIndex,
-        ptr: *const T,
-        len: usize,
-    );
+    unsafe fn extend_memcopy(&mut self, archetype: ArchetypeIndex, ptr: *const T, len: usize);
 
     /// Ensures that the given spare capacity is available for component insertions. This is a performance hint and
     /// should not be required before `extend_memcopy` is called.
-    fn ensure_capacity(&mut self, epoch: u64, archetype: ArchetypeIndex, space: usize);
+    fn ensure_capacity(&mut self, archetype: ArchetypeIndex, space: usize);
 
     /// Gets the component slice for the specified archetype.
     fn get(&'a self, archetype: ArchetypeIndex) -> Option<ComponentSlice<'a, T>>;
@@ -275,19 +268,27 @@ impl Components {
 
     pub fn get_multi_mut(&mut self) -> MultiMut { MultiMut::new(self) }
 
-    pub fn pack(&mut self, options: &PackOptions, epoch: u64) {
+    pub fn pack(&mut self, options: &PackOptions) {
         let mut total_moved_bytes = 0;
-        for (_, cell) in self.storages.iter_mut() {
-            let storage = unsafe { &mut *cell.get() };
-
+        for storage in self.iter_storages_mut() {
             if storage.fragmentation() >= options.fragmentation_threshold {
-                total_moved_bytes += storage.pack(epoch - options.stability_threshold);
+                total_moved_bytes += storage.pack(options.stability_threshold);
             }
 
             if total_moved_bytes >= options.maximum_iteration_size {
                 break;
             }
         }
+
+        for storage in self.iter_storages_mut() {
+            storage.increment_epoch();
+        }
+    }
+
+    fn iter_storages_mut(&mut self) -> impl Iterator<Item = &mut dyn UnknownComponentStorage> {
+        self.storages
+            .iter_mut()
+            .map(|(_, cell)| unsafe { (*cell.get()).deref_mut() })
     }
 }
 

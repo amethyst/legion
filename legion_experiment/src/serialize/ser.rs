@@ -8,7 +8,7 @@ use crate::{
     world::World,
 };
 use itertools::Itertools;
-use serde::ser::{Serialize, SerializeStruct, Serializer};
+use serde::ser::{Serialize, SerializeMap, SerializeStruct, Serializer};
 use std::{collections::HashMap, marker::PhantomData};
 
 pub trait WorldSerializer {
@@ -27,7 +27,7 @@ pub trait WorldSerializer {
 pub struct SerializableWorld<'a, F: LayoutFilter, W: WorldSerializer> {
     world: &'a World,
     filter: F,
-    world_serializer: W,
+    world_serializer: &'a W,
 }
 
 impl<'a, F: LayoutFilter, W: WorldSerializer> Serialize for SerializableWorld<'a, F, W> {
@@ -35,19 +35,14 @@ impl<'a, F: LayoutFilter, W: WorldSerializer> Serialize for SerializableWorld<'a
     where
         S: Serializer,
     {
-        serialize_world(
-            serializer,
-            &self.world,
-            &self.filter,
-            &self.world_serializer,
-        )
+        serialize_world(serializer, self.world, &self.filter, self.world_serializer)
     }
 }
 
 pub fn as_serializable<'a, F: LayoutFilter, W: WorldSerializer>(
     world: &'a World,
     filter: F,
-    world_serializer: W,
+    world_serializer: &'a W,
 ) -> SerializableWorld<'a, F, W> {
     SerializableWorld {
         world,
@@ -86,7 +81,7 @@ where
         .filter_map(|id| world_serializer.map_id(*id).map(|mapped| (*id, mapped)))
         .collect::<HashMap<ComponentTypeId, W::TypeId>>();
 
-    let mut root = serializer.serialize_struct("World", 3)?;
+    let mut root = serializer.serialize_struct("World", 2)?;
 
     // serialize archetypes
     root.serialize_field(
@@ -101,18 +96,15 @@ where
     )?;
 
     // serialize components
-    let mut components = type_mappings
-        .into_iter()
-        .map(|(type_id, mapped)| SerializableComponentStorage {
-            storage: world.components().get(type_id).unwrap(),
-            world_serializer: world_serializer,
-            type_id,
-            mapped,
-            archetypes: &archetypes,
-        })
-        .collect::<Vec<_>>();
-    components.sort_by(|a, b| a.mapped.cmp(&b.mapped));
-    root.serialize_field("components", &components)?;
+    root.serialize_field(
+        "components",
+        &Components {
+            world_serializer,
+            world,
+            type_mappings,
+            archetypes,
+        },
+    )?;
 
     root.end()
 }
@@ -142,11 +134,47 @@ impl<'a, T: Serialize> Serialize for SerializableArchetype<'a, T> {
     }
 }
 
+struct Components<'a, W: WorldSerializer> {
+    world_serializer: &'a W,
+    world: &'a World,
+    type_mappings: HashMap<ComponentTypeId, W::TypeId>,
+    archetypes: Vec<(ArchetypeIndex, &'a Archetype)>,
+}
+
+impl<'a, W: WorldSerializer> Serialize for Components<'a, W> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut components = self
+            .type_mappings
+            .iter()
+            .map(|(type_id, mapped)| {
+                (
+                    mapped,
+                    SerializableComponentStorage {
+                        storage: self.world.components().get(*type_id).unwrap(),
+                        world_serializer: self.world_serializer,
+                        type_id: *type_id,
+                        archetypes: &self.archetypes,
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        components.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut root = serializer.serialize_map(Some(self.type_mappings.len()))?;
+        for (mapped, storage) in components {
+            root.serialize_entry(mapped, &storage)?;
+        }
+        root.end()
+    }
+}
+
 struct SerializableComponentStorage<'a, W: WorldSerializer> {
     storage: &'a dyn UnknownComponentStorage,
     world_serializer: &'a W,
     type_id: ComponentTypeId,
-    mapped: W::TypeId,
     archetypes: &'a [(ArchetypeIndex, &'a Archetype)],
 }
 
@@ -164,38 +192,24 @@ impl<'a, W: WorldSerializer> Serialize for SerializableComponentStorage<'a, W> {
                     .get_raw(*arch_index)
                     .map(|(ptr, len)| (local_index, ptr, len))
             })
-            .map(|(arch_index, ptr, len)| SerializableArchetypeSlice {
-                slice: SerializableSlice {
-                    ptr,
-                    len,
-                    type_id: self.type_id,
-                    world_serializer: self.world_serializer,
-                    _phantom: PhantomData,
-                },
-                arch_index,
+            .map(|(arch_index, ptr, len)| {
+                (
+                    arch_index,
+                    SerializableSlice {
+                        ptr,
+                        len,
+                        type_id: self.type_id,
+                        world_serializer: self.world_serializer,
+                        _phantom: PhantomData,
+                    },
+                )
             })
             .collect::<Vec<_>>();
 
-        let mut root = serializer.serialize_struct("Storage", 2)?;
-        root.serialize_field("type", &self.mapped)?;
-        root.serialize_field("archetypes", &slices)?;
-        root.end()
-    }
-}
-
-struct SerializableArchetypeSlice<'a, W: WorldSerializer> {
-    arch_index: usize,
-    slice: SerializableSlice<'a, W>,
-}
-
-impl<'a, W: WorldSerializer> Serialize for SerializableArchetypeSlice<'a, W> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut root = serializer.serialize_struct("ArchetypeSlice", 2)?;
-        root.serialize_field("archetype", &self.arch_index)?;
-        root.serialize_field("slice", &self.slice)?;
+        let mut root = serializer.serialize_map(Some(slices.len()))?;
+        for (idx, slice) in slices {
+            root.serialize_entry(&idx, &slice)?;
+        }
         root.end()
     }
 }

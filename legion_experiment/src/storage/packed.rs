@@ -1,6 +1,6 @@
 use super::{
     archetype::ArchetypeIndex, component::Component, ComponentIndex, ComponentMeta, ComponentSlice,
-    ComponentSliceMut, ComponentStorage, UnknownComponentStorage,
+    ComponentSliceMut, ComponentStorage, Epoch, UnknownComponentStorage,
 };
 use std::{
     alloc::Layout,
@@ -100,7 +100,7 @@ enum ComponentVec<T> {
     Loose {
         raw: RawAlloc<T>,
         len: usize,
-        last_written: u64,
+        last_written: Epoch,
     },
 }
 
@@ -113,7 +113,7 @@ impl<T> ComponentVec<T> {
         }
     }
 
-    fn should_pack(&self, epoch_threshold: u64) -> bool {
+    fn should_pack(&self, epoch_threshold: Epoch) -> bool {
         match self {
             Self::Loose { last_written, .. } => *last_written <= epoch_threshold,
             _ => true,
@@ -144,7 +144,7 @@ impl<T> ComponentVec<T> {
         }
     }
 
-    unsafe fn extend_memcopy(&mut self, epoch: u64, ptr: *const T, count: usize) {
+    unsafe fn extend_memcopy(&mut self, epoch: Epoch, ptr: *const T, count: usize) {
         self.ensure_capacity(epoch, count);
         let (dst, len) = self.as_raw_slice();
         std::ptr::copy_nonoverlapping(ptr, dst.as_ptr().add(len), count);
@@ -159,7 +159,7 @@ impl<T> ComponentVec<T> {
         }
     }
 
-    fn ensure_capacity(&mut self, epoch: u64, space: usize) {
+    fn ensure_capacity(&mut self, epoch: Epoch, space: usize) {
         let (cap, len) = match self {
             Self::Packed { cap, len, .. } => (*cap, *len),
             Self::Loose { raw, len, .. } => (raw.cap, *len),
@@ -170,7 +170,7 @@ impl<T> ComponentVec<T> {
         }
     }
 
-    fn swap_remove(&mut self, epoch: u64, index: usize) -> T {
+    fn swap_remove(&mut self, epoch: Epoch, index: usize) -> T {
         let (ptr, len) = self.as_raw_slice();
         assert!(len > index);
 
@@ -194,7 +194,7 @@ impl<T> ComponentVec<T> {
         }
     }
 
-    fn grow(&mut self, epoch: u64, new_capacity: usize) {
+    fn grow(&mut self, epoch: Epoch, new_capacity: usize) {
         debug_assert_ne!(std::mem::size_of::<T>(), 0);
 
         match self {
@@ -286,6 +286,8 @@ pub struct PackedStorage<T: Component> {
     slices: Vec<(NonNull<T>, usize)>,
     // The total number of components stored
     entity_len: usize,
+    // The current epoch
+    epoch: Epoch,
     // Ordered archetype versions
     versions: Vec<UnsafeCell<u64>>,
     // Ordered allocation metadata
@@ -295,13 +297,12 @@ pub struct PackedStorage<T: Component> {
 impl<T: Component> PackedStorage<T> {
     fn swap_remove_internal(
         &mut self,
-        frame_counter: u64,
         ArchetypeIndex(archetype): ArchetypeIndex,
         ComponentIndex(index): ComponentIndex,
     ) -> T {
         let slice_index = self.index[archetype as usize];
         let allocation = &mut self.allocations[slice_index];
-        let component = allocation.swap_remove(frame_counter, index as usize);
+        let component = allocation.swap_remove(self.epoch, index as usize);
         self.update_slice(slice_index);
         self.entity_len -= 1;
         component
@@ -320,7 +321,6 @@ impl<T: Component> PackedStorage<T> {
 impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
     fn move_component(
         &mut self,
-        epoch: u64,
         source: ArchetypeIndex,
         index: ComponentIndex,
         dst: ArchetypeIndex,
@@ -331,12 +331,12 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
 
         // remove component from source slice
         let src_allocation = &mut self.allocations[src_slice_index];
-        let value = src_allocation.swap_remove(epoch, index.0 as usize);
+        let value = src_allocation.swap_remove(self.epoch, index.0 as usize);
 
         // insert component into destination slice
         let dst_allocation = &mut self.allocations[dst_slice_index];
         unsafe {
-            dst_allocation.extend_memcopy(epoch, &value as *const _, 1);
+            dst_allocation.extend_memcopy(self.epoch, &value as *const _, 1);
             *self.versions[dst_slice_index].get() = next_component_version();
         }
 
@@ -375,7 +375,6 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
         src_archetype: ArchetypeIndex,
         dst_archetype: ArchetypeIndex,
         dst: &mut dyn UnknownComponentStorage,
-        dst_frame_counter: u64,
     ) {
         let dst = dst.downcast_mut::<Self>().unwrap();
         let src_index = self.index(src_archetype);
@@ -395,11 +394,11 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
             );
 
             // bump destination version
-            unsafe { *dst.versions[dst_index].get() = dst_frame_counter };
+            unsafe { *dst.versions[dst_index].get() = next_component_version() };
         } else {
             // memcopy components into the destination
             let (ptr, len) = self.get_raw(src_archetype).unwrap();
-            unsafe { dst.extend_memcopy_raw(dst_frame_counter, dst_archetype, ptr, len) };
+            unsafe { dst.extend_memcopy_raw(dst_archetype, ptr, len) };
 
             // clear and forget source
             let mut swapped = ComponentVec::<T>::new();
@@ -419,34 +418,22 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
         src_component: ComponentIndex,
         dst_archetype: ArchetypeIndex,
         dst: &mut dyn UnknownComponentStorage,
-        src_epoch: u64,
-        dst_epoch: u64,
     ) {
-        let component = self.swap_remove_internal(src_epoch, src_archetype, src_component);
-        unsafe {
-            dst.extend_memcopy_raw(
-                dst_epoch,
-                dst_archetype,
-                &component as *const T as *const u8,
-                1,
-            )
-        };
+        let component = self.swap_remove_internal(src_archetype, src_component);
+        unsafe { dst.extend_memcopy_raw(dst_archetype, &component as *const T as *const u8, 1) };
         std::mem::forget(component);
     }
 
-    fn swap_remove(
-        &mut self,
-        frame_counter: u64,
-        archetype: ArchetypeIndex,
-        index: ComponentIndex,
-    ) {
-        self.swap_remove_internal(frame_counter, archetype, index);
+    fn swap_remove(&mut self, archetype: ArchetypeIndex, index: ComponentIndex) {
+        self.swap_remove_internal(archetype, index);
     }
 
-    fn pack(&mut self, epoch_threshold: u64) -> usize {
+    fn pack(&mut self, age_threshold: Epoch) -> usize {
         if size_of::<T>() == 0 {
             return 0;
         }
+
+        let epoch_threshold = self.epoch - age_threshold;
 
         let len = self
             .slices
@@ -492,29 +479,29 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
 
     unsafe fn get_mut_raw(
         &self,
-        epoch: u64,
         ArchetypeIndex(archetype): ArchetypeIndex,
     ) -> Option<(*mut u8, usize)> {
         let slice_index = *self.index.get(archetype as usize)?;
         let (ptr, len) = self.slices.get(slice_index)?;
-        *self.versions.get_unchecked(slice_index).get() = epoch;
+        *self.versions.get_unchecked(slice_index).get() = next_component_version();
         Some((ptr.as_ptr() as *mut u8, *len))
     }
 
     unsafe fn extend_memcopy_raw(
         &mut self,
-        epoch: u64,
         ArchetypeIndex(archetype): ArchetypeIndex,
         ptr: *const u8,
         count: usize,
     ) {
         let slice_index = self.index[archetype as usize];
         let allocation = &mut self.allocations[slice_index];
-        allocation.extend_memcopy(epoch, ptr as *const T, count);
+        allocation.extend_memcopy(self.epoch, ptr as *const T, count);
         self.slices[slice_index] = allocation.as_raw_slice();
         self.entity_len += count;
-        *self.versions[slice_index].get() = epoch;
+        *self.versions[slice_index].get() = next_component_version();
     }
+
+    fn increment_epoch(&mut self) { self.epoch += 1; }
 }
 
 impl<T: Component> Default for PackedStorage<T> {
@@ -525,6 +512,7 @@ impl<T: Component> Default for PackedStorage<T> {
             versions: Vec::new(),
             allocations: Vec::new(),
             entity_len: 0,
+            epoch: 0,
         }
     }
 }
@@ -533,25 +521,14 @@ impl<'a, T: Component> ComponentStorage<'a, T> for PackedStorage<T> {
     type Iter = ComponentIter<'a, T>;
     type IterMut = ComponentIterMut<'a, T>;
 
-    unsafe fn extend_memcopy(
-        &mut self,
-        epoch: u64,
-        archetype: ArchetypeIndex,
-        ptr: *const T,
-        count: usize,
-    ) {
-        self.extend_memcopy_raw(epoch, archetype, ptr as *const u8, count);
+    unsafe fn extend_memcopy(&mut self, archetype: ArchetypeIndex, ptr: *const T, count: usize) {
+        self.extend_memcopy_raw(archetype, ptr as *const u8, count);
     }
 
-    fn ensure_capacity(
-        &mut self,
-        epoch: u64,
-        ArchetypeIndex(archetype): ArchetypeIndex,
-        capacity: usize,
-    ) {
+    fn ensure_capacity(&mut self, ArchetypeIndex(archetype): ArchetypeIndex, capacity: usize) {
         let slice_index = self.index[archetype as usize];
         let allocation = &mut self.allocations[slice_index];
-        allocation.ensure_capacity(epoch, capacity);
+        allocation.ensure_capacity(self.epoch, capacity);
     }
 
     fn get(&'a self, ArchetypeIndex(archetype): ArchetypeIndex) -> Option<ComponentSlice<'a, T>> {
@@ -657,7 +634,7 @@ mod test {
         unsafe {
             let components = vec![1, 2, 3];
             let ptr = components.as_ptr();
-            storage.extend_memcopy(0, ArchetypeIndex(0), ptr, 3);
+            storage.extend_memcopy(ArchetypeIndex(0), ptr, 3);
             std::mem::forget(components);
 
             let slice = storage.get_mut(ArchetypeIndex(0)).unwrap();
@@ -673,7 +650,7 @@ mod test {
         unsafe {
             let components = vec![(), (), ()];
             let ptr = components.as_ptr();
-            storage.extend_memcopy(0, ArchetypeIndex(0), ptr, 3);
+            storage.extend_memcopy(ArchetypeIndex(0), ptr, 3);
             std::mem::forget(components);
 
             let slice = storage.get_mut(ArchetypeIndex(0)).unwrap();
@@ -689,11 +666,11 @@ mod test {
         unsafe {
             let components = vec![1, 2, 3];
             let ptr = components.as_ptr();
-            storage.extend_memcopy(0, ArchetypeIndex(0), ptr, 3);
+            storage.extend_memcopy(ArchetypeIndex(0), ptr, 3);
             std::mem::forget(components);
         }
 
-        storage.swap_remove(0, ArchetypeIndex(0), ComponentIndex(0));
+        storage.swap_remove(ArchetypeIndex(0), ComponentIndex(0));
 
         unsafe {
             let slice = storage.get_mut(ArchetypeIndex(0)).unwrap();
@@ -709,11 +686,11 @@ mod test {
         unsafe {
             let components = vec![1, 2, 3];
             let ptr = components.as_ptr();
-            storage.extend_memcopy(0, ArchetypeIndex(0), ptr, 3);
+            storage.extend_memcopy(ArchetypeIndex(0), ptr, 3);
             std::mem::forget(components);
         }
 
-        storage.swap_remove(0, ArchetypeIndex(0), ComponentIndex(2));
+        storage.swap_remove(ArchetypeIndex(0), ComponentIndex(2));
 
         unsafe {
             let slice = storage.get_mut(ArchetypeIndex(0)).unwrap();

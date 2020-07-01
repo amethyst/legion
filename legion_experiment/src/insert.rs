@@ -13,12 +13,10 @@ pub struct ArchetypeWriter<'a> {
     components: MultiMut<'a>,
     claimed: u128,
     initial_count: usize,
-    epoch: u64,
 }
 
 impl<'a> ArchetypeWriter<'a> {
     pub fn new(
-        epoch: u64,
         arch_index: ArchetypeIndex,
         archetype: &'a mut Archetype,
         components: MultiMut<'a>,
@@ -30,7 +28,6 @@ impl<'a> ArchetypeWriter<'a> {
             components,
             claimed: 0,
             initial_count,
-            epoch,
         }
     }
 
@@ -56,7 +53,6 @@ impl<'a> ArchetypeWriter<'a> {
         ComponentWriter {
             components: unsafe { self.components.claim::<T>() }.unwrap(),
             archetype: self.arch_index,
-            epoch: self.epoch,
         }
     }
 
@@ -69,7 +65,6 @@ impl<'a> ArchetypeWriter<'a> {
         UnknownComponentWriter {
             components: unsafe { self.components.claim_unknown(type_id) }.unwrap(),
             archetype: self.arch_index,
-            epoch: self.epoch,
         }
     }
 
@@ -93,25 +88,21 @@ impl<'a> Drop for ArchetypeWriter<'a> {
 pub struct ComponentWriter<'a, T: Component> {
     components: &'a mut T::Storage,
     archetype: ArchetypeIndex,
-    epoch: u64,
 }
 
 impl<'a, T: Component> ComponentWriter<'a, T> {
     pub unsafe fn extend_memcopy(&mut self, ptr: *const T, len: usize) {
-        self.components
-            .extend_memcopy(self.epoch, self.archetype, ptr, len)
+        self.components.extend_memcopy(self.archetype, ptr, len)
     }
 
     pub fn ensure_capacity(&mut self, space: usize) {
-        self.components
-            .ensure_capacity(self.epoch, self.archetype, space);
+        self.components.ensure_capacity(self.archetype, space);
     }
 }
 
 pub struct UnknownComponentWriter<'a> {
     components: &'a mut dyn UnknownComponentStorage,
     archetype: ArchetypeIndex,
-    epoch: u64,
 }
 
 impl<'a> UnknownComponentWriter<'a> {
@@ -120,14 +111,13 @@ impl<'a> UnknownComponentWriter<'a> {
         src_archetype: ArchetypeIndex,
         src: &mut dyn UnknownComponentStorage,
     ) {
-        src.transfer_archetype(src_archetype, self.archetype, self.components, self.epoch);
+        src.transfer_archetype(src_archetype, self.archetype, self.components);
     }
 
     pub fn move_component_from(
         &mut self,
         src_archetype: ArchetypeIndex,
         src_component: ComponentIndex,
-        src_epoch: u64,
         src: &mut dyn UnknownComponentStorage,
     ) {
         src.transfer_component(
@@ -135,8 +125,6 @@ impl<'a> UnknownComponentWriter<'a> {
             src_component,
             self.archetype,
             self.components,
-            src_epoch,
-            self.epoch,
         );
     }
 }

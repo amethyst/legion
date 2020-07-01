@@ -240,12 +240,11 @@ impl<'a> Entry<'a> {
                 target_arch,
                 self.location.component(),
             );
-            let epoch = self.world.epoch();
             self.world
                 .components_mut()
                 .get_downcast_mut::<T>()
                 .unwrap()
-                .extend_memcopy(epoch, target_arch, &component as *const T, 1);
+                .extend_memcopy(target_arch, &component as *const T, 1);
             std::mem::forget(component);
             self.location = EntityLocation::new(target_arch, idx);
         };
