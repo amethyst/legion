@@ -1,3 +1,4 @@
+use super::{ArchetypeDef, WorldMeta};
 use crate::{
     query::filter::LayoutFilter,
     storage::{
@@ -51,7 +52,7 @@ pub fn as_serializable<'a, F: LayoutFilter, W: WorldSerializer>(
     }
 }
 
-pub fn serialize_world<S, F, W>(
+fn serialize_world<S, F, W>(
     serializer: S,
     world: &World,
     filter: &F,
@@ -81,19 +82,47 @@ where
         .filter_map(|id| world_serializer.map_id(*id).map(|mapped| (*id, mapped)))
         .collect::<HashMap<ComponentTypeId, W::TypeId>>();
 
-    let mut root = serializer.serialize_struct("World", 2)?;
+    let archetype_defs = archetypes
+        .iter()
+        .map(|(_, archetype)| {
+            let components = archetype
+                .layout()
+                .component_types()
+                .iter()
+                .filter_map(|type_id| type_mappings.get(type_id))
+                .collect::<Vec<_>>();
+            ArchetypeDef {
+                components,
+                entities: archetype.entities().to_vec(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut root = serializer.serialize_struct("World", 3)?;
+
+    // serialize world metadata
+    root.serialize_field(
+        "_meta",
+        &WorldMeta {
+            entity_id_stride: world.entity_allocator().stride(),
+            entity_id_offset: world.entity_allocator().offset(),
+            entity_id_next: world.entity_allocator().head(),
+            component_groups: world
+                .groups()
+                .iter()
+                .filter(|group| group.components().count() > 1)
+                .map(|group| {
+                    group
+                        .components()
+                        .filter_map(|type_id| world_serializer.map_id(type_id))
+                        .collect()
+                })
+                .collect(),
+        },
+    )?;
 
     // serialize archetypes
-    root.serialize_field(
-        "archetypes",
-        &archetypes
-            .iter()
-            .map(|(_, archetype)| SerializableArchetype {
-                archetype,
-                type_mappings: &type_mappings,
-            })
-            .collect::<Vec<_>>(),
-    )?;
+    root.serialize_field("archetypes", &archetype_defs)?;
 
     // serialize components
     root.serialize_field(
@@ -107,31 +136,6 @@ where
     )?;
 
     root.end()
-}
-
-struct SerializableArchetype<'a, T: Serialize> {
-    archetype: &'a Archetype,
-    type_mappings: &'a HashMap<ComponentTypeId, T>,
-}
-
-impl<'a, T: Serialize> Serialize for SerializableArchetype<'a, T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let component_types = self
-            .archetype
-            .layout()
-            .component_types()
-            .iter()
-            .filter_map(|type_id| self.type_mappings.get(type_id))
-            .collect::<Vec<&T>>();
-
-        let mut root = serializer.serialize_struct("Archetype", 2)?;
-        root.serialize_field("components", &component_types)?;
-        root.serialize_field("entities", &self.archetype.entities())?;
-        root.end()
-    }
 }
 
 struct Components<'a, W: WorldSerializer> {
@@ -163,7 +167,7 @@ impl<'a, W: WorldSerializer> Serialize for Components<'a, W> {
             .collect::<Vec<_>>();
         components.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let mut root = serializer.serialize_map(Some(self.type_mappings.len()))?;
+        let mut root = serializer.serialize_map(Some(components.len()))?;
         for (mapped, storage) in components {
             root.serialize_entry(mapped, &storage)?;
         }
@@ -192,9 +196,9 @@ impl<'a, W: WorldSerializer> Serialize for SerializableComponentStorage<'a, W> {
                     .get_raw(*arch_index)
                     .map(|(ptr, len)| (local_index, ptr, len))
             })
-            .map(|(arch_index, ptr, len)| {
+            .map(|(local_index, ptr, len)| {
                 (
-                    arch_index,
+                    ArchetypeIndex(local_index as u32),
                     SerializableSlice {
                         ptr,
                         len,

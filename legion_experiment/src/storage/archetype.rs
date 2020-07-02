@@ -12,6 +12,7 @@ use std::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[repr(transparent)]
 pub struct ArchetypeIndex(pub u32);
 

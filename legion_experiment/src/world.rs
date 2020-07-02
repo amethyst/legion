@@ -60,6 +60,8 @@ impl Universe {
             ..World::with_options(options)
         }
     }
+
+    pub(crate) fn entity_allocator(&self) -> &EntityAllocator { &self.entity_allocator }
 }
 
 #[derive(Debug)]
@@ -223,6 +225,8 @@ impl World {
     pub(crate) fn archetypes_mut(&mut self) -> &mut [Archetype] { &mut self.archetypes }
 
     pub(crate) fn entities_mut(&mut self) -> &mut LocationMap { &mut self.entities }
+
+    pub(crate) fn groups(&self) -> &[Group] { &self.groups }
 
     pub(crate) unsafe fn transfer_archetype(
         &mut self,

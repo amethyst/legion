@@ -146,6 +146,39 @@ impl EntityAllocator {
         self.next
             .fetch_add(self.stride * BLOCK_SIZE_U64, Ordering::Relaxed)
     }
+
+    pub fn stride(&self) -> u64 { self.stride }
+
+    pub fn offset(&self) -> u64 { self.offset }
+
+    pub(crate) fn head(&self) -> u64 { self.next.load(Ordering::Relaxed) }
+
+    pub(crate) fn skip(&self, id: u64) {
+        let mut block = id / BLOCK_SIZE_U64;
+
+        // round up if we are part way through a block
+        if id % BLOCK_SIZE_U64 != 0 {
+            block += 1;
+        }
+
+        loop {
+            let head = self.head();
+            let current_block = head / BLOCK_SIZE_U64;
+            if current_block >= block {
+                break;
+            }
+
+            let new_block = block + (block - self.offset) % self.stride;
+
+            if self
+                .next
+                .compare_and_swap(head, new_block, Ordering::Relaxed)
+                == head
+            {
+                break;
+            }
+        }
+    }
 }
 
 impl Default for EntityAllocator {

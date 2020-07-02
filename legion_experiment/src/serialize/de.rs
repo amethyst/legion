@@ -1,11 +1,12 @@
+use super::{ArchetypeDef, WorldMeta};
 use crate::{
-    entity::Entity,
     storage::{
         archetype::{ArchetypeIndex, EntityLayout},
         component::ComponentTypeId,
+        group::Group,
         ComponentIndex, UnknownComponentStorage,
     },
-    world::World,
+    world::{Universe, World, WorldOptions},
 };
 use serde::{
     de::{DeserializeSeed, MapAccess, SeqAccess, Visitor},
@@ -15,7 +16,7 @@ use serde::{
 pub trait WorldDeserializer {
     type TypeId: for<'de> Deserialize<'de>;
 
-    fn unmap_id(&self, type_id: Self::TypeId) -> Option<ComponentTypeId>;
+    fn unmap_id(&self, type_id: &Self::TypeId) -> Option<ComponentTypeId>;
     fn register_component(&self, type_id: Self::TypeId, layout: &mut EntityLayout);
     fn deserialize_component_slice<'de, D: Deserializer<'de>>(
         &self,
@@ -35,7 +36,7 @@ impl<'de, W: WorldDeserializer> DeserializeSeed<'de> for Wrapper<W> {
     where
         D: serde::Deserializer<'de>,
     {
-        const FIELDS: &[&str] = &["archetypes", "components"];
+        const FIELDS: &[&str] = &["_meta", "archetypes", "components"];
         deserializer.deserialize_struct(
             "World",
             FIELDS,
@@ -50,6 +51,26 @@ struct WorldVisitor<W: WorldDeserializer> {
     world_deserializer: W,
 }
 
+impl<W: WorldDeserializer> WorldVisitor<W> {
+    fn create_archetype(&mut self, world: &mut World, archetype: ArchetypeDef<W::TypeId>) {
+        let mut layout = EntityLayout::default();
+        for component in archetype.components {
+            self.world_deserializer
+                .register_component(component, &mut layout);
+        }
+
+        let index = world.insert_archetype(layout);
+        let base = world.archetypes()[index].entities().len();
+        world
+            .entities_mut()
+            .insert(&archetype.entities, index, ComponentIndex(base));
+
+        world.archetypes_mut()[index]
+            .entities_mut()
+            .extend(archetype.entities);
+    }
+}
+
 impl<'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<W> {
     type Value = World;
 
@@ -57,16 +78,20 @@ impl<'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<W> {
         formatter.write_str("struct World")
     }
 
-    fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
+    fn visit_seq<V>(mut self, mut seq: V) -> Result<Self::Value, V::Error>
     where
         V: SeqAccess<'de>,
     {
-        let mut world = World::default();
+        let mut world = seq
+            .next_element_seed(MetaDeserializer {
+                world_deserializer: &self.world_deserializer,
+            })?
+            .unwrap();
 
-        seq.next_element_seed(ArchetypeDeserializer {
-            world: &mut world,
-            world_deserializer: &self.world_deserializer,
-        })?;
+        let archetypes = seq.next_element::<Vec<ArchetypeDef<W::TypeId>>>()?.unwrap();
+        for archetype in archetypes {
+            self.create_archetype(&mut world, archetype);
+        }
 
         seq.next_element_seed(ComponentsDeserializer {
             world: &mut world,
@@ -76,187 +101,87 @@ impl<'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<W> {
         Ok(world)
     }
 
-    fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
+    fn visit_map<V>(mut self, mut map: V) -> Result<Self::Value, V::Error>
     where
         V: MapAccess<'de>,
     {
-        let mut world = World::default();
+        let mut world = None;
 
         #[derive(Deserialize)]
         #[serde(field_identifier, rename_all = "lowercase")]
         enum Field {
+            _Meta,
             Archetypes,
             Components,
         }
 
         while let Some(key) = map.next_key()? {
             match key {
-                Field::Archetypes => {
-                    map.next_value_seed(ArchetypeListDeserializer {
-                        world: &mut world,
+                Field::_Meta => {
+                    if world.is_some() {
+                        return Err(serde::de::Error::duplicate_field("_meta"));
+                    }
+                    world = Some(map.next_value_seed(MetaDeserializer {
                         world_deserializer: &self.world_deserializer,
-                    })?;
+                    })?);
+                }
+                Field::Archetypes => {
+                    if let Some(world) = &mut world {
+                        let archetypes = map.next_value::<Vec<ArchetypeDef<W::TypeId>>>()?;
+                        for archetype in archetypes {
+                            self.create_archetype(world, archetype);
+                        }
+                    } else {
+                        return Err(serde::de::Error::missing_field("_meta"));
+                    }
                 }
                 Field::Components => {
-                    map.next_value_seed(ComponentsDeserializer {
-                        world: &mut world,
-                        world_deserializer: &self.world_deserializer,
-                    })?;
+                    if let Some(world) = &mut world {
+                        map.next_value_seed(ComponentsDeserializer {
+                            world,
+                            world_deserializer: &self.world_deserializer,
+                        })?;
+                    } else {
+                        return Err(serde::de::Error::missing_field("_meta"));
+                    }
                 }
             }
         }
 
+        let world = world.ok_or_else(|| serde::de::Error::missing_field("_meta"))?;
         Ok(world)
     }
 }
 
-struct ArchetypeListDeserializer<'a, W: WorldDeserializer> {
-    world: &'a mut World,
+struct MetaDeserializer<'a, W: WorldDeserializer> {
     world_deserializer: &'a W,
 }
 
-impl<'de, 'a, W: WorldDeserializer> DeserializeSeed<'de> for ArchetypeListDeserializer<'a, W> {
-    type Value = ();
+impl<'de, 'a, W: WorldDeserializer> DeserializeSeed<'de> for MetaDeserializer<'a, W> {
+    type Value = World;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_seq(self)
-    }
-}
+        let meta = WorldMeta::<W::TypeId>::deserialize(deserializer)?;
+        let universe = Universe::sharded(meta.entity_id_offset, meta.entity_id_stride);
+        universe.entity_allocator().skip(meta.entity_id_next);
+        let options = WorldOptions {
+            groups: meta
+                .component_groups
+                .iter()
+                .map(|group| {
+                    Group::new(
+                        group
+                            .iter()
+                            .filter_map(|id| self.world_deserializer.unmap_id(id)),
+                    )
+                })
+                .collect(),
+        };
 
-impl<'de, 'a, W: WorldDeserializer> Visitor<'de> for ArchetypeListDeserializer<'a, W> {
-    type Value = ();
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("seqence of archetypes")
-    }
-
-    fn visit_seq<V>(self, mut seq: V) -> Result<Self::Value, V::Error>
-    where
-        V: SeqAccess<'de>,
-    {
-        while seq
-            .next_element_seed(ArchetypeDeserializer {
-                world: self.world,
-                world_deserializer: self.world_deserializer,
-            })?
-            .is_some()
-        {}
-
-        Ok(())
-    }
-}
-
-struct ArchetypeDeserializer<'a, W: WorldDeserializer> {
-    world: &'a mut World,
-    world_deserializer: &'a W,
-}
-
-impl<'de, 'a, W: WorldDeserializer> DeserializeSeed<'de> for ArchetypeDeserializer<'a, W> {
-    type Value = ();
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        const FIELDS: &[&str] = &["entities", "components"];
-        deserializer.deserialize_struct(
-            "Archetype",
-            FIELDS,
-            ArchetypeVisitor {
-                world: self.world,
-                world_deserializer: self.world_deserializer,
-            },
-        )?;
-        Ok(())
-    }
-}
-
-struct ArchetypeVisitor<'a, W: WorldDeserializer> {
-    world: &'a mut World,
-    world_deserializer: &'a W,
-}
-
-impl<'a, W: WorldDeserializer> ArchetypeVisitor<'a, W> {
-    fn create_archetype(&mut self, components: Vec<W::TypeId>, entities: Vec<Entity>) {
-        let mut layout = EntityLayout::default();
-        for component in components {
-            self.world_deserializer
-                .register_component(component, &mut layout);
-        }
-
-        let index = self.world.insert_archetype(layout);
-        let base = self.world.archetypes()[index].entities().len();
-        self.world
-            .entities_mut()
-            .insert(&entities, index, ComponentIndex(base));
-
-        self.world.archetypes_mut()[index]
-            .entities_mut()
-            .extend(entities);
-    }
-}
-
-impl<'de, 'a, W: WorldDeserializer> Visitor<'de> for ArchetypeVisitor<'a, W> {
-    type Value = ();
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("struct Archetype")
-    }
-
-    fn visit_seq<V>(mut self, mut seq: V) -> Result<Self::Value, V::Error>
-    where
-        V: SeqAccess<'de>,
-    {
-        let components: Vec<W::TypeId> = seq
-            .next_element()?
-            .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-        let entities: Vec<Entity> = seq
-            .next_element()?
-            .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-
-        self.create_archetype(components, entities);
-
-        Ok(())
-    }
-
-    fn visit_map<V>(mut self, mut map: V) -> Result<Self::Value, V::Error>
-    where
-        V: MapAccess<'de>,
-    {
-        #[derive(Deserialize)]
-        #[serde(field_identifier, rename_all = "lowercase")]
-        enum Field {
-            Components,
-            Entities,
-        }
-
-        let mut components: Option<Vec<W::TypeId>> = None;
-        let mut entities: Option<Vec<Entity>> = None;
-        while let Some(key) = map.next_key()? {
-            match key {
-                Field::Components => {
-                    if components.is_some() {
-                        return Err(serde::de::Error::duplicate_field("components"));
-                    }
-                    components = Some(map.next_value()?);
-                }
-                Field::Entities => {
-                    if entities.is_some() {
-                        return Err(serde::de::Error::duplicate_field("entities"));
-                    }
-                    entities = Some(map.next_value()?);
-                }
-            }
-        }
-
-        let components = components.ok_or_else(|| serde::de::Error::missing_field("components"))?;
-        let entities = entities.ok_or_else(|| serde::de::Error::missing_field("entities"))?;
-        self.create_archetype(components, entities);
-
-        Ok(())
+        Ok(universe.create_world_with_options(options))
     }
 }
 
@@ -298,7 +223,7 @@ impl<'de, 'a, W: WorldDeserializer> Visitor<'de> for ComponentsVisitor<'a, W> {
         V: MapAccess<'de>,
     {
         while let Some(mapped_id) = map.next_key()? {
-            if let Some(type_id) = self.world_deserializer.unmap_id(mapped_id) {
+            if let Some(type_id) = self.world_deserializer.unmap_id(&mapped_id) {
                 map.next_value_seed(ArchetypeSliceDeserializer {
                     type_id,
                     world: &mut self.world,
@@ -349,7 +274,7 @@ impl<'de, 'a, W: WorldDeserializer> Visitor<'de> for ArchetypeSliceDeserializer<
 
             map.next_value_seed(SliceDeserializer {
                 storage,
-                arch_index: ArchetypeIndex(arch_index),
+                arch_index,
                 world_deserializer: self.world_deserializer,
                 type_id: self.type_id,
             })?;

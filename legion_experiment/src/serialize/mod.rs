@@ -1,4 +1,5 @@
 use crate::{
+    entity::Entity,
     storage::{
         archetype::{ArchetypeIndex, EntityLayout},
         component::{Component, ComponentTypeId},
@@ -45,7 +46,7 @@ impl<T> TypeKey for T where
 {
 }
 
-pub struct Serializer<T = SerializableTypeId>
+pub struct Registry<T = SerializableTypeId>
 where
     T: TypeKey,
 {
@@ -54,20 +55,18 @@ where
         ComponentTypeId,
         (
             T,
-            Box<dyn Fn(*const u8, usize, &mut dyn FnMut(&dyn erased_serde::Serialize))>,
-            Box<
-                dyn Fn(
-                    &mut dyn UnknownComponentStorage,
-                    ArchetypeIndex,
-                    &mut dyn erased_serde::Deserializer,
-                ) -> Result<(), erased_serde::Error>,
-            >,
+            fn(*const u8, usize, &mut dyn FnMut(&dyn erased_serde::Serialize)),
+            fn(
+                &mut dyn UnknownComponentStorage,
+                ArchetypeIndex,
+                &mut dyn erased_serde::Deserializer,
+            ) -> Result<(), erased_serde::Error>,
         ),
     >,
-    constructors: HashMap<T, (ComponentTypeId, Box<dyn Fn(&mut EntityLayout)>)>,
+    constructors: HashMap<T, (ComponentTypeId, fn(&mut EntityLayout))>,
 }
 
-impl<T> Serializer<T>
+impl<T> Registry<T>
 where
     T: TypeKey,
 {
@@ -103,14 +102,10 @@ where
         let constructor_fn = |layout: &mut EntityLayout| layout.register_component::<C>();
         self.serialize_fns.insert(
             type_id,
-            (
-                mapped_type_id.clone(),
-                Box::new(serialize_fn),
-                Box::new(deserialize_fn),
-            ),
+            (mapped_type_id.clone(), serialize_fn, deserialize_fn),
         );
         self.constructors
-            .insert(mapped_type_id, (type_id, Box::new(constructor_fn)));
+            .insert(mapped_type_id, (type_id, constructor_fn));
     }
 
     pub fn register_auto_mapped<
@@ -124,7 +119,7 @@ where
     }
 }
 
-impl<T> WorldSerializer for Serializer<T>
+impl<T> WorldSerializer for Registry<T>
 where
     T: TypeKey,
 {
@@ -162,14 +157,14 @@ where
     }
 }
 
-impl<T> WorldDeserializer for Serializer<T>
+impl<T> WorldDeserializer for Registry<T>
 where
     T: TypeKey,
 {
     type TypeId = T;
 
-    fn unmap_id(&self, type_id: Self::TypeId) -> Option<ComponentTypeId> {
-        self.constructors.get(&type_id).map(|(id, _)| *id)
+    fn unmap_id(&self, type_id: &Self::TypeId) -> Option<ComponentTypeId> {
+        self.constructors.get(type_id).map(|(id, _)| *id)
     }
 
     fn register_component(&self, type_id: Self::TypeId, layout: &mut EntityLayout) {
@@ -195,7 +190,7 @@ where
     }
 }
 
-impl<'de, T: TypeKey> DeserializeSeed<'de> for Serializer<T> {
+impl<'de, T: TypeKey> DeserializeSeed<'de> for Registry<T> {
     type Value = World;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -226,17 +221,30 @@ impl Into<ComponentTypeId> for SerializableTypeId {
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+struct WorldMeta<T> {
+    entity_id_offset: u64,
+    entity_id_stride: u64,
+    entity_id_next: u64,
+    component_groups: Vec<Vec<T>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ArchetypeDef<T> {
+    pub components: Vec<T>,
+    pub entities: Vec<Entity>,
+}
+
 #[cfg(test)]
 mod test {
-    use super::{ser::as_serializable, Serializer};
+    use super::{ser::as_serializable, Registry};
     use crate::{
         query::filter::filter_fns::any,
         world::{EntityStore, World},
     };
-    use serde_json::json;
 
     #[test]
-    fn serialize() {
+    fn serialize_json() {
         let mut world = World::default();
 
         let entity = world.extend(vec![
@@ -253,86 +261,56 @@ mod test {
             (8usize, 8isize),
         ]);
 
-        let mut serializer = Serializer::<String>::new();
-        serializer.register::<usize>("usize".to_string());
-        serializer.register::<bool>("bool".to_string());
-        serializer.register::<isize>("isize".to_string());
+        let mut registry = Registry::<String>::new();
+        registry.register::<usize>("usize".to_string());
+        registry.register::<bool>("bool".to_string());
+        registry.register::<isize>("isize".to_string());
 
-        let json = serde_json::to_value(&as_serializable(&world, any(), &serializer)).unwrap();
+        let json = serde_json::to_value(&as_serializable(&world, any(), &registry)).unwrap();
         println!("{:#}", json);
 
-        let expected = json!({
-          "archetypes": [
-            {
-              "components": [
-                "usize",
-                "bool",
-                "isize"
-              ],
-              "entities": [
-                63,
-                62,
-                61,
-                60
-              ]
-            },
-            {
-              "components": [
-                "usize",
-                "isize"
-              ],
-              "entities": [
-                127,
-                126,
-                125,
-                124
-              ]
-            }
-          ],
-          "components": {
-            "bool": {
-              "0": [
-                false,
-                false,
-                false,
-                false
-              ]
-            },
-            "isize": {
-                "0": [
-                  1,
-                  2,
-                  3,
-                  4
-                ],
-                "1": [
-                  5,
-                  6,
-                  7,
-                  8
-                ]
-              },
-            "usize": {
-              "0": [
-                1,
-                2,
-                3,
-                4
-              ],
-              "1": [
-                5,
-                6,
-                7,
-                8
-              ]
-            }
-          }
-        });
-
-        assert_eq!(json, expected);
-
         use serde::de::DeserializeSeed;
-        let world: World = serializer.deserialize(json).unwrap();
+        let world: World = registry.deserialize(json).unwrap();
+        let entity = world.entry_ref(entity).unwrap();
+        assert_eq!(entity.get_component::<usize>().unwrap(), &1usize);
+        assert_eq!(entity.get_component::<bool>().unwrap(), &false);
+        assert_eq!(entity.get_component::<isize>().unwrap(), &1isize);
+    }
+
+    #[test]
+    fn serialize_bincode() {
+        let mut world = World::default();
+
+        let entity = world.extend(vec![
+            (1usize, false, 1isize),
+            (2usize, false, 2isize),
+            (3usize, false, 3isize),
+            (4usize, false, 4isize),
+        ])[0];
+
+        world.extend(vec![
+            (5usize, 5isize),
+            (6usize, 6isize),
+            (7usize, 7isize),
+            (8usize, 8isize),
+        ]);
+
+        let mut registry = Registry::<i32>::new();
+        registry.register::<usize>(1);
+        registry.register::<bool>(2);
+        registry.register::<isize>(3);
+
+        let encoded = bincode::serialize(&as_serializable(&world, any(), &registry)).unwrap();
+
+        use bincode::config::Options;
+        use serde::de::DeserializeSeed;
+        let mut deserializer = bincode::de::Deserializer::from_slice(
+            &encoded[..],
+            bincode::config::DefaultOptions::new()
+                .with_fixint_encoding()
+                .allow_trailing_bytes(),
+        );
+        let world: World = registry.deserialize(&mut deserializer).unwrap();
         let entity = world.entry_ref(entity).unwrap();
         assert_eq!(entity.get_component::<usize>().unwrap(), &1usize);
         assert_eq!(entity.get_component::<bool>().unwrap(), &false);

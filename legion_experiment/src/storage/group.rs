@@ -32,7 +32,7 @@ pub struct Group {
 }
 
 impl Group {
-    fn new<T: IntoIterator<Item = ComponentTypeId>>(components: T) -> Self {
+    pub fn new<T: IntoIterator<Item = ComponentTypeId>>(components: T) -> Self {
         let components: SmallVec<[(ComponentTypeId, usize); 5]> =
             components.into_iter().map(|type_id| (type_id, 0)).collect();
         let mut seen = HashSet::new();
@@ -80,9 +80,7 @@ impl Group {
         }
     }
 
-    pub fn archetypes(&self) -> &[ArchetypeIndex] {
-        &self.archetypes
-    }
+    pub fn archetypes(&self) -> &[ArchetypeIndex] { &self.archetypes }
 
     pub fn components<'a>(&'a self) -> impl Iterator<Item = ComponentTypeId> + 'a {
         self.components.iter().map(|(c, _)| *c)
@@ -117,9 +115,7 @@ impl Index<SubGroup> for Group {
 }
 
 impl From<GroupDef> for Group {
-    fn from(def: GroupDef) -> Self {
-        Self::new(def.components)
-    }
+    fn from(def: GroupDef) -> Self { Self::new(def.components) }
 }
 
 pub trait GroupSource {
