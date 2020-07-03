@@ -554,6 +554,15 @@ impl World {
 
         Ok(dst_entity)
     }
+
+    #[cfg(feature = "serialize")]
+    pub fn as_serializable<'a, F: LayoutFilter, W: crate::serialize::ser::WorldSerializer>(
+        &'a self,
+        filter: F,
+        world_serializer: &'a W,
+    ) -> crate::serialize::ser::SerializableWorld<'a, F, W> {
+        crate::serialize::ser::SerializableWorld::new(&self, filter, world_serializer)
+    }
 }
 
 impl EntityStore for World {

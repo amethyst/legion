@@ -1,5 +1,4 @@
 use crate::{
-    entity::Entity,
     storage::{
         archetype::{ArchetypeIndex, EntityLayout},
         component::{Component, ComponentTypeId},
@@ -9,31 +8,13 @@ use crate::{
 };
 use de::WorldDeserializer;
 use ser::WorldSerializer;
-use serde::de::DeserializeSeed;
+use serde::{de::DeserializeSeed, Serializer};
 use std::{collections::HashMap, hash::Hash, marker::PhantomData};
 
 pub mod de;
+mod entities;
+mod packed;
 pub mod ser;
-
-/*
-{
-    archetypes: [
-        {
-            components: [type_id],
-            entities: [Entity],
-        }
-        ...
-    ],
-    components: [
-        "type_id": {
-            "arch_index": [
-                component,
-                ...
-            ]
-        },
-    ]
-}
-*/
 
 #[doc(hidden)]
 pub trait TypeKey:
@@ -55,12 +36,13 @@ where
         ComponentTypeId,
         (
             T,
-            fn(*const u8, usize, &mut dyn FnMut(&dyn erased_serde::Serialize)),
+            fn(*const u8, &mut dyn FnMut(&dyn erased_serde::Serialize)),
             fn(
                 &mut dyn UnknownComponentStorage,
                 ArchetypeIndex,
                 &mut dyn erased_serde::Deserializer,
             ) -> Result<(), erased_serde::Error>,
+            fn(&mut dyn erased_serde::Deserializer) -> Result<Box<[u8]>, erased_serde::Error>,
         ),
     >,
     constructors: HashMap<T, (ComponentTypeId, fn(&mut EntityLayout))>,
@@ -83,9 +65,9 @@ where
         mapped_type_id: T,
     ) {
         let type_id = ComponentTypeId::of::<C>();
-        let serialize_fn = |ptr, count, serialize: &mut dyn FnMut(&dyn erased_serde::Serialize)| {
-            let slice = unsafe { std::slice::from_raw_parts(ptr as *const C, count) };
-            (serialize)(&slice);
+        let serialize_fn = |ptr, serialize: &mut dyn FnMut(&dyn erased_serde::Serialize)| {
+            let component = unsafe { &*(ptr as *const C) };
+            (serialize)(component);
         };
         let deserialize_fn =
             |storage: &mut dyn UnknownComponentStorage,
@@ -99,10 +81,27 @@ where
                 }
                 Ok(())
             };
+        let deserialize_single_fn = |deserializer: &mut dyn erased_serde::Deserializer| {
+            let component = erased_serde::deserialize::<C>(deserializer)?;
+            unsafe {
+                let vec = std::slice::from_raw_parts(
+                    &component as *const C as *const u8,
+                    std::mem::size_of::<C>(),
+                )
+                .to_vec();
+                std::mem::forget(component);
+                Ok(vec.into_boxed_slice())
+            }
+        };
         let constructor_fn = |layout: &mut EntityLayout| layout.register_component::<C>();
         self.serialize_fns.insert(
             type_id,
-            (mapped_type_id.clone(), serialize_fn, deserialize_fn),
+            (
+                mapped_type_id.clone(),
+                serialize_fn,
+                deserialize_fn,
+                deserialize_single_fn,
+            ),
         );
         self.constructors
             .insert(mapped_type_id, (type_id, constructor_fn));
@@ -125,18 +124,17 @@ where
 {
     type TypeId = T;
 
-    unsafe fn serialize_component_slice<S: serde::Serializer>(
+    unsafe fn serialize_component<S: Serializer>(
         &self,
         ty: ComponentTypeId,
         ptr: *const u8,
-        count: usize,
         serializer: S,
     ) -> Result<S::Ok, S::Error> {
-        if let Some((_, serialize_fn, _)) = self.serialize_fns.get(&ty) {
+        if let Some((_, serialize_fn, _, _)) = self.serialize_fns.get(&ty) {
             let mut serializer = Some(serializer);
             let mut result = None;
             let result_ref = &mut result;
-            (serialize_fn)(ptr, count, &mut move |serializable| {
+            (serialize_fn)(ptr, &mut move |serializable| {
                 *result_ref = Some(erased_serde::serialize(
                     serializable,
                     serializer
@@ -153,7 +151,7 @@ where
     fn map_id(&self, type_id: ComponentTypeId) -> Option<Self::TypeId> {
         self.serialize_fns
             .get(&type_id)
-            .map(|(type_id, _, _)| type_id.clone())
+            .map(|(type_id, _, _, _)| type_id.clone())
     }
 }
 
@@ -180,12 +178,28 @@ where
         arch_index: ArchetypeIndex,
         deserializer: D,
     ) -> Result<(), D::Error> {
-        if let Some((_, _, deserialize)) = self.serialize_fns.get(&type_id) {
+        if let Some((_, _, deserialize, _)) = self.serialize_fns.get(&type_id) {
             use serde::de::Error;
             let mut deserializer = erased_serde::Deserializer::erase(deserializer);
             (deserialize)(storage, arch_index, &mut deserializer).map_err(D::Error::custom)
         } else {
-            panic!();
+            //Err(D::Error::custom("unrecognized component type"))
+            panic!()
+        }
+    }
+
+    fn deserialize_component<'de, D: serde::Deserializer<'de>>(
+        &self,
+        type_id: ComponentTypeId,
+        deserializer: D,
+    ) -> Result<Box<[u8]>, D::Error> {
+        if let Some((_, _, _, deserialize)) = self.serialize_fns.get(&type_id) {
+            use serde::de::Error;
+            let mut deserializer = erased_serde::Deserializer::erase(deserializer);
+            (deserialize)(&mut deserializer).map_err(D::Error::custom)
+        } else {
+            //Err(D::Error::custom("unrecognized component type"))
+            panic!()
         }
     }
 }
@@ -230,14 +244,16 @@ struct WorldMeta<T> {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct ArchetypeDef<T> {
-    pub components: Vec<T>,
-    pub entities: Vec<Entity>,
+#[serde(rename_all = "lowercase")]
+enum WorldField {
+    _Meta,
+    Packed,
+    Entities,
 }
 
 #[cfg(test)]
 mod test {
-    use super::{ser::as_serializable, Registry};
+    use super::Registry;
     use crate::{
         query::filter::filter_fns::any,
         world::{EntityStore, World},
@@ -266,7 +282,7 @@ mod test {
         registry.register::<bool>("bool".to_string());
         registry.register::<isize>("isize".to_string());
 
-        let json = serde_json::to_value(&as_serializable(&world, any(), &registry)).unwrap();
+        let json = serde_json::to_value(&world.as_serializable(any(), &registry)).unwrap();
         println!("{:#}", json);
 
         use serde::de::DeserializeSeed;
@@ -300,7 +316,7 @@ mod test {
         registry.register::<bool>(2);
         registry.register::<isize>(3);
 
-        let encoded = bincode::serialize(&as_serializable(&world, any(), &registry)).unwrap();
+        let encoded = bincode::serialize(&world.as_serializable(any(), &registry)).unwrap();
 
         use bincode::config::Options;
         use serde::de::DeserializeSeed;
