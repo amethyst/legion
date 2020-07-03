@@ -249,9 +249,7 @@ pub mod de {
 
                     let arch_index = self.world.insert_archetype(layout);
                     let comp_index = self.world.archetypes()[arch_index].entities().len();
-                    self.world.archetypes_mut()[arch_index]
-                        .entities_mut()
-                        .push(self.entity);
+                    self.world.archetypes_mut()[arch_index].push(self.entity);
                     self.world.entities_mut().insert(
                         &[self.entity],
                         arch_index,

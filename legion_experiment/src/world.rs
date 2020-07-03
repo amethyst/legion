@@ -1,6 +1,7 @@
 use crate::entity::{Entity, EntityAllocator, EntityHasher, EntityLocation, LocationMap};
 use crate::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use crate::{
+    event::{EventSender, Subscriber, Subscribers},
     query::{
         filter::{filter_fns::any, EntityFilter, LayoutFilter},
         view::View,
@@ -106,6 +107,7 @@ pub struct World {
     entities: LocationMap,
     entity_allocator: EntityAllocator,
     allocation_buffer: Vec<Entity>,
+    subscribers: Subscribers,
 }
 
 impl Default for World {
@@ -139,6 +141,7 @@ impl World {
             entities: LocationMap::default(),
             entity_allocator: EntityAllocator::default(),
             allocation_buffer: Vec::default(),
+            subscribers: Subscribers::default(),
         }
     }
 
@@ -181,7 +184,7 @@ impl World {
         if let Some(location) = location {
             let EntityLocation(arch_index, component_index) = location;
             let archetype = &mut self.archetypes[arch_index];
-            archetype.entities_mut().swap_remove(component_index.0);
+            archetype.swap_remove(component_index.0);
             for type_id in archetype.layout().component_types() {
                 let storage = self.components.get_mut(*type_id).unwrap();
                 storage.swap_remove(arch_index, component_index);
@@ -212,6 +215,20 @@ impl World {
                 ComponentAccess::All,
             )
         })
+    }
+
+    pub fn subscribe<T: LayoutFilter + 'static, S: EventSender + 'static>(
+        &mut self,
+        sender: S,
+        filter: T,
+    ) {
+        let subscriber = Subscriber::new(filter, sender);
+        for arch in &mut self.archetypes {
+            if subscriber.is_interested(arch) {
+                arch.subscribe(subscriber.clone());
+            }
+        }
+        self.subscribers.push(subscriber);
     }
 
     pub fn pack(&mut self, options: PackOptions) { self.components.pack(&options); }
@@ -248,8 +265,8 @@ impl World {
         };
 
         // move entity ID
-        let entity = from_arch.entities_mut().swap_remove(idx);
-        to_arch.entities_mut().push(entity);
+        let entity = from_arch.swap_remove(idx);
+        to_arch.push(entity);
         self.entities.set(
             entity,
             EntityLocation::new(
@@ -300,7 +317,9 @@ impl World {
         // create and insert new archetype
         self.index.push(&layout);
         let arch_index = ArchetypeIndex(self.archetypes.len() as u32);
-        self.archetypes.push(Archetype::new(arch_index, layout));
+        let subscribers = self.subscribers.matches_layout(layout.component_types());
+        self.archetypes
+            .push(Archetype::new(arch_index, layout, subscribers));
         let archetype = &self.archetypes[self.archetypes.len() - 1];
 
         // find all groups which contain each component
@@ -699,7 +718,7 @@ impl Merger for Move {
                 dst_storage.move_archetype_from(src_arch.index(), src_storage);
             }
 
-            for entity in src_arch.entities_mut().drain(..) {
+            for entity in src_arch.drain() {
                 src_entities.remove(entity);
             }
         } else {
@@ -719,7 +738,7 @@ impl Merger for Move {
 
             // swap-remove entities in the same order as we swap-removed the components
             for entity_index in src_entity_range.rev() {
-                let removed = src_arch.entities_mut().swap_remove(entity_index);
+                let removed = src_arch.swap_remove(entity_index);
                 let location = src_entities.remove(removed).unwrap();
                 if entity_index < src_arch.entities().len() {
                     let swapped = src_arch.entities()[entity_index];

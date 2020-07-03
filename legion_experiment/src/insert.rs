@@ -68,7 +68,7 @@ impl<'a> ArchetypeWriter<'a> {
         }
     }
 
-    pub fn push(&mut self, entity: Entity) { self.archetype.entities_mut().push(entity); }
+    pub fn push(&mut self, entity: Entity) { self.archetype.push(entity); }
 
     pub fn inserted(&self) -> (ComponentIndex, &[Entity]) {
         let start = self.initial_count;

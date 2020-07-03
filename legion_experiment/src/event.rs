@@ -1,55 +1,65 @@
 use crate::entity::Entity;
-use crate::storage::archetype::{ArchetypeId, ArchetypeTagsRef};
-use crate::storage::chunk::ChunkId;
-use crate::storage::components::ComponentTypeId;
-use crate::storage::filter::{EntityFilterTuple, FilterResult, Passthrough};
-use crate::storage::tags::TagTypeId;
-use crate::storage::{ArchetypeFilter, LayoutFilter};
-use crossbeam_channel::{Sender, TrySendError};
+use crate::query::filter::LayoutFilter;
+use crate::storage::{
+    archetype::{Archetype, ArchetypeIndex},
+    component::ComponentTypeId,
+};
 use std::iter::Iterator;
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 /// Events emitted by a world to subscribers. See `World.subscribe(Sender, EntityFilter)`.
 #[derive(Debug, Clone)]
 pub enum Event {
     /// A new archetype has been created.
-    ArchetypeCreated(ArchetypeId),
-    /// A new chunk has been created.
-    ChunkCreated(ChunkId),
-    /// An entity has been inserted into a chunk.
-    EntityInserted(Entity, ChunkId),
-    /// An entity has been removed from a chunk.
-    EntityRemoved(Entity, ChunkId),
+    ArchetypeCreated(ArchetypeIndex),
+    /// An entity has been inserted into an archetype.
+    EntityInserted(Entity, ArchetypeIndex),
+    /// An entity has been removed from an archetype.
+    EntityRemoved(Entity, ArchetypeIndex),
 }
 
-pub trait EventFilter: LayoutFilter + ArchetypeFilter {}
+pub trait EventSender: Send + Sync {
+    fn send(&self, event: Event) -> bool;
+}
 
-impl<L, A> EventFilter for EntityFilterTuple<L, A, Passthrough>
-where
-    L: LayoutFilter + Send + Sync + Clone,
-    A: ArchetypeFilter + Send + Sync + Clone,
-{
+#[cfg(feature = "crossbeam-events")]
+impl EventSender for crossbeam_channel::Sender<Event> {
+    fn send(&self, event: Event) -> bool {
+        if let Err(crossbeam_channel::TrySendError::Disconnected(_)) = self.try_send(event) {
+            false
+        } else {
+            true
+        }
+    }
 }
 
 #[derive(Clone)]
 pub struct Subscriber {
-    pub filter: Arc<dyn EventFilter>,
-    pub sender: Sender<Event>,
+    filter: Arc<dyn LayoutFilter>,
+    sender: Arc<dyn EventSender>,
 }
 
 impl Subscriber {
-    pub fn new(filter: Arc<dyn EventFilter>, sender: Sender<Event>) -> Self {
-        Self { filter, sender }
+    pub(crate) fn new<F: LayoutFilter + 'static, S: EventSender + 'static>(
+        filter: F,
+        sender: S,
+    ) -> Self {
+        Self {
+            filter: Arc::new(filter),
+            sender: Arc::new(sender),
+        }
     }
 
-    pub fn filter(&self) -> &dyn EventFilter { &*self.filter }
-
-    pub(crate) fn try_send(&self, message: Event) -> Result<(), TrySendError<Event>> {
-        self.sender.try_send(message)
+    pub(crate) fn is_interested(&self, archetype: &Archetype) -> bool {
+        self.filter
+            .matches_layout(archetype.layout().component_types())
+            .is_pass()
     }
+
+    pub(crate) fn send(&self, message: Event) -> bool { self.sender.send(message) }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Subscribers {
     subscribers: Vec<Subscriber>,
 }
@@ -61,35 +71,28 @@ impl Subscribers {
 
     pub fn send(&mut self, message: Event) {
         for i in (0..self.subscribers.len()).rev() {
-            if let Err(error) = self.subscribers[i].try_send(message.clone()) {
-                if let TrySendError::Disconnected(_) = error {
-                    self.subscribers.swap_remove(i);
-                }
+            if !self.subscribers[i].send(message.clone()) {
+                self.subscribers.swap_remove(i);
             }
         }
     }
 
-    pub fn matches_layout(
-        &self,
-        components: &[ComponentTypeId],
-        tags: &[TagTypeId],
-    ) -> Vec<Subscriber> {
-        self.subscribers
-            .iter()
-            .filter(|sub| sub.filter.matches_layout(components, tags).is_pass())
-            .cloned()
-            .collect()
-    }
-
-    pub fn matches_archetype(&self, tags: &ArchetypeTagsRef) -> Vec<Subscriber> {
-        self.subscribers
-            .iter()
-            .filter(|sub| sub.filter.matches_archetype(tags).is_pass())
-            .cloned()
-            .collect()
+    pub fn matches_layout(&self, components: &[ComponentTypeId]) -> Self {
+        Self {
+            subscribers: self
+                .subscribers
+                .iter()
+                .filter(|sub| sub.filter.matches_layout(components).is_pass())
+                .cloned()
+                .collect(),
+        }
     }
 }
 
-impl Default for Subscribers {
-    fn default() -> Self { Subscribers::new(Vec::new()) }
+impl Debug for Subscribers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Subscribers")
+            .field("len", &self.subscribers.len())
+            .finish()
+    }
 }

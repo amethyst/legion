@@ -277,9 +277,7 @@ pub mod de {
                         ComponentIndex(base),
                     );
 
-                    self.world.archetypes_mut()[index]
-                        .entities_mut()
-                        .extend(archetype.entities);
+                    self.world.archetypes_mut()[index].extend(archetype.entities);
 
                     index
                 }

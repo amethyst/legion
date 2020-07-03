@@ -4,6 +4,7 @@ use super::{
 };
 use crate::{
     entity::Entity,
+    event::{Event, Subscriber, Subscribers},
     query::filter::{FilterResult, LayoutFilter},
 };
 use std::{
@@ -45,14 +46,17 @@ pub struct Archetype {
     index: ArchetypeIndex,
     entities: Vec<Entity>,
     layout: Arc<EntityLayout>,
+    subscribers: Subscribers,
 }
 
 impl Archetype {
-    pub fn new(index: ArchetypeIndex, layout: EntityLayout) -> Self {
+    pub fn new(index: ArchetypeIndex, layout: EntityLayout, mut subscribers: Subscribers) -> Self {
+        subscribers.send(Event::ArchetypeCreated(index));
         Self {
             index,
             layout: Arc::new(layout),
             entities: Vec::new(),
+            subscribers,
         }
     }
 
@@ -62,7 +66,41 @@ impl Archetype {
 
     pub fn entities(&self) -> &[Entity] { &self.entities }
 
-    pub fn entities_mut(&mut self) -> &mut Vec<Entity> { &mut self.entities }
+    pub fn push(&mut self, entity: Entity) {
+        self.entities.push(entity);
+        self.subscribers
+            .send(Event::EntityInserted(entity, self.index));
+    }
+
+    pub fn extend(&mut self, entities: impl IntoIterator<Item = Entity>) {
+        let start = self.entities.len();
+        self.entities.extend(entities);
+        for entity in &self.entities[start..] {
+            self.subscribers
+                .send(Event::EntityInserted(*entity, self.index));
+        }
+    }
+
+    pub fn swap_remove(&mut self, entity_index: usize) -> Entity {
+        let removed = self.entities.swap_remove(entity_index);
+        self.subscribers
+            .send(Event::EntityRemoved(removed, self.index));
+        removed
+    }
+
+    pub(crate) fn subscribe(&mut self, subscriber: Subscriber) {
+        subscriber.send(Event::ArchetypeCreated(self.index));
+        for entity in &self.entities {
+            subscriber.send(Event::EntityInserted(*entity, self.index));
+        }
+        self.subscribers.push(subscriber);
+    }
+
+    pub fn drain(&mut self) -> Vec<Entity> {
+        let mut entities = Vec::new();
+        std::mem::swap(&mut self.entities, &mut entities);
+        entities
+    }
 }
 
 #[derive(Default, Debug, Clone)]

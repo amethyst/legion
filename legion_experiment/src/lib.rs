@@ -1,6 +1,7 @@
 pub mod cons;
 pub mod entity;
 pub mod entry;
+pub mod event;
 mod hash;
 mod insert;
 mod iter;
