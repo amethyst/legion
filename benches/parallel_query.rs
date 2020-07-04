@@ -131,15 +131,32 @@ fn parallel(world: &mut World) {
 }
 
 fn par_for_each_mut(world: &mut World) {
+    // join(
+    //     || unsafe {
+    //         <(Write<B>, Read<A>)>::query().par_for_each_unchecked(world, |(b, a)| {
+    //             b.0 = a.0;
+    //         });
+    //     },
+    //     || unsafe {
+    //         <(Write<C>, Read<A>)>::query().par_for_each_unchecked(world, |(c, a)| {
+    //             c.0 = a.0;
+    //         });
+    //     },
+    // );
+    use rayon::iter::{IntoParallelIterator, ParallelIterator};
     join(
         || unsafe {
-            <(Write<B>, Read<A>)>::query().par_for_each_unchecked(world, |(b, a)| {
-                b.0 = a.0;
+            <(Write<B>, Read<A>)>::query().for_each_chunk_unchecked(world, |chunk| {
+                chunk.into_par_iter().for_each(|(b, a)| {
+                    b.0 = a.0;
+                })
             });
         },
         || unsafe {
-            <(Write<C>, Read<A>)>::query().par_for_each_unchecked(world, |(c, a)| {
-                c.0 = a.0;
+            <(Write<C>, Read<A>)>::query().for_each_chunk_unchecked(world, |chunk| {
+                chunk.into_par_iter().for_each(|(c, a)| {
+                    c.0 = a.0;
+                })
             });
         },
     );

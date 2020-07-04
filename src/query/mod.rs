@@ -424,9 +424,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     ) where
         Body: Fn(<V as View<'a>>::Element) + Send + Sync,
     {
-        use rayon::iter::{IntoParallelIterator, ParallelIterator};
-        self.par_iter_chunks_unchecked(world)
-            .for_each(move |chunk| chunk.into_par_iter().for_each(&f));
+        use rayon::iter::ParallelIterator;
+        self.par_iter_unchecked(world).for_each(&f);
     }
 
     #[inline]
