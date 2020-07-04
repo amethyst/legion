@@ -4,7 +4,6 @@ use component::{Component, ComponentTypeId};
 use downcast_rs::{impl_downcast, Downcast};
 use packed::next_component_version;
 use std::{
-    cell::UnsafeCell,
     collections::{HashMap, HashSet},
     hash::BuildHasherDefault,
     ops::{Deref, DerefMut, Index, IndexMut},
@@ -223,15 +222,10 @@ pub trait ComponentStorage<'a, T: Component>: UnknownComponentStorage + Default 
 pub struct Components {
     storages: HashMap<
         ComponentTypeId,
-        UnsafeCell<Box<dyn UnknownComponentStorage>>,
+        Box<dyn UnknownComponentStorage>,
         BuildHasherDefault<ComponentTypeIdHasher>,
     >,
 }
-
-// required because of the UnsafeCell in storages
-// but we check write safety ourselves
-unsafe impl Send for Components {}
-unsafe impl Sync for Components {}
 
 impl Components {
     pub fn get_or_insert_with<F>(
@@ -242,17 +236,12 @@ impl Components {
     where
         F: FnMut() -> Box<dyn UnknownComponentStorage>,
     {
-        let cell = self
-            .storages
-            .entry(type_id)
-            .or_insert_with(|| UnsafeCell::new(create()));
-        unsafe { &mut *cell.get() }.deref_mut()
+        let cell = self.storages.entry(type_id).or_insert_with(|| create());
+        cell.deref_mut()
     }
 
     pub fn get(&self, type_id: ComponentTypeId) -> Option<&dyn UnknownComponentStorage> {
-        self.storages
-            .get(&type_id)
-            .map(|cell| unsafe { &*cell.get() }.deref())
+        self.storages.get(&type_id).map(|cell| cell.deref())
     }
 
     pub fn get_downcast<T: Component>(&self) -> Option<&T::Storage> {
@@ -264,9 +253,7 @@ impl Components {
         &mut self,
         type_id: ComponentTypeId,
     ) -> Option<&mut dyn UnknownComponentStorage> {
-        self.storages
-            .get_mut(&type_id)
-            .map(|cell| unsafe { &mut *cell.get() }.deref_mut())
+        self.storages.get_mut(&type_id).map(|cell| cell.deref_mut())
     }
 
     pub fn get_downcast_mut<T: Component>(&mut self) -> Option<&mut T::Storage> {
@@ -295,9 +282,7 @@ impl Components {
     }
 
     fn iter_storages_mut(&mut self) -> impl Iterator<Item = &mut dyn UnknownComponentStorage> {
-        self.storages
-            .iter_mut()
-            .map(|(_, cell)| unsafe { (*cell.get()).deref_mut() })
+        self.storages.iter_mut().map(|(_, cell)| cell.deref_mut())
     }
 }
 
@@ -349,6 +334,11 @@ impl<'a> MultiMut<'a> {
         }
     }
 
+    /// Claims exclusive access to a component storage.
+    ///
+    /// # Safety
+    /// The caller must ensure that each component type is only claimed once, as doing otherwise
+    /// may result in mutable aliases of the component storage. This is validated in debug builds.
     pub unsafe fn claim<T: Component>(&mut self) -> Option<&'a mut T::Storage> {
         let type_id = ComponentTypeId::of::<T>();
         #[cfg(debug_assertions)]
@@ -356,12 +346,22 @@ impl<'a> MultiMut<'a> {
             assert!(!self.claimed.contains(&type_id));
             self.claimed.insert(type_id);
         }
+        // Self::extend_lifetime extends the local borrow up to 'a.
+        // This is highly unsafe as it would allow aliasing a mutable borrow
+        // by calling claim() multiple times for the same component.
+        // However, the caller is responsible for not doing this as part of claim's safety rules.
+        // We validate this in debug builds.
         self.components
             .storages
-            .get(&type_id)
-            .and_then(|cell| { &mut *cell.get() }.downcast_mut())
+            .get_mut(&type_id)
+            .and_then(|cell| Self::extend_lifetime(cell).downcast_mut())
     }
 
+    /// Claims exclusive access to a component storage.
+    ///
+    /// # Safety
+    /// The caller must ensure that each component type is only claimed once, as doing otherwise
+    /// may result in mutable aliases of the component storage. This is validated in debug builds.
     pub unsafe fn claim_unknown(
         &mut self,
         type_id: ComponentTypeId,
@@ -371,9 +371,18 @@ impl<'a> MultiMut<'a> {
             assert!(!self.claimed.contains(&type_id));
             self.claimed.insert(type_id);
         }
+        // Self::extend_lifetime extends the local borrow up to 'a.
+        // This is highly unsafe as it would allow aliasing a mutable borrow
+        // by calling claim_unknown() multiple times for the same component.
+        // However, the caller is responsible for not doing this as part of claim_unknown's safety rules.
+        // We validate this in debug builds.
         self.components
             .storages
-            .get(&type_id)
-            .map(|cell| &mut **cell.get())
+            .get_mut(&type_id)
+            .map(|cell| Self::extend_lifetime(cell).deref_mut())
+    }
+
+    unsafe fn extend_lifetime<'b, T>(value: &'b mut T) -> &'a mut T {
+        std::mem::transmute::<&'b mut T, &'a mut T>(value)
     }
 }
