@@ -2,7 +2,7 @@ use criterion::*;
 
 use cgmath::prelude::*;
 use cgmath::{vec3, Matrix4, Quaternion, Vector3};
-use legion::prelude::*;
+use legion::*;
 use rayon::join;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -36,7 +36,7 @@ fn setup(data: Vec<(Position, Orientation, Scale, Transform)>) -> World {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    world.insert((), data);
+    world.extend(data);
 
     world
 }
