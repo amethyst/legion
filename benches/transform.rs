@@ -85,7 +85,7 @@ fn par_for_each_mut(world: &mut World) {
 
 fn bench_transform(c: &mut Criterion) {
     c.bench(
-        "update transform (experimental)",
+        "update transform",
         ParameterizedBenchmark::new(
             "ideal sequential",
             |b, n| {
