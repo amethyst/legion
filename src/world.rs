@@ -24,6 +24,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+/// Unique identifier for a universe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UniverseId(u64);
 static UNIVERSE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -36,6 +37,20 @@ impl Default for UniverseId {
     fn default() -> Self { Self::next() }
 }
 
+/// A Universe defines an [entity](../entity/struct.Entity.html) ID address space which can be shared between multiple [Worlds](struct.World.html).
+///
+/// A universe can be sharded to divide the entity address space between multiple universes. This can be useful in cases where entities
+/// need to be allocated in two worlds which cannot share a single runtime universe; for example when running a network application across
+/// multiple devices, or when mixing runtime created entities with offline serialized entities. Entities allocated in different shards of
+/// a sharded universe are guaranteed to have unique entity IDs across both worlds.
+///
+/// Sharding a universe splits the address space into _n_ shards, where each universe is assigned a unique index from among the shards:
+///
+/// ```
+/// # use legion::*;
+/// // create universe in shard 7 of 9
+/// let universe = Universe::sharded(7, 9);
+/// ```
 #[derive(Debug, Clone, Default)]
 pub struct Universe {
     id: UniverseId,
@@ -43,8 +58,11 @@ pub struct Universe {
 }
 
 impl Universe {
+    /// Creates a new universe across the entire entity address space.
     pub fn new() -> Self { Self::default() }
 
+    /// Creates a new universe with a sharded entity address space.
+    /// `n` represents the index of the shard from a set of `of` shards.
     pub fn sharded(n: u64, of: u64) -> Self {
         Self {
             id: UniverseId::next(),
@@ -52,8 +70,10 @@ impl Universe {
         }
     }
 
+    /// Creates a new [World](struct.World.html) in this universe with default options.
     pub fn create_world(&self) -> World { self.create_world_with_options(WorldOptions::default()) }
 
+    /// Creates a new [World](struct.World.html) in this universe.
     pub fn create_world_with_options(&self, options: WorldOptions) -> World {
         World {
             id: WorldId::next(self.id),
@@ -65,18 +85,29 @@ impl Universe {
     pub(crate) fn entity_allocator(&self) -> &EntityAllocator { &self.entity_allocator }
 }
 
+/// Error type representing a failure to aquire a storage accessor.
 #[derive(Debug)]
 pub struct ComponentAccessError;
 
+/// The `EntityStore` trait abstracts access to entity data as required by queries for
+/// both [World](struct.World.html) and [SubWorld](../subworld/struct.SubWorld.html)
 pub trait EntityStore {
+    /// Returns the world's unique ID.
     fn id(&self) -> WorldId;
+
+    /// Returns an entity entry which can be used to access entity metadata and components.
     fn entry_ref(&self, entity: Entity) -> Option<crate::entry::EntryRef>;
+
+    /// Returns a mutable entity entry which can be used to access entity metadata and components.
     fn entry_mut(&mut self, entity: Entity) -> Option<crate::entry::EntryMut>;
+
+    /// Returns a component storage accessor for component types declared in the specified [View](../query/view/trait.View.html).
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
     ) -> Result<StorageAccessor, ComponentAccessError>;
 }
 
+/// Unique identifier for a [world](struct.World.html).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WorldId(UniverseId, u64);
 static WORLD_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -92,11 +123,20 @@ impl Default for WorldId {
     fn default() -> Self { Self::next(UniverseId::default()) }
 }
 
+/// Describes configuration options for the creation of a new [world](struct.World.html).
 #[derive(Default)]
 pub struct WorldOptions {
+    /// A vector of component [groups](../storage/group/struct.Group.html) to provide
+    /// layout hints for query optimization.
     pub groups: Vec<Group>,
 }
 
+/// A container of entities.
+///
+/// Each entity stored inside a world is uniquely identified by an [Entity](../entity/struct.Entity.html) ID
+/// and may have an arbitrary collection of [components](../storage/component/trait.Component.html) attached.
+///
+/// The entities in a world may be efficiently searched and iterated via [queries](../query/index.html).
 #[derive(Debug)]
 pub struct World {
     id: WorldId,
@@ -116,8 +156,10 @@ impl Default for World {
 }
 
 impl World {
+    /// Creates a new world in its own [universe](struct.Universe.html) with default [options](struct.WorldOptions.html).
     pub fn new() -> Self { Self::default() }
 
+    /// Creates a new world in its own [universe](struct.Universe.html).
     pub fn with_options(options: WorldOptions) -> Self {
         let mut group_members = HashMap::default();
         for (i, group) in options.groups.iter().enumerate() {
@@ -146,16 +188,36 @@ impl World {
         }
     }
 
+    /// Returns the world's unique ID.
     pub fn id(&self) -> WorldId { self.id }
 
-    pub fn entity_allocator(&self) -> &EntityAllocator { &self.entity_allocator }
-
+    /// Returns the number of entities in the world.
     pub fn len(&self) -> usize { self.entities.len() }
 
+    /// Returns `true` if the world contains no entities.
     pub fn is_empty(&self) -> bool { self.len() == 0 }
 
+    /// Returns `true` if the world contains an entity with the given ID.
     pub fn contains(&self, entity: Entity) -> bool { self.entities.contains(entity) }
 
+    /// Appends a new entity to the world. Returns the ID of the new entity.
+    /// `components` should be a tuple of components to attach to the entity.
+    ///
+    /// # Examples
+    ///
+    /// Pushing an entity with three components:
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::new();
+    /// let _entity = world.push((1usize, false, 5.3f32));
+    /// ```
+    ///
+    /// Pushing an entity with one component (note the tuple syntax):
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::new();
+    /// let _entity = world.push((1usize,));
+    /// ```
     pub fn push<T>(&mut self, components: T) -> Entity
     where
         Option<T>: IntoComponentSource,
@@ -163,6 +225,34 @@ impl World {
         self.extend(Some(components))[0]
     }
 
+    /// Appends a collection of entities to the world. Returns the IDs of the new entities.
+    ///
+    /// # Examples
+    ///
+    /// Inserting a vector of component tuples:
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::new();
+    /// let _entities = world.extend(vec![
+    ///     (1usize, false, 5.3f32),
+    ///     (2usize, true,  5.3f32),
+    ///     (3usize, false, 5.3f32),
+    /// ]);
+    /// ```
+    ///
+    /// Inserting a tuple of component vectors:
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::new();
+    /// let _entities = world.extend(
+    ///     (
+    ///         vec![1usize, 2usize, 3usize],
+    ///         vec![false, true, false],
+    ///         vec![5.3f32, 5.3f32, 5.2f32],
+    ///     ).into_soa()
+    /// );
+    /// ```
+    /// SoA inserts require all vectors to have the same length. These inserts are faster than inserting via an iterator of tuples.
     pub fn extend(&mut self, components: impl IntoComponentSource) -> &[Entity] {
         let mut components = components.into();
 
@@ -180,6 +270,7 @@ impl World {
         &self.allocation_buffer
     }
 
+    /// Removes the specified entity from the world. Returns `true` if an entity was removed.
     pub fn remove(&mut self, entity: Entity) -> bool {
         let location = self.entities.remove(entity);
         if let Some(location) = location {
@@ -201,6 +292,7 @@ impl World {
         }
     }
 
+    /// Removes all entities from the world.
     pub fn clear(&mut self) {
         use crate::query::IntoQuery;
         let mut all = Entity::query();
@@ -210,6 +302,20 @@ impl World {
         }
     }
 
+    /// Gets an [entry](../entry/struct.Entry.html) for an entity, allowing manipulation of the
+    /// entity.
+    ///
+    /// # Examples
+    ///
+    /// Adding a component to an entity:
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::new();
+    /// let entity = world.push((true, 0isize));
+    /// if let Some(mut entry) = world.entry(entity) {
+    ///     entry.add_component(0.2f32);
+    /// }
+    /// ```
     pub fn entry(&mut self, entity: Entity) -> Option<crate::entry::Entry> {
         self.entities
             .get(entity)
@@ -227,6 +333,7 @@ impl World {
         })
     }
 
+    /// Subscribes to entity [events](../event/enum.Event.html).
     pub fn subscribe<T: LayoutFilter + 'static, S: EventSender + 'static>(
         &mut self,
         sender: S,
@@ -241,7 +348,12 @@ impl World {
         self.subscribers.push(subscriber);
     }
 
+    /// Packs the world's internal component storage to optimise iteration performance for
+    /// [queries](../query/index.html) which match a [group](../storage/group/struct.Group.html)
+    /// defined when this world was created.
     pub fn pack(&mut self, options: PackOptions) { self.components.pack(&options); }
+
+    pub(crate) fn entity_allocator(&self) -> &EntityAllocator { &self.entity_allocator }
 
     pub(crate) fn components(&self) -> &Components { &self.components }
 
@@ -401,6 +513,7 @@ impl World {
         self.split::<V>()
     }
 
+    /// Merges the given world into this world by moving all entities out of the given world.
     pub fn move_from(
         &mut self,
         source: &mut World,
@@ -408,6 +521,7 @@ impl World {
         self.merge_from(source, &any(), &mut Move, None, EntityPolicy::default())
     }
 
+    /// Merges the given world into this world by cloning all entities from the given world via a [Duplicate](struct.Duplicate.html).
     pub fn clone_from(
         &mut self,
         source: &mut World,
@@ -416,6 +530,69 @@ impl World {
         self.merge_from(source, &any(), cloner, None, EntityPolicy::default())
     }
 
+    /// Merges a world into this world.
+    ///
+    /// A [filter](../query/filter/trait.LayoutFilter.html) selects which entities to merge.  
+    /// A [merger](trait.Merger.html) describes how to perform the merge operation.  
+    /// A map of entity IDs can be provided to manually remap entity IDs from the source world before they are handled by the entity policy.  
+    /// A [policy](enum.EntityPolicy.html) describes how to handle entity ID allocation and conflict resolution.
+    ///
+    /// If any entity IDs are remapped by the policy, their mappings will be returned in the result.
+    ///
+    /// More advanced operations such as component type transformations can be performed with the [Duplicate](struct.Duplicate.html) merger.
+    ///
+    /// # Examples
+    ///
+    /// Moving all entities from the source world, while preserving their IDs. This will error
+    /// if the ID conflicts with IDs in the destination world.
+    /// ```
+    /// # use legion::*;
+    /// let mut world_a = World::new();
+    /// let mut world_b = World::new();
+    ///
+    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut Move, None, EntityPolicy::Move(ConflictPolicy::Error));
+    /// ```
+    ///
+    /// Moving all entities from the source world, while reallocating IDs from the
+    /// destination world's address space.
+    /// ```
+    /// # use legion::*;
+    /// let mut world_a = World::new();
+    /// let mut world_b = World::new();
+    ///
+    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut Move, None, EntityPolicy::Reallocate);
+    /// ```
+    ///
+    /// Moving all entities from the source world, replacing entities in the destination
+    /// with entities from the source if they conflict.
+    /// ```
+    /// # use legion::*;
+    /// let mut world_a = World::new();
+    /// let mut world_b = World::new();
+    ///
+    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut Move, None, EntityPolicy::Move(ConflictPolicy::Replace));
+    /// ```
+    ///
+    /// Cloning all entities from the source world, converting all `i32` components to `f64` components.
+    /// ```
+    /// # use legion::*;
+    /// let mut world_a = World::new();
+    /// let mut world_b = World::new();
+    ///
+    /// // any component types not registered with Duplicate will be ignored during the merge
+    /// let mut merger = Duplicate::default();
+    /// merger.register_copy::<isize>(); // copy is faster than clone
+    /// merger.register_clone::<String>();
+    /// merger.register_convert(|comp: &i32| *comp as f32);
+    ///
+    /// let _ = world_a.merge_from(
+    ///     &mut world_b,
+    ///     &any(),
+    ///     &mut merger,
+    ///     None,
+    ///     EntityPolicy::Move(ConflictPolicy::Error),
+    /// );
+    /// ```
     pub fn merge_from<F: LayoutFilter, M: Merger>(
         &mut self,
         source: &mut World,
@@ -517,6 +694,7 @@ impl World {
         Ok(entity_mappings)
     }
 
+    /// Merges a single entity from the source world into the destination world.
     pub fn merge_from_single<M: Merger>(
         &mut self,
         source: &mut World,
@@ -584,6 +762,45 @@ impl World {
         Ok(dst_entity)
     }
 
+    /// Creates a serde serializable representation of the world.
+    ///
+    /// A [filter](../query/filter/trait.LayoutFilter.html) selects which entities shall be serialized.  
+    /// A [world serializer](../serialize/ser/trait.WorldSerializer.html) describes how components will
+    /// be serialized.  
+    ///
+    /// As component types are not known at compile time, the world must be provided with the
+    /// means to serialize each component. This is provided by the
+    /// [WorldSerializer](../serialize/ser/trait.WorldSerializer.html) implementation. This implementation
+    /// also describes how [ComponentTypeIDs](../storage/component/struct.ComponentTypeId.html) (which
+    /// are not stable between compiles) are mapped to stable type identifiers. Components that are
+    /// not known to the serializer will be omitted from the serialized output.
+    ///
+    /// The [Registry](../serialize/struct.Registry.html) provides a
+    /// [WorldSerializer](../serialize/ser/trait.WorldSerializer.html) implementation suitable for most
+    /// situations.
+    ///
+    /// # Examples
+    ///
+    /// Serializing all entities with a `Position` component to JSON.
+    /// ```
+    /// # use legion::*;
+    /// # let world = World::new();
+    /// # #[derive(serde::Serialize, serde::Deserialize)]
+    /// # struct Position;
+    /// // create a registry which uses strings as the external type ID
+    /// let mut registry = Registry::<String>::new();
+    /// registry.register::<Position>("position".to_string());
+    /// registry.register::<f32>("f32".to_string());
+    /// registry.register::<bool>("bool".to_string());
+    ///
+    /// // serialize entities with the `Position` component
+    /// let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry)).unwrap();
+    /// println!("{:#}", json);
+    ///
+    /// // registries are also serde deserializers
+    /// use serde::de::DeserializeSeed;
+    /// let world: World = registry.deserialize(json).unwrap();
+    /// ```
     #[cfg(feature = "serialize")]
     pub fn as_serializable<'a, F: LayoutFilter, W: crate::serialize::ser::WorldSerializer>(
         &'a self,
@@ -628,6 +845,7 @@ impl EntityStore for World {
     fn id(&self) -> WorldId { self.id }
 }
 
+/// Provides access to the archetypes and entity components contained within a world.
 #[derive(Clone, Copy)]
 pub struct StorageAccessor<'a> {
     id: WorldId,
@@ -640,6 +858,7 @@ pub struct StorageAccessor<'a> {
 }
 
 impl<'a> StorageAccessor<'a> {
+    /// Constructs a new storage accessor.
     pub fn new(
         id: WorldId,
         index: &'a SearchIndex,
@@ -668,8 +887,10 @@ impl<'a> StorageAccessor<'a> {
         self
     }
 
+    /// Returns the world ID.
     pub fn id(&self) -> WorldId { self.id }
 
+    /// Returns `true` if the given archetype is accessable from this storage accessor.
     pub fn can_access_archetype(&self, ArchetypeIndex(archetype): ArchetypeIndex) -> bool {
         match self.allowed_archetypes {
             None => true,
@@ -677,14 +898,19 @@ impl<'a> StorageAccessor<'a> {
         }
     }
 
+    /// Returns the archetype layout index.
     pub fn layout_index(&self) -> &'a SearchIndex { self.index }
 
+    /// Returns the component storage.
     pub fn components(&self) -> &'a Components { self.components }
 
+    /// Returns the archetypes.
     pub fn archetypes(&self) -> &'a [Archetype] { self.archetypes }
 
+    /// Returns group definitions.
     pub fn groups(&self) -> &'a [Group] { self.groups }
 
+    /// Returns the group the given component belongs to.
     pub fn group(&self, type_id: ComponentTypeId) -> Option<(usize, &'a Group)> {
         self.group_members
             .get(&type_id)
@@ -692,13 +918,17 @@ impl<'a> StorageAccessor<'a> {
     }
 }
 
+/// Describes how to merge two [worlds](struct.World.html).
 pub trait Merger {
+    /// Indicates if the merger prefers to merge into a new empty archetype.
     #[inline]
     fn prefers_new_archetype() -> bool { false }
 
+    /// Calculates the destination entity layout for the given source layout.
     #[inline]
     fn convert_layout(&mut self, source_layout: EntityLayout) -> EntityLayout { source_layout }
 
+    /// Merges an archetype from the source world into the destination world.
     fn merge_archetype(
         &mut self,
         src_entity_range: Range<usize>,
@@ -709,6 +939,7 @@ pub trait Merger {
     );
 }
 
+/// A [merger](trait.Merger.html) which moves entities from the source world into the destination.
 pub struct Move;
 
 impl Merger for Move {
@@ -761,6 +992,8 @@ impl Merger for Move {
     }
 }
 
+/// A [merger](trait.Merger.html) which clones entities from the source world into the destination,
+/// potentially performing data transformations in the process.
 #[derive(Default)]
 pub struct Duplicate {
     duplicate_fns: HashMap<
@@ -781,8 +1014,10 @@ pub struct Duplicate {
 }
 
 impl Duplicate {
+    /// Creates a new duplicate merger.
     pub fn new() -> Self { Self::default() }
 
+    /// Allows the merger to copy the given component into the destination world.
     pub fn register_copy<T: Component + Copy>(&mut self) {
         use crate::storage::ComponentStorage;
 
@@ -805,10 +1040,12 @@ impl Duplicate {
             .insert(type_id, (type_id, constructor, convert));
     }
 
+    /// Allows the merger to clone the given component into the destination world.
     pub fn register_clone<T: Component + Clone>(&mut self) {
         self.register_convert(|source: &T| source.clone());
     }
 
+    /// Allows the merger to clone the given component into the destination world with a custom clone function.
     pub fn register_convert<
         Source: Component,
         Target: Component,
@@ -848,6 +1085,7 @@ impl Duplicate {
             .insert(source_type, (dest_type, constructor, convert));
     }
 
+    /// Allows the merger to clone the given component into the destination world with a custom clone function.
     pub fn register_convert_raw(
         &mut self,
         src_type: ComponentTypeId,
@@ -896,9 +1134,13 @@ impl Merger for Duplicate {
     }
 }
 
+/// An error type which indicates that a world merge failed.
 #[derive(Debug)]
 pub enum MergeError {
+    /// The source world contains IDs which conflcit with the destination.
     ConflictingEntityIDs,
+    /// The source world contains IDs which lie in the destination's address space but which have
+    /// not yet been allocated by the destination.
     InvalidFutureEntityID,
 }
 
