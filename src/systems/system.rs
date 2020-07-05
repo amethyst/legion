@@ -497,7 +497,7 @@ where
     {
         System {
             name: self.name,
-            run_fn: run_fn,
+            run_fn,
             _resources: PhantomData::<<R as ConsFlatten>::Output>,
             queries: self.queries.flatten(),
             archetypes: if self.access_all_archetypes {
