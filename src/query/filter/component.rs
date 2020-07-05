@@ -9,27 +9,19 @@ use std::marker::PhantomData;
 pub struct ComponentFilter<T: Component>(PhantomData<T>);
 
 impl<T: Component> Default for ComponentFilter<T> {
-    fn default() -> Self {
-        ComponentFilter(PhantomData)
-    }
+    fn default() -> Self { ComponentFilter(PhantomData) }
 }
 
 impl<T: Component> Copy for ComponentFilter<T> {}
 impl<T: Component> Clone for ComponentFilter<T> {
-    fn clone(&self) -> Self {
-        *self
-    }
+    fn clone(&self) -> Self { *self }
 }
 
 impl<T: Component> ActiveFilter for ComponentFilter<T> {}
 
 impl<T: Component> GroupMatcher for ComponentFilter<T> {
-    fn can_match_group() -> bool {
-        true
-    }
-    fn group_components() -> Vec<ComponentTypeId> {
-        vec![ComponentTypeId::of::<T>()]
-    }
+    fn can_match_group() -> bool { true }
+    fn group_components() -> Vec<ComponentTypeId> { vec![ComponentTypeId::of::<T>()] }
 }
 
 impl<T: Component> LayoutFilter for ComponentFilter<T> {
@@ -45,9 +37,7 @@ impl<T: Component> std::ops::Not for ComponentFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output {
-        Not { filter: self }
-    }
+    fn not(self) -> Self::Output { Not { filter: self } }
 }
 
 impl<'a, T: Component, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for ComponentFilter<T> {
@@ -65,9 +55,7 @@ impl<'a, T: Component> std::ops::BitAnd<Passthrough> for ComponentFilter<T> {
     type Output = Self;
 
     #[inline]
-    fn bitand(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitand(self, _: Passthrough) -> Self::Output { self }
 }
 
 impl<'a, T: Component, Rhs: ActiveFilter> std::ops::BitOr<Rhs> for ComponentFilter<T> {
@@ -85,7 +73,5 @@ impl<'a, T: Component> std::ops::BitOr<Passthrough> for ComponentFilter<T> {
     type Output = Self;
 
     #[inline]
-    fn bitor(self, _: Passthrough) -> Self::Output {
-        self
-    }
+    fn bitor(self, _: Passthrough) -> Self::Output { self }
 }
