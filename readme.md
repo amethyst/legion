@@ -63,10 +63,16 @@ let entities: &[Entity] = world.insert(
 let query = <(Write<Position>, Read<Velocity>)>::query();
 
 // Iterate through all entities that match the query in the world
-for (mut pos, vel) in query.iter(&mut world) {
+for (mut pos, vel) in query.iter_mut(&mut world) {
     pos.x += vel.dx;
     pos.y += vel.dy;
 }
+```
+
+### WASM
+Legion runs with parallelism on by default, which is not currently supported by Web Assembly as it runs single-threaded. Therefore, to build for WASM, ensure you set `default-features = false` in Cargo.toml:
+```toml
+legion = { version = "*", default-features = false }
 ```
 
 ## Features
@@ -132,10 +138,10 @@ let universe = Universe::new();
 let mut world_a = universe.create_world();
 let mut world_b = universe.create_world();
 
-// Merge all entities from `world_b` into `world_a`
-// Entity IDs are guarenteed to be unique across worlds and will
-// remain unchanged across the merge.
-world_a.merge(world_b);
+// Move all entities from `world_b` into `world_a`
+// Entity IDs are guaranteed to be unique across worlds and will
+// remain unchanged across the move.
+world_a.move_from(world_b);
 ```
 
 ### Chunk Iteration
