@@ -5,7 +5,12 @@ use super::{
     WorldMeta,
 };
 use crate::internals::{
-    storage::{ArchetypeIndex, ComponentTypeId, EntityLayout, GroupDef, UnknownComponentStorage},
+    storage::{
+        archetype::{ArchetypeIndex, EntityLayout},
+        component::ComponentTypeId,
+        group::GroupDef,
+        UnknownComponentStorage,
+    },
     world::{Universe, World, WorldOptions},
 };
 use serde::{
@@ -41,7 +46,7 @@ pub trait WorldDeserializer {
     ) -> Result<Box<[u8]>, D::Error>;
 }
 
-pub(crate) struct Wrapper<T: WorldDeserializer>(pub T);
+pub struct Wrapper<T: WorldDeserializer>(pub T);
 
 impl<'de, W: WorldDeserializer> DeserializeSeed<'de> for Wrapper<W> {
     type Value = World;

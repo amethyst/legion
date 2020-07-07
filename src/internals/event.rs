@@ -1,6 +1,9 @@
 use super::entity::Entity;
 use super::query::filter::LayoutFilter;
-use super::storage::{Archetype, ArchetypeIndex, ComponentTypeId};
+use super::storage::{
+    archetype::{Archetype, ArchetypeIndex},
+    component::ComponentTypeId,
+};
 use std::iter::Iterator;
 use std::{fmt::Debug, sync::Arc};
 

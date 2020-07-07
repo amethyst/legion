@@ -1,19 +1,22 @@
 //! Contains types required to serialize and deserialize a world via the serde library.
 
 use crate::internals::{
-    storage::{ArchetypeIndex, Component, ComponentTypeId, EntityLayout, UnknownComponentStorage},
+    storage::{
+        archetype::{ArchetypeIndex, EntityLayout},
+        component::{Component, ComponentTypeId},
+        UnknownComponentStorage,
+    },
     world::World,
 };
+use de::WorldDeserializer;
+use ser::WorldSerializer;
 use serde::{de::DeserializeSeed, Serializer};
 use std::{collections::HashMap, hash::Hash, marker::PhantomData};
 
-mod de;
+pub mod de;
 mod entities;
 mod packed;
-mod ser;
-
-pub use de::WorldDeserializer;
-pub use ser::{SerializableWorld, WorldSerializer};
+pub mod ser;
 
 /// A (de)serializable type which can represent a component type in a serialized world.
 ///
@@ -265,7 +268,7 @@ enum WorldField {
 mod test {
     use super::Registry;
     use crate::internals::{
-        query::filter::any,
+        query::filter::filter_fns::any,
         world::{EntityStore, World},
     };
 

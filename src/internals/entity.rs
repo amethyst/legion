@@ -1,6 +1,6 @@
 use super::{
     hash::U64Hasher,
-    storage::{ArchetypeIndex, ComponentIndex},
+    storage::{archetype::ArchetypeIndex, ComponentIndex},
 };
 use std::{
     collections::HashMap,

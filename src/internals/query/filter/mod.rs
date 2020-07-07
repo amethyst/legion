@@ -1,48 +1,44 @@
 //! Defines all filter types. Filters are a component of [queries](../index.html).
 
 use super::view::Fetch;
-use crate::internals::{
-    storage::{Component, ComponentTypeId},
-    world::WorldId,
-};
+use crate::internals::{storage::component::ComponentTypeId, world::WorldId};
 
-mod and;
-mod any;
-mod component;
-mod maybe_changed;
-mod not;
-mod or;
-mod passthrough;
-mod try_component;
+pub mod and;
+pub mod any;
+pub mod component;
+pub mod maybe_changed;
+pub mod not;
+pub mod or;
+pub mod passthrough;
+pub mod try_component;
 
-pub use and::And;
-pub use any::Any;
-pub use component::ComponentFilter;
-pub use maybe_changed::ComponentChangedFilter;
-pub use not::Not;
-pub use or::Or;
-pub use passthrough::Passthrough;
-pub use try_component::TryComponentFilter;
+pub mod filter_fns {
+    use super::{
+        any::Any, component::ComponentFilter, maybe_changed::ComponentChangedFilter,
+        passthrough::Passthrough, try_component::TryComponentFilter, EntityFilterTuple,
+    };
+    use crate::internals::storage::component::Component;
 
-/// Constructs a filter which requires that the entities have the given component.
-pub fn component<T: Component>() -> EntityFilterTuple<ComponentFilter<T>, Passthrough> {
-    Default::default()
+    /// Constructs a filter which requires that the entities have the given component.
+    pub fn component<T: Component>() -> EntityFilterTuple<ComponentFilter<T>, Passthrough> {
+        Default::default()
+    }
+
+    /// Constructs a filter which requires that the component cannot be certain to have not changed.
+    ///
+    /// This check is course grained and should be used to reject the majority of entities which have
+    /// not changed, but not all entities passed by the filter are guarenteed to have been modified.
+    pub fn maybe_changed<T: Component>(
+    ) -> EntityFilterTuple<TryComponentFilter<T>, ComponentChangedFilter<T>> {
+        Default::default()
+    }
+
+    /// Constructs a filter which passes all entities.
+    pub fn any() -> EntityFilterTuple<Any, Any> { Default::default() }
+
+    /// Constructs a filter which performs a no-op and defers to any filters it is combined with.
+    pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough> { Default::default() }
 }
-
-/// Constructs a filter which requires that the component cannot be certain to have not changed.
-///
-/// This check is course grained and should be used to reject the majority of entities which have
-/// not changed, but not all entities passed by the filter are guarenteed to have been modified.
-pub fn maybe_changed<T: Component>(
-) -> EntityFilterTuple<TryComponentFilter<T>, ComponentChangedFilter<T>> {
-    Default::default()
-}
-
-/// Constructs a filter which passes all entities.
-pub fn any() -> EntityFilterTuple<Any, Any> { Default::default() }
-
-/// Constructs a filter which performs a no-op and defers to any filters it is combined with.
-pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough> { Default::default() }
 
 /// Indicates if an an archetype should be accepted or rejected.
 pub enum FilterResult {

@@ -5,12 +5,13 @@ use crate::internals::{
     iter::indexed::IndexedIter,
     permissions::Permissions,
     query::{
-        filter::{ComponentFilter, EntityFilterTuple, Passthrough},
+        filter::{component::ComponentFilter, passthrough::Passthrough, EntityFilterTuple},
         QueryResult,
     },
     storage::{
-        next_component_version, Archetype, ArchetypeIndex, Component, ComponentSliceMut,
-        ComponentStorage, ComponentTypeId, Components,
+        archetype::{Archetype, ArchetypeIndex},
+        component::{Component, ComponentTypeId},
+        next_component_version, ComponentSliceMut, ComponentStorage, Components,
     },
     subworld::ComponentAccess,
 };

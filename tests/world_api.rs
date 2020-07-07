@@ -312,7 +312,7 @@ fn delete_entities_on_drop() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let (tx, rx) = crossbeam_channel::unbounded::<legion::event::Event>();
+    let (tx, rx) = crossbeam_channel::unbounded::<legion::world::Event>();
 
     let components = vec![(Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3))];
 
@@ -330,7 +330,7 @@ fn delete_entities_on_drop() {
     for e in rx {
         println!("{:?}", e);
         match e {
-            legion::event::Event::EntityRemoved(entity, _arch_id) => {
+            legion::world::Event::EntityRemoved(entity, _arch_id) => {
                 assert!(entities.remove(&entity));
             }
             _ => {}

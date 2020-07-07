@@ -3,8 +3,9 @@
 use super::entity::Entity;
 use super::query::filter::{FilterResult, LayoutFilter};
 use super::storage::{
-    Archetype, ArchetypeIndex, Component, ComponentIndex, ComponentStorage, ComponentTypeId,
-    EntityLayout, MultiMut, UnknownComponentStorage,
+    archetype::{Archetype, ArchetypeIndex, EntityLayout},
+    component::{Component, ComponentTypeId},
+    ComponentIndex, ComponentStorage, MultiMut, UnknownComponentStorage,
 };
 use std::marker::PhantomData;
 
@@ -165,13 +166,19 @@ impl<'a> UnknownComponentWriter<'a> {
 
 /// Defines a type which can describe the layout of an archetype.
 pub trait ArchetypeSource {
+    /// A filter which finds existing archetypes which match the layout.
     type Filter: LayoutFilter;
+
+    /// Returns the archetype source's filter.
     fn filter(&self) -> Self::Filter;
+
+    /// Constructs a new entity layout.
     fn layout(&mut self) -> EntityLayout;
 }
 
 /// Describes a type which can write entity components into a world.
 pub trait ComponentSource: ArchetypeSource {
+    /// Writes components for new entities into an archetype.
     fn push_components<'a>(
         &mut self,
         writer: &mut ArchetypeWriter<'a>,

@@ -5,7 +5,7 @@
 
 use crate::internals::{
     hash::ComponentTypeIdHasher,
-    query::view::{Read, ReadOnly, Write},
+    query::view::{read::Read, write::Write, ReadOnly},
 };
 use downcast_rs::{impl_downcast, Downcast};
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -63,8 +63,8 @@ impl_downcast!(Resource);
 /// struct TypeA(usize);
 /// struct TypeB(usize);
 ///
-/// # use legion::query::view::{read::Read, write::Write};
-/// # use legion::systems::resources::{Resources, ResourceSet};
+/// # use legion::*;
+/// # use legion::systems::ResourceSet;
 /// let mut resources = Resources::default();
 /// resources.insert(TypeA(55));
 /// resources.insert(TypeB(12));

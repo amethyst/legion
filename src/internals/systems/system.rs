@@ -10,10 +10,13 @@ use crate::internals::{
     permissions::Permissions,
     query::{
         filter::EntityFilter,
-        view::{Read, View, Write},
+        view::{read::Read, write::Write, View},
         Query,
     },
-    storage::{ArchetypeIndex, Component, ComponentTypeId},
+    storage::{
+        archetype::ArchetypeIndex,
+        component::{Component, ComponentTypeId},
+    },
     subworld::{ArchetypeAccess, ComponentAccess, SubWorld},
     world::{World, WorldId},
 };
@@ -230,11 +233,7 @@ where
 /// as singular closures for a given system - providing queries which should be cached for that
 /// system, as well as resource access and other metadata.
 /// ```rust
-/// # use legion::query::view::{read::Read, write::Write};
-/// # use legion::query::filter::filter_fns::*;
-/// # use legion::systems::system::*;
-/// # use legion::entity::Entity;
-/// # use legion::query::IntoQuery;
+/// # use legion::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]

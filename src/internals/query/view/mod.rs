@@ -1,7 +1,7 @@
 //! Defines all view types. Views are a component of [queries](../index.html).
 
 use super::{
-    filter::{And, EntityFilter, EntityFilterTuple},
+    filter::{and::And, EntityFilter, EntityFilterTuple},
     QueryResult,
 };
 use crate::internals::{
@@ -11,21 +11,20 @@ use crate::internals::{
         zip::{multizip, Zip},
     },
     permissions::Permissions,
-    storage::{Archetype, Component, ComponentTypeId, Components},
+    storage::{
+        archetype::Archetype,
+        component::{Component, ComponentTypeId},
+        Components,
+    },
     subworld::ComponentAccess,
 };
 use std::marker::PhantomData;
 
-mod entity;
-mod read;
-mod try_read;
-mod try_write;
-mod write;
-
-pub use self::read::Read;
-pub use self::try_read::TryRead;
-pub use self::try_write::TryWrite;
-pub use self::write::Write;
+pub mod entity;
+pub mod read;
+pub mod try_read;
+pub mod try_write;
+pub mod write;
 
 // View and Fetch types are separate traits so that View implementations can be
 // zero sized types and therefore not need the user to provide a lifetime when they

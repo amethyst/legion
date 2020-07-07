@@ -2,7 +2,7 @@ use super::{
     not::Not, or::Or, passthrough::Passthrough, ActiveFilter, DynamicFilter, FilterResult,
     GroupMatcher, LayoutFilter,
 };
-use crate::internals::{query::view::Fetch, storage::ComponentTypeId, world::WorldId};
+use crate::internals::{query::view::Fetch, storage::component::ComponentTypeId, world::WorldId};
 
 /// A filter which requires all filters within `T` match.
 #[derive(Debug, Clone)]

@@ -6,7 +6,7 @@ use super::{
     entry::{EntryMut, EntryRef},
     permissions::Permissions,
     query::{filter::EntityFilter, view::View, Query},
-    storage::{ArchetypeIndex, ComponentTypeId},
+    storage::{archetype::ArchetypeIndex, component::ComponentTypeId},
     world::{ComponentAccessError, EntityStore, StorageAccessor, World, WorldId},
 };
 use bit_set::BitSet;
@@ -276,7 +276,7 @@ impl<'a> From<&'a mut World> for SubWorld<'a> {
 #[cfg(test)]
 mod tests {
     use crate::internals::{
-        query::view::{Read, Write},
+        query::view::{read::Read, write::Write},
         world::{EntityStore, World},
     };
 

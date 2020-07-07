@@ -8,7 +8,7 @@
 use crate::internals::{
     entity::{Entity, EntityAllocator},
     insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource, KnownLength},
-    storage::{Component, EntityLayout},
+    storage::{archetype::EntityLayout, component::Component},
     world::{World, WorldId},
 };
 use derivative::Derivative;
@@ -193,8 +193,8 @@ enum Command {
 /// Inserting an entity using the `CommandBuffer`:
 ///
 /// ```
-/// # use legion::systems::command::*;
-/// # use legion::world::*;
+/// # use legion::*;
+/// # use legion::systems::CommandBuffer;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Position(f32);
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -334,7 +334,7 @@ impl CommandBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::internals::query::{view::Read, IntoQuery};
+    use crate::internals::query::{view::read::Read, IntoQuery};
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);

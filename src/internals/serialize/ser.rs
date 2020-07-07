@@ -4,7 +4,9 @@ use super::{
     entities::ser::EntitiesLayoutSerializer, packed::ser::PackedLayoutSerializer, WorldField,
     WorldMeta,
 };
-use crate::internals::{query::filter::LayoutFilter, storage::ComponentTypeId, world::World};
+use crate::internals::{
+    query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World,
+};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 /// Describes a type which knows how to deserialize the components in a world.

@@ -6,13 +6,16 @@ use super::{
     entry::{Entry, EntryMut, EntryRef},
     event::{EventSender, Subscriber, Subscribers},
     query::{
-        filter::{any, EntityFilter, LayoutFilter},
+        filter::{filter_fns::any, EntityFilter, LayoutFilter},
         view::View,
         Query,
     },
     storage::{
-        Archetype, ArchetypeIndex, Component, ComponentIndex, ComponentTypeId, Components,
-        EntityLayout, Group, GroupDef, PackOptions, SearchIndex, UnknownComponentStorage,
+        archetype::{Archetype, ArchetypeIndex, EntityLayout},
+        component::{Component, ComponentTypeId},
+        group::{Group, GroupDef},
+        index::SearchIndex,
+        ComponentIndex, Components, PackOptions, UnknownComponentStorage,
     },
     subworld::{ComponentAccess, SubWorld},
 };
@@ -550,6 +553,7 @@ impl World {
     /// if the ID conflicts with IDs in the destination world.
     /// ```
     /// # use legion::*;
+    ///! # use legion::world::{EntityPolicy, ConflictPolicy, Move};
     /// let mut world_a = World::new();
     /// let mut world_b = World::new();
     ///
@@ -560,6 +564,7 @@ impl World {
     /// destination world's address space.
     /// ```
     /// # use legion::*;
+    ///! # use legion::world::{EntityPolicy, ConflictPolicy, Move};
     /// let mut world_a = World::new();
     /// let mut world_b = World::new();
     ///
@@ -570,6 +575,7 @@ impl World {
     /// with entities from the source if they conflict.
     /// ```
     /// # use legion::*;
+    ///! # use legion::world::{EntityPolicy, ConflictPolicy, Move};
     /// let mut world_a = World::new();
     /// let mut world_b = World::new();
     ///
@@ -579,6 +585,7 @@ impl World {
     /// Cloning all entities from the source world, converting all `i32` components to `f64` components.
     /// ```
     /// # use legion::*;
+    /// # use legion::world::{EntityPolicy, ConflictPolicy, Duplicate};
     /// let mut world_a = World::new();
     /// let mut world_b = World::new();
     ///
@@ -805,12 +812,16 @@ impl World {
     /// let world: World = registry.deserialize(json).unwrap();
     /// ```
     #[cfg(feature = "serialize")]
-    pub fn as_serializable<'a, F: LayoutFilter, W: crate::internals::serialize::WorldSerializer>(
+    pub fn as_serializable<
+        'a,
+        F: LayoutFilter,
+        W: crate::internals::serialize::ser::WorldSerializer,
+    >(
         &'a self,
         filter: F,
         world_serializer: &'a W,
-    ) -> crate::internals::serialize::SerializableWorld<'a, F, W> {
-        crate::internals::serialize::SerializableWorld::new(&self, filter, world_serializer)
+    ) -> crate::internals::serialize::ser::SerializableWorld<'a, F, W> {
+        crate::internals::serialize::ser::SerializableWorld::new(&self, filter, world_serializer)
     }
 }
 
@@ -1176,7 +1187,7 @@ impl Default for ConflictPolicy {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::internals::{insert::IntoSoa, query::filter::any};
+    use crate::internals::insert::IntoSoa;
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
@@ -1281,10 +1292,10 @@ mod test {
     fn pack() {
         use crate::internals::{
             query::{
-                view::{Read, Write},
+                view::{read::Read, write::Write},
                 IntoQuery,
             },
-            storage::GroupSource,
+            storage::group::GroupSource,
         };
 
         #[derive(Copy, Clone, Debug, PartialEq)]

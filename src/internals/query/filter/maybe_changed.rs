@@ -1,7 +1,7 @@
 use super::{
     and::And, not::Not, or::Or, passthrough::Passthrough, ActiveFilter, DynamicFilter, FilterResult,
 };
-use crate::internals::{query::view::Fetch, storage::Component, world::WorldId};
+use crate::internals::{query::view::Fetch, storage::component::Component, world::WorldId};
 use std::{collections::HashMap, marker::PhantomData};
 
 /// A filter which performs course-grained change detection.

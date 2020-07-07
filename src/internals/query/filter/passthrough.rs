@@ -1,5 +1,5 @@
 use super::{DynamicFilter, FilterResult, GroupMatcher, LayoutFilter};
-use crate::internals::{query::view::Fetch, storage::ComponentTypeId, world::WorldId};
+use crate::internals::{query::view::Fetch, storage::component::ComponentTypeId, world::WorldId};
 
 /// A filter which always defers.
 #[derive(Debug, Clone, Default)]

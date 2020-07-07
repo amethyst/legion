@@ -1,4 +1,4 @@
-//#![deny(missing_docs)]
+#![deny(missing_docs)]
 
 //! Legion aims to be a feature rich high performance ECS library for Rust game projects with minimal boilerplate.
 //!
@@ -183,20 +183,27 @@
 //! * `serialize` - Enables the serde serialization module and associated functionality. Enabled by default.
 //! * `crossbeam-events` - Implements the `EventSender` trait for crossbeam `Sender` channels, allowing them to be used for event subscriptions. Enabled by default.
 
+// implementation modules
 mod internals;
 
-// re-export most common types
+// public API organized into logical modules
+pub mod query;
+pub mod storage;
+pub mod systems;
+pub mod world;
+
+#[cfg(feature = "serialize")]
+pub mod serialize;
+
+// re-export most common types into the root
 pub use crate::{
-    entity::Entity,
-    event::Event,
-    insert::IntoSoa,
     query::{
-        filter::*,
-        view::{Fetch, Read, TryRead, TryWrite, Write},
-        IntoQuery, Query,
+        any, component, maybe_changed, passthrough, Fetch, IntoQuery, Read, TryRead, TryWrite,
+        Write,
     },
-    systems::{Executor, Resources, Schedule, SystemBuilder},
-    world::{ConflictPolicy, Duplicate, EntityPolicy, EntityStore, Move, Universe, World},
+    storage::{GroupSource, IntoSoa},
+    systems::{Resources, Schedule, SystemBuilder},
+    world::{Entity, EntityStore, Universe, World, WorldOptions},
 };
 
 #[cfg(feature = "serialize")]

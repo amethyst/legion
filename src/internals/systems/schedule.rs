@@ -23,7 +23,7 @@ use super::{
     system::SystemId,
 };
 use crate::internals::{
-    storage::ComponentTypeId,
+    storage::component::ComponentTypeId,
     subworld::ArchetypeAccess,
     world::{World, WorldId},
 };
@@ -507,7 +507,7 @@ pub enum Step {
 /// # Examples
 ///
 /// ```rust
-/// # use legion::{world::*, systems::{schedule::*, system::*, resources::*}};
+/// # use legion::*;
 /// # let find_collisions = SystemBuilder::new("find_collisions").build(|_,_,_,_| {});
 /// # let calculate_acceleration = SystemBuilder::new("calculate_acceleration").build(|_,_,_,_| {});
 /// # let update_positions = SystemBuilder::new("update_positions").build(|_,_,_,_| {});
@@ -582,7 +582,7 @@ impl From<Vec<Step>> for Schedule {
 mod tests {
     use super::*;
     use crate::internals::{
-        query::{view::Write, IntoQuery},
+        query::{view::write::Write, IntoQuery},
         systems::system::SystemBuilder,
     };
     use itertools::sorted;

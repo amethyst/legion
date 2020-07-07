@@ -1,89 +1,11 @@
-//! Queries provide efficient iteration and filtering of entity components in a world.
-//!
-//! Queries are defined by two parts; [views](view/index.html) and [filters](filter/index.html).
-//! Views declare what data you want to access it, and how you want to access it.
-//! Filters decide which entities are to be included in the results.
-//!
-//! To construct a query, we declare our view, and then call `::query()` to convert it into
-//! a query with an initial filter which selects entities with all of the component types
-//! requested by the view.
-//!
-//! View types include [Entity](view/entity/index.html), [Read](view/read/struct.Read.html),
-//! [Write](view/write/struct.Write.html), [TryRead](view/try_read/struct.TryRead.html) and
-//! [TryWrite](view/try_write/struct.TryWrite.html).
-//!
-//! ```
-//! # use legion::*;
-//! # struct Position;
-//! # struct Orientation;
-//! // a view can be a single view type
-//! let mut query = Read::<Position>::query();
-//!
-//! // or a tuple of views
-//! let mut query = <(Read<Position>, Write<Orientation>)>::query();
-//! ```
-//!
-//! You can attach [additional filters](filter/filter_fns/index.html) to a query to further
-//! refine which entities you want to access.
-//!
-//! ```
-//! # use legion::*;
-//! # struct Position;
-//! # struct Orientation;
-//!
-//! // filters can be combined with boolean operators
-//! let mut query = <(Read<Position>, Write<Orientation>)>::query()
-//!     .filter(!component::<Static>() | !component::<Model>());
-//! ```
-//!
-//! Once you have a query, you can use it to pull data out of a world. At its core, a query
-//! allows you to iterate over [chunks](struct.ChunkView.html). Each chunk contains a set of
-//! entities which all have extactly the same component types attached, and the chunk provides
-//! access to slices of each component. A single index in each slice in a chunk contains the
-//! component for the same entity.
-//!
-//! ```
-//! # use legion::*;
-//! # struct Position;
-//! # struct Orientation;
-//! # let mut world = World::default();
-//! let mut query = <(Read<Position>, Write<Orientation>)>::query();
-//! for mut chunk in query.iter_chunks_mut(&mut world) {
-//!     // we can access information about the archetype (shape/component layout) of the entities
-//!     println!(
-//!         "the entities in the chunk have {:?} components",
-//!         chunk.archetype().layout().component_types(),
-//!     );
-//!
-//!     // we can iterate through a tuple of component references
-//!     for (position, orientation) in chunk {
-//!         // position is a `&Position`
-//!         // orientation is a `&mut Orientation`
-//!         // they are both attached to the same entity
-//!     }
-//! }
-//! ```
-//!
-//! There are convenience functions on query which will flatten this loop for us, giving
-//! direct access to the entities.
-//!
-//! ```
-//! # use legion::*;
-//! # struct Position;
-//! # struct Orientation;
-//! # let mut world = World::default();
-//! let mut query = <(Read<Position>, Write<Orientation>)>::query();
-//! for (position, orientation) in query.iter_mut(&mut world) {
-//!     // position is a `&Position`
-//!     // orientation is a `&mut Orientation`
-//!     // they are both attached to the same entity
-//! }
-//! ```
-
 use crate::internals::{
     entity::Entity,
     iter::indexed::TrustedRandomAccess,
-    storage::{Archetype, ArchetypeIndex, Component, SubGroup},
+    storage::{
+        archetype::{Archetype, ArchetypeIndex},
+        component::Component,
+        group::SubGroup,
+    },
     world::{EntityStore, StorageAccessor, WorldId},
 };
 use filter::{DynamicFilter, EntityFilter, GroupMatcher};
@@ -869,7 +791,7 @@ where
 // }
 
 #[cfg(feature = "par-iter")]
-mod par_iter {
+pub mod par_iter {
     use super::*;
     use rayon::iter::plumbing::{bridge_unindexed, Folder, UnindexedConsumer, UnindexedProducer};
     use rayon::iter::ParallelIterator;
@@ -929,7 +851,7 @@ mod par_iter {
         V: View<'a>,
         D: DynamicFilter + 'a,
     {
-        pub fn new(
+        pub(super) fn new(
             world: StorageAccessor<'a>,
             result: QueryResult<'a>,
             filter: &'a Mutex<D>,
@@ -1028,7 +950,7 @@ mod par_iter {
 
 #[cfg(test)]
 mod test {
-    use super::view::{Read, Write};
+    use super::view::{read::Read, write::Write};
     use super::IntoQuery;
     use crate::internals::world::World;
 
