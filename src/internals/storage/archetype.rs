@@ -160,6 +160,10 @@ impl EntityLayout {
     }
 
     /// Adds a new component to the layout.
+    ///
+    /// # Safety
+    /// The storage returned from the storage constructor function must be capable
+    /// of storing the component type identified by `type_id`.
     pub unsafe fn register_component_raw(
         &mut self,
         type_id: ComponentTypeId,

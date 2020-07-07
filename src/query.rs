@@ -1,6 +1,6 @@
 //! Queries provide efficient iteration and filtering of entity components in a world.
 //!
-//! Queries are defined by two parts; [views](view/index.html) and [filters](filter/index.html).
+//! Queries are defined by two parts; "views" and "filters".
 //! Views declare what data you want to access it, and how you want to access it.
 //! Filters decide which entities are to be included in the results.
 //!
@@ -8,9 +8,8 @@
 //! a query with an initial filter which selects entities with all of the component types
 //! requested by the view.
 //!
-//! View types include [Entity](view/entity/index.html), [Read](view/read/struct.Read.html),
-//! [Write](view/write/struct.Write.html), [TryRead](view/try_read/struct.TryRead.html) and
-//! [TryWrite](view/try_write/struct.TryWrite.html).
+//! View types include [Entity](../world/struct.Entity.html), [Read](struct.Read.html),
+//! [Write](struct.Write.html), [TryRead](struct.TryRead.html) and [TryWrite](struct.TryWrite.html).
 //!
 //! ```
 //! # use legion::*;
@@ -23,8 +22,7 @@
 //! let mut query = <(Read<Position>, Write<Orientation>)>::query();
 //! ```
 //!
-//! You can attach [additional filters](filter/filter_fns/index.html) to a query to further
-//! refine which entities you want to access.
+//! You can attach additional filters to a query to further refine which entities you want to access.
 //!
 //! ```
 //! # use legion::*;

@@ -222,6 +222,9 @@ pub trait ComponentStorage<'a, T: Component>: UnknownComponentStorage + Default 
     /// Returns the number of archetype slices stored.
     fn len(&self) -> usize;
 
+    /// Returns `true` if the storage contains no archetypes.
+    fn is_empty(&self) -> bool { self.len() == 0 }
+
     /// Copies new components into the specified archetype slice.
     ///
     /// # Safety

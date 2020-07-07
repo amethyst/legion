@@ -42,7 +42,7 @@ impl Default for UniverseId {
     fn default() -> Self { Self::next() }
 }
 
-/// A Universe defines an [entity](../entity/struct.Entity.html) ID address space which can be shared between multiple [Worlds](struct.World.html).
+/// A Universe defines an [entity](struct.Entity.html) ID address space which can be shared between multiple [Worlds](struct.World.html).
 ///
 /// A universe can be sharded to divide the entity address space between multiple universes. This can be useful in cases where entities
 /// need to be allocated in two worlds which cannot share a single runtime universe; for example when running a network application across
@@ -95,7 +95,7 @@ impl Universe {
 pub struct ComponentAccessError;
 
 /// The `EntityStore` trait abstracts access to entity data as required by queries for
-/// both [World](struct.World.html) and [SubWorld](../subworld/struct.SubWorld.html)
+/// both [World](struct.World.html) and [SubWorld](struct.SubWorld.html)
 pub trait EntityStore {
     /// Returns the world's unique ID.
     fn id(&self) -> WorldId;
@@ -131,15 +131,15 @@ impl Default for WorldId {
 /// Describes configuration options for the creation of a new [world](struct.World.html).
 #[derive(Default)]
 pub struct WorldOptions {
-    /// A vector of component [groups](../storage/group/struct.Group.html) to provide
+    /// A vector of component [groups](../storage/struct.Group.html) to provide
     /// layout hints for query optimization.
     pub groups: Vec<GroupDef>,
 }
 
 /// A container of entities.
 ///
-/// Each entity stored inside a world is uniquely identified by an [Entity](../entity/struct.Entity.html) ID
-/// and may have an arbitrary collection of [components](../storage/component/trait.Component.html) attached.
+/// Each entity stored inside a world is uniquely identified by an [Entity](struct.Entity.html) ID
+/// and may have an arbitrary collection of [components](../storage/trait.Component.html) attached.
 ///
 /// The entities in a world may be efficiently searched and iterated via [queries](../query/index.html).
 #[derive(Debug)]
@@ -308,7 +308,7 @@ impl World {
         }
     }
 
-    /// Gets an [entry](../entry/struct.Entry.html) for an entity, allowing manipulation of the
+    /// Gets an [entry](struct.Entry.html) for an entity, allowing manipulation of the
     /// entity.
     ///
     /// # Examples
@@ -355,7 +355,7 @@ impl World {
     }
 
     /// Packs the world's internal component storage to optimise iteration performance for
-    /// [queries](../query/index.html) which match a [group](../storage/group/struct.Group.html)
+    /// [queries](../query/index.html) which match a [group](../storage/struct.Group.html)
     /// defined when this world was created.
     pub fn pack(&mut self, options: PackOptions) { self.components.pack(&options); }
 
@@ -538,7 +538,7 @@ impl World {
 
     /// Merges a world into this world.
     ///
-    /// A [filter](../query/filter/trait.LayoutFilter.html) selects which entities to merge.  
+    /// A [filter](../query/trait.LayoutFilter.html) selects which entities to merge.  
     /// A [merger](trait.Merger.html) describes how to perform the merge operation.  
     /// A map of entity IDs can be provided to manually remap entity IDs from the source world before they are handled by the entity policy.  
     /// A [policy](enum.EntityPolicy.html) describes how to handle entity ID allocation and conflict resolution.
@@ -774,19 +774,19 @@ impl World {
 
     /// Creates a serde serializable representation of the world.
     ///
-    /// A [filter](../query/filter/trait.LayoutFilter.html) selects which entities shall be serialized.  
-    /// A [world serializer](../serialize/ser/trait.WorldSerializer.html) describes how components will
+    /// A [filter](../query/trait.LayoutFilter.html) selects which entities shall be serialized.  
+    /// A [world serializer](../serialize/trait.WorldSerializer.html) describes how components will
     /// be serialized.  
     ///
     /// As component types are not known at compile time, the world must be provided with the
     /// means to serialize each component. This is provided by the
-    /// [WorldSerializer](../serialize/ser/trait.WorldSerializer.html) implementation. This implementation
-    /// also describes how [ComponentTypeIDs](../storage/component/struct.ComponentTypeId.html) (which
+    /// [WorldSerializer](../serialize/trait.WorldSerializer.html) implementation. This implementation
+    /// also describes how [ComponentTypeIDs](../storage/struct.ComponentTypeId.html) (which
     /// are not stable between compiles) are mapped to stable type identifiers. Components that are
     /// not known to the serializer will be omitted from the serialized output.
     ///
     /// The [Registry](../serialize/struct.Registry.html) provides a
-    /// [WorldSerializer](../serialize/ser/trait.WorldSerializer.html) implementation suitable for most
+    /// [WorldSerializer](../serialize/trait.WorldSerializer.html) implementation suitable for most
     /// situations.
     ///
     /// # Examples
@@ -1009,6 +1009,7 @@ impl Merger for Move {
 /// A [merger](trait.Merger.html) which clones entities from the source world into the destination,
 /// potentially performing data transformations in the process.
 #[derive(Default)]
+#[allow(clippy::type_complexity)]
 pub struct Duplicate {
     duplicate_fns: HashMap<
         ComponentTypeId,

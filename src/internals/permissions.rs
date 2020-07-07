@@ -1,5 +1,5 @@
 //! Contains types related to read and write access declarations. Used by the scheduler and
-//! by [SubWorld](../subworld/index.html) splits.
+//! by [SubWorld](../world/struct.SubWorld.html) splits.
 
 use smallvec::SmallVec;
 use std::fmt::{Debug, Display};

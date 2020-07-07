@@ -1,6 +1,5 @@
 use crate::internals::{
     entity::Entity,
-    iter::indexed::TrustedRandomAccess,
     storage::{
         archetype::{Archetype, ArchetypeIndex},
         component::Component,
@@ -723,7 +722,7 @@ impl<'a, F: Fetch> IntoIterator for ChunkView<'a, F> {
 #[cfg(feature = "par-iter")]
 impl<'a, F: Fetch> rayon::iter::IntoParallelIterator for ChunkView<'a, F> {
     type Iter = crate::internals::iter::indexed::par_iter::Par<<F as IntoIndexableIter>::IntoIter>;
-    type Item = <<F as IntoIndexableIter>::IntoIter as TrustedRandomAccess>::Item;
+    type Item = <<F as IntoIndexableIter>::IntoIter as crate::internals::iter::indexed::TrustedRandomAccess>::Item;
     fn into_par_iter(self) -> Self::Iter {
         use crate::internals::iter::indexed::par_iter::Par;
         Par::new(self.fetch.into_indexable_iter())
@@ -967,15 +966,17 @@ mod test {
             let (x, y) = chunk.into_components();
             println!("{:?}, {:?}", x, y);
         }
-        println!("parallel");
-        query.par_for_each_mut(&mut world, |(x, y)| println!("{:?}, {:?}", x, y));
-        println!("par chunks");
-        use rayon::iter::ParallelIterator;
-        query.par_iter_chunks_mut(&mut world).for_each(|chunk| {
-            println!("arch {:?}", chunk.archetype());
-            let (x, y) = chunk.into_components();
-            println!("{:?}, {:?}", x, y);
-        })
+
+        #[cfg(feature = "par-iter")]
+        {
+            query.par_for_each_mut(&mut world, |(x, y)| println!("{:?}, {:?}", x, y));
+            use rayon::iter::ParallelIterator;
+            query.par_iter_chunks_mut(&mut world).for_each(|chunk| {
+                println!("arch {:?}", chunk.archetype());
+                let (x, y) = chunk.into_components();
+                println!("{:?}, {:?}", x, y);
+            })
+        }
     }
 
     #[test]

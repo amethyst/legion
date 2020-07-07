@@ -141,7 +141,7 @@ impl<'a> ComponentAccess<'a> {
 /// Provides access to a subset of the entities of a `World`.
 ///
 /// To access a component mutably in a world, such as inside a [query](../query/index.html) or via an
-/// [entry](../entry/index.html), you need to borrow the entire world mutably. This prevents you from
+/// [entry](struct.EntryMut.html), you need to borrow the entire world mutably. This prevents you from
 /// accessing any other data in the world at the same time.
 ///
 /// In some cases, we can work around this by splitting the world. We can split a world around the

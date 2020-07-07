@@ -113,7 +113,7 @@
 //! to an [EventSender](trait.EventSender.html) by subscribing to the world. A layout filter specifies
 //! which archetypes the subscriber is interested in.
 //!
-//! ```
+//! ```ignore
 //! # use legion::*;
 //! # let mut world = World::new();
 //! # struct Position;

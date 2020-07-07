@@ -19,7 +19,7 @@ use std::{
 };
 
 /// Unique ID for a resource.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Eq, PartialOrd, Ord)]
 pub struct ResourceTypeId {
     type_id: TypeId,
     #[cfg(debug_assertions)]
@@ -39,6 +39,10 @@ impl ResourceTypeId {
 
 impl std::hash::Hash for ResourceTypeId {
     fn hash<H: Hasher>(&self, state: &mut H) { self.type_id.hash(state); }
+}
+
+impl PartialEq for ResourceTypeId {
+    fn eq(&self, other: &Self) -> bool { self.type_id.eq(&other.type_id) }
 }
 
 impl Display for ResourceTypeId {

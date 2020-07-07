@@ -306,6 +306,7 @@ fn mutate_remove_component() {
 }
 
 #[test]
+#[cfg(feature = "crossbeam-events")]
 fn delete_entities_on_drop() {
     let _ = tracing_subscriber::fmt::try_init();
 

@@ -2,13 +2,13 @@
 //!
 //! As component types are not known at compile time, the world must be provided with the
 //! means to serialize each component. This is provided by the
-//! [WorldSerializer](../serialize/ser/trait.WorldSerializer.html) implementation. This implementation
-//! also describes how [ComponentTypeIDs](../storage/component/struct.ComponentTypeId.html) (which
+//! [WorldSerializer](trait.WorldSerializer.html) implementation. This implementation
+//! also describes how [ComponentTypeIDs](../storage/struct.ComponentTypeId.html) (which
 //! are not stable between compiles) are mapped to stable type identifiers. Components that are
 //! not known to the serializer will be omitted from the serialized output.
 //!
-//! The [Registry](../serialize/struct.Registry.html) provides a
-//! [WorldSerializer](../serialize/ser/trait.WorldSerializer.html) implementation suitable for most
+//! The [Registry](struct.Registry.html) provides a
+//! [WorldSerializer](trait.WorldSerializer.html) implementation suitable for most
 //! situations.
 //!
 //! Serializing all entities with a `Position` component to JSON.

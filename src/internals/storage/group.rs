@@ -6,17 +6,14 @@ use smallvec::SmallVec;
 use std::{collections::HashSet, ops::Index};
 
 /// Describes the components in a component group.
+#[derive(Default)]
 pub struct GroupDef {
     components: Vec<ComponentTypeId>,
 }
 
 impl GroupDef {
     /// Constructs a new component group.
-    pub fn new() -> Self {
-        Self {
-            components: Vec::new(),
-        }
-    }
+    pub fn new() -> Self { Self::default() }
 
     /// Constructs a new component group from a vector of component type IDs.
     pub fn from_vec(components: Vec<ComponentTypeId>) -> Self {

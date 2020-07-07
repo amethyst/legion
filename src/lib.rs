@@ -6,8 +6,8 @@
 //!
 //! ## Worlds
 //!
-//! [Worlds](world/struct.World.html) are collections of [entities](entity/struct.Entity.html), where each entity
-//! can have an arbitrary collection of [components](storage/component/trait.Component.html) attached.
+//! [Worlds](world/struct.World.html) are collections of [entities](world/struct.Entity.html), where each entity
+//! can have an arbitrary collection of [components](storage/trait.Component.html) attached.
 //!
 //! ```
 //! use legion::*;
@@ -45,7 +45,7 @@
 //! ]);
 //! ```
 //!
-//! You can access entities via [entries](entry/index.html). Entries allow you to query an entity to find
+//! You can access entities via [entries](world/struct.Entry.html). Entries allow you to query an entity to find
 //! out what types of components are attached to it, to get component references, or to add and remove components.
 //!
 //! ```
@@ -64,6 +64,8 @@
 //!     assert_eq!(entry.get_component::<f32>().unwrap(), &12f32);
 //! }
 //! ```
+//!
+//! See the [world module](world/index.html) for more information.
 //!
 //! ## Queries
 //!
@@ -121,7 +123,7 @@
 //! }
 //! ```
 //!
-//! There is much more than can be done with queries. See the [module documentation](query/index.html) for
+//! There is much more than can be done with queries. See the [query module](query/index.html) for
 //! more information.
 //!
 //! ## Systems
@@ -132,12 +134,12 @@
 //! to do when the different pieces of the application don't know what components each other need, or might or might not even have
 //! conflicting access requirements.
 //!
-//! [Systems](systems/system/index.html) and the [Schedule](systems/schedule/struct.Schedule.html) automates this process, and can
+//! Systems and the [Schedule](systems/struct.Schedule.html) automates this process, and can
 //! even schedule work at a more granular level than you can otherwise do manually.
 //!
-//! A system is a unit of work. Each system is defined as a function which is provided access to queries and shared [resources](systems/resources/struct.Resources.html).
-//! These systems can then be appended to a schedule, which is a linear sequence of systems, ordered by when side effects (such as
-//! writes to components) should be observed.
+//! A system is a unit of work. Each system is defined as a function which is provided access to queries and shared
+//! [resources](systems/struct.Resources.html). These systems can then be appended to a schedule, which is a linear
+//! sequence of systems, ordered by when side effects (such as writes to components) should be observed.
 //!
 //! The schedule will automatically parallelize the execution of all systems whilst maintaining the apparent order of execution from
 //! the perspective of each system.

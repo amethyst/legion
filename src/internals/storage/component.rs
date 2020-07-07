@@ -8,7 +8,7 @@ use std::{
 };
 
 /// A unique ID for a component type.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Copy, Clone, Debug, Eq, PartialOrd, Ord)]
 pub struct ComponentTypeId {
     pub(crate) type_id: TypeId,
     #[cfg(debug_assertions)]
@@ -36,6 +36,10 @@ impl ComponentTypeId {
 
 impl std::hash::Hash for ComponentTypeId {
     fn hash<H: Hasher>(&self, state: &mut H) { self.type_id.hash(state); }
+}
+
+impl PartialEq for ComponentTypeId {
+    fn eq(&self, other: &Self) -> bool { self.type_id.eq(&other.type_id) }
 }
 
 impl Display for ComponentTypeId {
