@@ -183,21 +183,7 @@
 //! * `serialize` - Enables the serde serialization module and associated functionality. Enabled by default.
 //! * `crossbeam-events` - Implements the `EventSender` trait for crossbeam `Sender` channels, allowing them to be used for event subscriptions. Enabled by default.
 
-pub mod cons;
-pub mod entity;
-pub mod entry;
-pub mod event;
-pub mod hash;
-pub mod insert;
-pub mod iter;
-pub mod permissions;
-pub mod query;
-#[cfg(feature = "serialize")]
-pub mod serialize;
-pub mod storage;
-pub mod subworld;
-pub mod systems;
-pub mod world;
+mod internals;
 
 // re-export most common types
 pub use crate::{
