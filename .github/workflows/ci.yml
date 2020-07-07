@@ -38,15 +38,13 @@ jobs:
     strategy:
       matrix:
         features:
-          - --manifest-path=example/Cargo.toml
           - --all-features --release
           - --no-default-features --release
           - --all-features
           - --no-default-features
           - --no-default-features --features par-iter
-          - --no-default-features --features par-schedule
-          - --no-default-features --features metrics
-          - --no-default-features --features ffi
+          - --no-default-features --features extended-tuple-impls
+          - --no-default-features --features serialize
     steps:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1
