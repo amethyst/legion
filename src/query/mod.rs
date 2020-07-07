@@ -1,12 +1,90 @@
+//! Queries provide efficient iteration and filtering of entity components in a world.
+//!
+//! Queries are defined by two parts; [views](view/index.html) and [filters](filter/index.html).
+//! Views declare what data you want to access it, and how you want to access it.
+//! Filters decide which entities are to be included in the results.
+//!
+//! To construct a query, we declare our view, and then call `::query()` to convert it into
+//! a query with an initial filter which selects entities with all of the component types
+//! requested by the view.
+//!
+//! View types include [Entity](view/entity/index.html), [Read](view/read/struct.Read.html),
+//! [Write](view/write/struct.Write.html), [TryRead](view/try_read/struct.TryRead.html) and
+//! [TryWrite](view/try_write/struct.TryWrite.html).
+//!
+//! ```
+//! # use legion::*;
+//! # struct Position;
+//! # struct Orientation;
+//! // a view can be a single view type
+//! let mut query = Read::<Position>::query();
+//!
+//! // or a tuple of views
+//! let mut query = <(Read<Position>, Write<Orientation>)>::query();
+//! ```
+//!
+//! You can attach [additional filters](filter/filter_fns/index.html) to a query to further
+//! refine which entities you want to access.
+//!
+//! ```
+//! # use legion::*;
+//! # struct Position;
+//! # struct Orientation;
+//!
+//! // filters can be combined with boolean operators
+//! let mut query = <(Read<Position>, Write<Orientation>)>::query()
+//!     .filter(!component::<Static>() | !component::<Model>());
+//! ```
+//!
+//! Once you have a query, you can use it to pull data out of a world. At its core, a query
+//! allows you to iterate over [chunks](struct.ChunkView.html). Each chunk contains a set of
+//! entities which all have extactly the same component types attached, and the chunk provides
+//! access to slices of each component. A single index in each slice in a chunk contains the
+//! component for the same entity.
+//!
+//! ```
+//! # use legion::*;
+//! # struct Position;
+//! # struct Orientation;
+//! # let mut world = World::default();
+//! let mut query = <(Read<Position>, Write<Orientation>)>::query();
+//! for mut chunk in query.iter_chunks_mut(&mut world) {
+//!     // we can access information about the archetype (shape/component layout) of the entities
+//!     println!(
+//!         "the entities in the chunk have {:?} components",
+//!         chunk.archetype().layout().component_types(),
+//!     );
+//!
+//!     // we can iterate through a tuple of component references
+//!     for (position, orientation) in chunk {
+//!         // position is a `&Position`
+//!         // orientation is a `&mut Orientation`
+//!         // they are both attached to the same entity
+//!     }
+//! }
+//! ```
+//!
+//! There are convenience functions on query which will flatten this loop for us, giving
+//! direct access to the entities.
+//!
+//! ```
+//! # use legion::*;
+//! # struct Position;
+//! # struct Orientation;
+//! # let mut world = World::default();
+//! let mut query = <(Read<Position>, Write<Orientation>)>::query();
+//! for (position, orientation) in query.iter_mut(&mut world) {
+//!     // position is a `&Position`
+//!     // orientation is a `&mut Orientation`
+//!     // they are both attached to the same entity
+//! }
+//! ```
+
 use crate::{
+    entity::Entity,
     iter::indexed::TrustedRandomAccess,
-    storage::{
-        archetype::{Archetype, ArchetypeIndex},
-        component::Component,
-        group::SubGroup,
-    },
+    storage::{Archetype, ArchetypeIndex, Component, SubGroup},
     world::{EntityStore, StorageAccessor, WorldId},
-    Entity,
 };
 use filter::{DynamicFilter, EntityFilter, GroupMatcher};
 use parking_lot::Mutex;
@@ -16,7 +94,9 @@ use view::{Fetch, IntoIndexableIter, ReadOnlyFetch, View};
 pub mod filter;
 pub mod view;
 
+/// A type (typically a view) which can construct a query.
 pub trait IntoQuery: for<'a> View<'a> {
+    /// Constructs a query.
     fn query() -> Query<Self, Self::Filter>;
 }
 
@@ -41,6 +121,7 @@ pub struct QueryResult<'a> {
 }
 
 impl<'a> QueryResult<'a> {
+    /// The query should access the following archetypes via direct indexing.
     fn unordered(index: &'a [ArchetypeIndex]) -> Self {
         Self {
             range: 0..index.len(),
@@ -49,6 +130,8 @@ impl<'a> QueryResult<'a> {
         }
     }
 
+    /// The query should access the following archetypes, and storage can be
+    /// assumed to have stored components in the same order as given.
     fn ordered(index: &'a [ArchetypeIndex]) -> Self {
         Self {
             range: 0..index.len(),
@@ -57,21 +140,26 @@ impl<'a> QueryResult<'a> {
         }
     }
 
+    /// Gets the archetype index containing the archetypes which match the filter.
     pub fn index(&self) -> &'a [ArchetypeIndex] {
         let (_, slice) = self.index.split_at(self.range.start);
         let (slice, _) = slice.split_at(self.range.len());
         slice
     }
 
+    /// The sub-range of archetypes which should be accessed.
     pub fn range(&self) -> &Range<usize> { &self.range }
 
+    /// Returns `true` if components can be assumed to be stored in the same order as given.
     pub fn is_ordered(&self) -> bool { self.is_ordered }
 
+    /// The number of archetypes that matches the filter.
     pub fn len(&self) -> usize { self.range.len() }
 
+    /// Returns `true` if no archetypes matched the filter.
     pub fn is_empty(&self) -> bool { self.index().is_empty() }
 
-    pub fn split_at(self, index: usize) -> (Self, Self) {
+    pub(crate) fn split_at(self, index: usize) -> (Self, Self) {
         (
             Self {
                 range: self.range.start..index,
@@ -99,6 +187,7 @@ enum Cache {
     },
 }
 
+/// Provides efficient means to iterate and filter entities in a world.
 pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
     _view: PhantomData<V>,
     filter: Mutex<F>,
@@ -135,7 +224,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         &'a mut self,
         world: &StorageAccessor<'a>,
     ) -> (&mut Mutex<F>, QueryResult<'a>) {
+        // pull layout matches out of the cache
         let cache = self.layout_matches.entry(world.id()).or_insert_with(|| {
+            // if the query can match a group, look to see if there is a subgroup we can use
             let cache = if F::can_match_group() {
                 let components = F::group_components();
                 components
@@ -150,15 +241,18 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
                 None
             };
 
+            // else use an unordered result
             cache.unwrap_or_else(|| Cache::Unordered {
                 archetypes: Vec::new(),
                 seen: 0,
             })
         });
 
+        // iteratively update our layout matches
         let filter = self.filter.get_mut();
         let result = match cache {
             Cache::Unordered { archetypes, seen } => {
+                // resume index search from where we last left off
                 for archetype in world.layout_index().search_from(&*filter, *seen) {
                     archetypes.push(archetype);
                 }
@@ -166,6 +260,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
                 QueryResult::unordered(archetypes.as_slice())
             }
             Cache::Ordered { group, subgroup } => {
+                // grab the archetype slice from the group
                 let archetypes = &world.groups()[*group][*subgroup];
                 QueryResult::ordered(archetypes)
             }
@@ -176,7 +271,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         (&mut self.filter, result)
     }
 
-    pub fn find_archetypes<'a, T: EntityStore + 'a>(
+    pub(crate) fn find_archetypes<'a, T: EntityStore + 'a>(
         &'a mut self,
         world: &'a T,
     ) -> &'a [ArchetypeIndex] {
@@ -189,6 +284,13 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     // Chunk Iteration
     // ----------------
 
+    /// Returns an iterator which will yield all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.
+    ///
+    /// # Safety
+    /// This function allows mutable access via a shared world reference. The caller is responsible for
+    /// ensuring that no component accesses may create mutable aliases.
     pub unsafe fn iter_chunks_unchecked<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world T,
@@ -246,6 +348,13 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         }
     }
 
+    /// Returns a parallel iterator which will yield all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.
+    ///
+    /// # Safety
+    /// This function allows mutable access via a shared world reference. The caller is responsible for
+    /// ensuring that no component accesses may create mutable aliases.    
     #[cfg(feature = "par-iter")]
     pub unsafe fn par_iter_chunks_unchecked<'a, T: EntityStore>(
         &'a mut self,
@@ -256,6 +365,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         par_iter::ParChunkIter::new(accessor, result, filter)
     }
 
+    /// Returns an iterator which will yield all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.      
     #[inline]
     pub fn iter_chunks_mut<'query, 'world, T: EntityStore>(
         &'query mut self,
@@ -265,6 +377,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.iter_chunks_unchecked(world) }
     }
 
+    /// Returns a parallel iterator which will yield all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub fn par_iter_chunks_mut<'a, T: EntityStore>(
@@ -275,6 +390,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.par_iter_chunks_unchecked(world) }
     }
 
+    /// Returns an iterator which will yield all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.  
+    /// Only usable with queries who's views are read-only.
     #[inline]
     pub fn iter_chunks<'query, 'world, T: EntityStore>(
         &'query mut self,
@@ -287,6 +406,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.iter_chunks_unchecked(world) }
     }
 
+    /// Returns a parallel iterator which will yield all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.
+    /// Only usable with queries who's views are read-only.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub fn par_iter_chunks<'a, T: EntityStore>(
@@ -304,6 +427,13 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     // Entity Iteration
     // ----------------
 
+    /// Returns an iterator which will yield all components which match the query.
+    ///
+    /// Prefer `for_each_unchecked` as it offers better performance.
+    ///
+    /// # Safety
+    /// This function allows mutable access via a shared world reference. The caller is responsible for
+    /// ensuring that no component accesses may create mutable aliases.
     #[inline]
     pub unsafe fn iter_unchecked<'query, 'world, T: EntityStore>(
         &'query mut self,
@@ -312,6 +442,11 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         self.iter_chunks_unchecked(world).flatten()
     }
 
+    /// Returns a parallel iterator which will yield all components which match the query.
+    ///
+    /// # Safety
+    /// This function allows mutable access via a shared world reference. The caller is responsible for
+    /// ensuring that no component accesses may create mutable aliases.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub unsafe fn par_iter_unchecked<'a, T: EntityStore>(
@@ -322,6 +457,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         self.par_iter_chunks_unchecked(world).flatten()
     }
 
+    /// Returns an iterator which will yield all components which match the query.
+    ///
+    /// Prefer `for_each_mut` as it yields better performance.
     #[inline]
     pub fn iter_mut<'query, 'world, T: EntityStore>(
         &'query mut self,
@@ -331,6 +469,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.iter_unchecked(world) }
     }
 
+    /// Returns a parallel iterator which will yield all components which match the query.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub fn par_iter_mut<'a, T: EntityStore>(
@@ -341,6 +480,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.par_iter_unchecked(world) }
     }
 
+    /// Returns an iterator which will yield all components which match the query.
+    ///
+    /// Prefer `for_each` as it yields better performance.  
+    /// Only usable with queries who's views are read-only.
     #[inline]
     pub fn iter<'query, 'world, T: EntityStore>(
         &'query mut self,
@@ -353,6 +496,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.iter_unchecked(world) }
     }
 
+    /// Returns a parallel iterator which will yield all components which match the query.
+    ///
+    /// Only usable with queries who's views are read-only.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub fn par_iter<'a, T: EntityStore>(
@@ -370,6 +516,13 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     // Chunk for-each
     // ----------------
 
+    /// Iterates through all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.  
+    ///
+    /// # Safety
+    /// This function allows mutable access via a shared world reference. The caller is responsible for
+    /// ensuring that no component accesses may create mutable aliases.
     #[inline]
     pub unsafe fn for_each_chunk_unchecked<'query, 'world, T: EntityStore, Body>(
         &'query mut self,
@@ -383,6 +536,13 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         }
     }
 
+    /// Iterates in parallel through all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.  
+    ///
+    /// # Safety
+    /// This function allows mutable access via a shared world reference. The caller is responsible for
+    /// ensuring that no component accesses may create mutable aliases.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub unsafe fn par_for_each_chunk_unchecked<'a, T: EntityStore, Body>(
@@ -396,6 +556,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         self.par_iter_chunks_unchecked(world).for_each(f);
     }
 
+    /// Iterates through all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.  
     #[inline]
     pub fn for_each_chunk_mut<'query, 'world, T: EntityStore, Body>(
         &'query mut self,
@@ -408,6 +571,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.for_each_chunk_unchecked(world, f) };
     }
 
+    /// Iterates in parallel through all entity chunks which match the query.  
+    /// Each chunk contains slices of components for entities which all have the same component layout.  
     #[cfg(feature = "par-iter")]
     #[inline]
     pub fn par_for_each_chunk_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
@@ -418,6 +583,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.par_for_each_chunk_unchecked(world, f) };
     }
 
+    /// Iterates through all entity chunks which match the query.  
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.  
+    /// Only usable with queries who's views are read-only.
     #[inline]
     pub fn for_each_chunk<'query, 'world, T: EntityStore, Body>(
         &'query mut self,
@@ -431,6 +600,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.for_each_chunk_unchecked(world, f) };
     }
 
+    /// Iterates in parallel through all entity chunks which match the query.
+    ///
+    /// Each chunk contains slices of components for entities which all have the same component layout.  
+    /// Only usable with queries who's views are read-only.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub fn par_for_each_chunk<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
@@ -446,6 +619,11 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     // Entity for-each
     // ----------------
 
+    /// Iterates through all components which match the query.
+    ///
+    /// # Safety
+    /// This function allows mutable access via a shared world reference. The caller is responsible for
+    /// ensuring that no component accesses may create mutable aliases.
     #[inline]
     pub unsafe fn for_each_unchecked<'query, 'world, T: EntityStore, Body>(
         &'query mut self,
@@ -462,6 +640,11 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         }
     }
 
+    /// Iterates in parallel through all components which match the query.
+    ///
+    /// # Safety
+    /// This function allows mutable access via a shared world reference. The caller is responsible for
+    /// ensuring that no component accesses may create mutable aliases.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub unsafe fn par_for_each_unchecked<'a, T: EntityStore, Body>(
@@ -475,6 +658,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         self.par_iter_unchecked(world).for_each(&f);
     }
 
+    /// Iterates through all components which match the query.
     #[inline]
     pub fn for_each_mut<'query, 'world, T: EntityStore, Body>(
         &'query mut self,
@@ -487,6 +671,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.for_each_unchecked(world, f) };
     }
 
+    /// Iterates in parallel through all components which match the query.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub fn par_for_each_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
@@ -497,6 +682,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.par_for_each_unchecked(world, f) };
     }
 
+    /// Iterates through all components which match the query.
+    ///
+    /// Only usable with queries who's views are read-only.
     #[inline]
     pub fn for_each<'query, 'world, T: EntityStore, Body>(
         &'query mut self,
@@ -510,6 +698,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.for_each_unchecked(world, f) };
     }
 
+    /// Iterates in parallel through all components which match the query.
+    ///
+    /// Only usable with queries who's views are read-only.
     #[cfg(feature = "par-iter")]
     #[inline]
     pub fn par_for_each<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
@@ -522,6 +713,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     }
 }
 
+/// Provides access to slices of components for entities which have the same component layout.
+///
+/// A single index in any of the slices contained in a chunk belong to the same entity.
 pub struct ChunkView<'a, F: Fetch> {
     archetype: &'a Archetype,
     fetch: F,
@@ -530,16 +724,55 @@ pub struct ChunkView<'a, F: Fetch> {
 impl<'a, F: Fetch> ChunkView<'a, F> {
     fn new(archetype: &'a Archetype, fetch: F) -> Self { Self { archetype, fetch } }
 
+    /// Returns the archetype that all entities in the chunk belong to.
     pub fn archetype(&self) -> &Archetype { &self.archetype }
 
+    /// Returns a slice of components.
+    ///
+    /// May return `None` if the chunk's view does not declare access to the component type.
     pub fn component_slice<T: Component>(&self) -> Option<&[T]> { self.fetch.find::<T>() }
 
+    /// Returns a mutable slice of components.
+    ///
+    /// May return `None` if the chunk's view does not declare access to the component type.
     pub fn component_slice_mut<T: Component>(&mut self) -> Option<&mut [T]> {
         self.fetch.find_mut::<T>()
     }
 
+    /// Converts the chunk into a tuple of it's inner slices.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use legion::*;
+    /// # struct A;
+    /// # struct B;
+    /// # struct C;
+    /// # struct D;
+    /// # let mut world = World::new();
+    /// let mut query = <(Entity, Read<A>, Write<B>, TryRead<C>, TryWrite<D>)>::query();
+    /// for chunk in query.iter_chunks_mut(&mut world) {
+    ///     let slices: (&[Entity], &[A], &mut [B], Option<&[C]>, Option<&mut [D]>) = chunk.into_components();       
+    /// }
+    /// ```
     pub fn into_components(self) -> F::Data { self.fetch.into_components() }
 
+    /// Converts the chunk into a tuple of it's inner slices.
+    ///
+    /// Only usable with views who's elements are all read-only.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use legion::*;
+    /// # struct A;
+    /// # struct B;
+    /// # let mut world = World::new();
+    /// let mut query = <(Entity, Read<A>, TryRead<B>)>::query();
+    /// for chunk in query.iter_chunks_mut(&mut world) {
+    ///     let slices: (&[Entity], &[A], Option<&[B]>) = chunk.get_components();       
+    /// }
+    /// ```
     pub fn get_components(&self) -> F::Data
     where
         F: ReadOnlyFetch,
@@ -547,6 +780,7 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
         self.fetch.get_components()
     }
 
+    /// Converts the chunk into an iterator which yields tuples of `(Entity, components)`.
     pub fn into_iter_entities(
         self,
     ) -> impl Iterator<Item = (Entity, <F as IntoIndexableIter>::Item)> + 'a
@@ -574,6 +808,8 @@ impl<'a, F: Fetch> rayon::iter::IntoParallelIterator for ChunkView<'a, F> {
     }
 }
 
+/// An iterator which yields entity chunks from a query.
+#[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
 pub struct ChunkIter<'data, 'index, V, D>
 where
     V: View<'data>,
@@ -639,6 +875,8 @@ mod par_iter {
     use rayon::iter::ParallelIterator;
     use std::marker::PhantomData;
 
+    /// An entity chunk iterator which internally locks its filter during iteration.
+    #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
     pub struct Iter<'world, 'query, V, D>
     where
         V: View<'world>,
@@ -673,6 +911,8 @@ mod par_iter {
         fn size_hint(&self) -> (usize, Option<usize>) { (0, Some(self.max_count)) }
     }
 
+    /// A parallel entity chunk iterator.
+    #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
     pub struct ParChunkIter<'a, V, D>
     where
         V: View<'a>,
@@ -734,7 +974,7 @@ mod par_iter {
                     filter: self.filter,
                     _view: PhantomData,
                 },
-                if left.len() > 0 {
+                if !left.is_empty() {
                     Some(Self {
                         world: self.world,
                         result: left,
@@ -788,7 +1028,7 @@ mod par_iter {
 
 #[cfg(test)]
 mod test {
-    use super::view::{read::Read, write::Write};
+    use super::view::{Read, Write};
     use super::IntoQuery;
     use crate::world::World;
 

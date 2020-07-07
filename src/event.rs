@@ -1,9 +1,6 @@
 use crate::entity::Entity;
 use crate::query::filter::LayoutFilter;
-use crate::storage::{
-    archetype::{Archetype, ArchetypeIndex},
-    component::ComponentTypeId,
-};
+use crate::storage::{Archetype, ArchetypeIndex, ComponentTypeId};
 use std::iter::Iterator;
 use std::{fmt::Debug, sync::Arc};
 
@@ -18,7 +15,10 @@ pub enum Event {
     EntityRemoved(Entity, ArchetypeIndex),
 }
 
+/// Describes a type which can send entity events.
 pub trait EventSender: Send + Sync {
+    /// Sends the given event to all listeners.
+    /// Returns `true` if the sender is still alive.
     fn send(&self, event: Event) -> bool;
 }
 
@@ -34,7 +34,7 @@ impl EventSender for crossbeam_channel::Sender<Event> {
 }
 
 #[derive(Clone)]
-pub struct Subscriber {
+pub(crate) struct Subscriber {
     filter: Arc<dyn LayoutFilter>,
     sender: Arc<dyn EventSender>,
 }
@@ -60,13 +60,11 @@ impl Subscriber {
 }
 
 #[derive(Clone, Default)]
-pub struct Subscribers {
+pub(crate) struct Subscribers {
     subscribers: Vec<Subscriber>,
 }
 
 impl Subscribers {
-    pub fn new(subscribers: Vec<Subscriber>) -> Self { Self { subscribers } }
-
     pub fn push(&mut self, subscriber: Subscriber) { self.subscribers.push(subscriber); }
 
     pub fn send(&mut self, message: Event) {

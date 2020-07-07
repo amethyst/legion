@@ -3,9 +3,8 @@ use crate::{
     insert::ArchetypeSource,
     query::filter::{FilterResult, LayoutFilter},
     storage::{
-        archetype::{Archetype, EntityLayout},
-        component::{Component, ComponentTypeId},
-        ComponentStorage, Components, UnknownComponentStorage,
+        Archetype, Component, ComponentStorage, ComponentTypeId, Components, EntityLayout,
+        UnknownComponentStorage,
     },
     subworld::ComponentAccess,
     world::World,
@@ -325,7 +324,7 @@ impl<'a> ArchetypeSource for DynamicArchetype<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::{query::view::read::Read, query::IntoQuery, world::World};
+    use crate::{query::view::Read, query::IntoQuery, world::World};
 
     #[test]
     fn add_component() {

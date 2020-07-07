@@ -29,7 +29,7 @@
 //DEALINGS IN THE SOFTWARE.
 
 #[inline]
-pub fn min(a: (usize, Option<usize>), b: (usize, Option<usize>)) -> (usize, Option<usize>) {
+fn min(a: (usize, Option<usize>), b: (usize, Option<usize>)) -> (usize, Option<usize>) {
     let (a_lower, a_upper) = a;
     let (b_lower, b_upper) = b;
     let lower = std::cmp::min(a_lower, b_lower);
@@ -40,6 +40,7 @@ pub fn min(a: (usize, Option<usize>), b: (usize, Option<usize>)) -> (usize, Opti
     (lower, upper)
 }
 
+/// An iterator which zips a tuple of iterators.
 #[derive(Clone, Debug)]
 #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
 pub struct Zip<T> {

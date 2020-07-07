@@ -1,3 +1,5 @@
+//! Contains types related to defining system schedules.
+
 use std::cell::UnsafeCell;
 
 #[cfg(feature = "par-schedule")]
@@ -21,7 +23,7 @@ use super::{
     system::SystemId,
 };
 use crate::{
-    storage::component::ComponentTypeId,
+    storage::ComponentTypeId,
     subworld::ArchetypeAccess,
     world::{World, WorldId},
 };
@@ -580,7 +582,7 @@ impl From<Vec<Step>> for Schedule {
 mod tests {
     use super::*;
     use crate::{
-        query::{view::write::Write, IntoQuery},
+        query::{view::Write, IntoQuery},
         systems::system::SystemBuilder,
     };
     use itertools::sorted;

@@ -1,6 +1,7 @@
 use super::{DynamicFilter, FilterResult, GroupMatcher, LayoutFilter};
-use crate::{query::view::Fetch, storage::component::ComponentTypeId, world::WorldId};
+use crate::{query::view::Fetch, storage::ComponentTypeId, world::WorldId};
 
+/// A filter which always defers.
 #[derive(Debug, Clone, Default)]
 pub struct Passthrough;
 

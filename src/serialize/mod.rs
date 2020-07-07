@@ -1,22 +1,23 @@
+//! Contains types required to serialize and deserialize a world via the serde library.
+
 use crate::{
-    storage::{
-        archetype::{ArchetypeIndex, EntityLayout},
-        component::{Component, ComponentTypeId},
-        UnknownComponentStorage,
-    },
+    storage::{ArchetypeIndex, Component, ComponentTypeId, EntityLayout, UnknownComponentStorage},
     world::World,
 };
-use de::WorldDeserializer;
-use ser::WorldSerializer;
 use serde::{de::DeserializeSeed, Serializer};
 use std::{collections::HashMap, hash::Hash, marker::PhantomData};
 
-pub mod de;
+mod de;
 mod entities;
 mod packed;
-pub mod ser;
+mod ser;
 
-#[doc(hidden)]
+pub use de::WorldDeserializer;
+pub use ser::{SerializableWorld, WorldSerializer};
+
+/// A (de)serializable type which can represent a component type in a serialized world.
+///
+/// This trait has a blanket impl for all applicable types.
 pub trait TypeKey:
     serde::Serialize + for<'de> serde::Deserialize<'de> + Ord + Clone + Hash
 {
@@ -27,24 +28,23 @@ impl<T> TypeKey for T where
 {
 }
 
+type SerializeFn = fn(*const u8, &mut dyn FnMut(&dyn erased_serde::Serialize));
+type DeserializeSliceFn = fn(
+    &mut dyn UnknownComponentStorage,
+    ArchetypeIndex,
+    &mut dyn erased_serde::Deserializer,
+) -> Result<(), erased_serde::Error>;
+type DeserializeSingleFn =
+    fn(&mut dyn erased_serde::Deserializer) -> Result<Box<[u8]>, erased_serde::Error>;
+
+/// A world (de)serializer which describes how to (de)serialize the component types in a world.
 pub struct Registry<T = SerializableTypeId>
 where
     T: TypeKey,
 {
     _phantom: PhantomData<T>,
-    serialize_fns: HashMap<
-        ComponentTypeId,
-        (
-            T,
-            fn(*const u8, &mut dyn FnMut(&dyn erased_serde::Serialize)),
-            fn(
-                &mut dyn UnknownComponentStorage,
-                ArchetypeIndex,
-                &mut dyn erased_serde::Deserializer,
-            ) -> Result<(), erased_serde::Error>,
-            fn(&mut dyn erased_serde::Deserializer) -> Result<Box<[u8]>, erased_serde::Error>,
-        ),
-    >,
+    serialize_fns:
+        HashMap<ComponentTypeId, (T, SerializeFn, DeserializeSliceFn, DeserializeSingleFn)>,
     constructors: HashMap<T, (ComponentTypeId, fn(&mut EntityLayout))>,
 }
 
@@ -52,6 +52,7 @@ impl<T> Registry<T>
 where
     T: TypeKey,
 {
+    /// Constructs a new registry.
     pub fn new() -> Self {
         Self {
             serialize_fns: HashMap::new(),
@@ -60,6 +61,7 @@ where
         }
     }
 
+    /// Registers a component type and its key with the registry.
     pub fn register<C: Component + serde::Serialize + for<'de> serde::Deserialize<'de>>(
         &mut self,
         mapped_type_id: T,
@@ -107,6 +109,7 @@ where
             .insert(mapped_type_id, (type_id, constructor_fn));
     }
 
+    /// Registers a component type and its key with the registry.
     pub fn register_auto_mapped<
         C: Component + serde::Serialize + for<'de> serde::Deserialize<'de>,
     >(
@@ -116,6 +119,10 @@ where
     {
         self.register::<C>(ComponentTypeId::of::<C>().into())
     }
+}
+
+impl<T: TypeKey> Default for Registry<T> {
+    fn default() -> Self { Self::new() }
 }
 
 impl<T> WorldSerializer for Registry<T>
@@ -216,6 +223,9 @@ impl<'de, T: TypeKey> DeserializeSeed<'de> for Registry<T> {
     }
 }
 
+/// A default serializable type ID. This ID is not stable between compiles,
+/// so serialized words serialized by a different binary may not deserialize
+/// correctly.
 #[derive(
     Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
 )]
@@ -255,7 +265,7 @@ enum WorldField {
 mod test {
     use super::Registry;
     use crate::{
-        query::filter::filter_fns::any,
+        query::filter::any,
         world::{EntityStore, World},
     };
 

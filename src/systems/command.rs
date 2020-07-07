@@ -1,7 +1,14 @@
+//! Contains types related to command buffers.
+//!
+//! Use command buffers to enqueue changes to a world from within a system.
+//! For example, creating or destroying entities.
+//! Command buffers are flushed at the end of the schedule, or by adding a
+//! `flush_command_buffers` step to the schedule.
+
 use crate::{
     entity::{Entity, EntityAllocator},
     insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource, KnownLength},
-    storage::{archetype::EntityLayout, component::Component},
+    storage::{EntityLayout, Component},
     world::{World, WorldId},
 };
 use derivative::Derivative;
@@ -179,7 +186,7 @@ enum Command {
 
 /// A command buffer used to queue mutable changes to the world from a system. This buffer is automatically
 /// flushed and refreshed at the beginning of every frame by `Schedule`. If `Schedule` is not used,
-/// then the user needs to manually flush it by performing `CommandBuffer::write`.
+/// then the user needs to manually flush it by performing `CommandBuffer::flush`.
 ///
 /// # Examples
 ///
@@ -210,11 +217,7 @@ pub struct CommandBuffer {
 }
 
 impl CommandBuffer {
-    /// Creates a `CommandBuffer` with a custom capacity of cached Entity's to be collected every frame.
-    /// Allocating a command buffer in this manner will use the default `World::set_command_buffer_size`
-    /// value.
-    ///
-    /// This constructor will preallocate the first round of entities needed from the world.
+    /// Constructs an empty command buffer.
     pub fn new(world: &World) -> Self {
         Self {
             world_id: world.id(),
@@ -269,6 +272,7 @@ impl CommandBuffer {
             .push_front(Command::WriteWorld(Arc::new(writer)));
     }
 
+    /// Queues the insertion of a single entity into the world.
     pub fn push<T>(&mut self, components: T) -> Entity
     where
         Option<T>: 'static + IntoComponentSource,
@@ -277,8 +281,7 @@ impl CommandBuffer {
         self.extend(Some(components))[0]
     }
 
-    /// Queues an insertion into the world. This command follows the same syntax as
-    /// the normal `World::insert`, returning the entities created for this command.
+    /// Queues the insertion of new entities into the world.
     pub fn extend<T>(&mut self, components: T) -> &[Entity]
     where
         T: 'static + IntoComponentSource,
@@ -303,17 +306,15 @@ impl CommandBuffer {
         &self.pending_insertion[range]
     }
 
-    /// Queues the deletion of an entity in the command buffer. This writer calls `World::delete`
+    /// Queues the deletion of an entity in the command buffer.
     pub fn remove(&mut self, entity: Entity) { self.insert_writer(DeleteEntityCommand(entity)); }
 
     /// Queues the addition of a component from an entity in the command buffer.
-    /// This writer calls `World::add_component`
     pub fn add_component<C: Component>(&mut self, entity: Entity, component: C) {
         self.insert_writer(AddComponentCommand { entity, component });
     }
 
     /// Queues the removal of a component from an entity in the command buffer.
-    /// This writer calls `World::remove_component`
     pub fn remove_component<C: Component>(&mut self, entity: Entity) {
         self.insert_writer(RemoveComponentCommand {
             entity,
@@ -333,7 +334,7 @@ impl CommandBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::{view::read::Read, IntoQuery};
+    use crate::query::{view::Read, IntoQuery};
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);

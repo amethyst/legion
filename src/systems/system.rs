@@ -1,3 +1,5 @@
+//! Contains types related to the definition of systems.
+
 use super::{
     command::CommandBuffer,
     resources::{Resource, ResourceSet, ResourceTypeId, Resources},
@@ -8,13 +10,10 @@ use crate::{
     permissions::Permissions,
     query::{
         filter::EntityFilter,
-        view::{read::Read, write::Write, View},
+        view::{Read, View, Write},
         Query,
     },
-    storage::{
-        archetype::ArchetypeIndex,
-        component::{Component, ComponentTypeId},
-    },
+    storage::{ArchetypeIndex, Component, ComponentTypeId},
     subworld::{ArchetypeAccess, ComponentAccess, SubWorld},
     world::{World, WorldId},
 };
@@ -83,6 +82,7 @@ pub struct SystemAccess {
     components: Permissions<ComponentTypeId>,
 }
 
+/// A diagnostic identifier for a system.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SystemId {
     name: Cow<'static, str>,
@@ -90,17 +90,6 @@ pub struct SystemId {
 }
 
 struct Unspecified;
-
-impl SystemId {
-    pub fn of<T: 'static>(name: Option<String>) -> Self {
-        Self {
-            name: name
-                .unwrap_or_else(|| std::any::type_name::<T>().to_string())
-                .into(),
-            type_id: TypeId::of::<T>(),
-        }
-    }
-}
 
 impl std::fmt::Display for SystemId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -204,13 +193,9 @@ where
     }
 }
 
-/// Supertrait used for defining systems. All wrapper objects for systems implement this trait.
-///
-/// This trait will generally not be used by users.
+/// A function which can provide the body of a system.
 pub trait SystemFn<R: ResourceSet<'static>, Q: QuerySet> {
-    // type Resources: ResourceSet<'static>;
-    // type Queries;
-
+    /// Runs the system body.
     fn run(
         &mut self,
         commands: &mut CommandBuffer,
@@ -226,9 +211,6 @@ where
     Q: QuerySet,
     F: FnMut(&mut CommandBuffer, &mut SubWorld, &mut R::Result, &mut Q) + 'static,
 {
-    // type Resources = R;
-    // type Queries = Q;
-
     fn run(
         &mut self,
         commands: &mut CommandBuffer,
@@ -239,30 +221,6 @@ where
         (self)(commands, world, resources, queries)
     }
 }
-
-// pub struct SystemFnWrapper<
-//     R: ResourceSet<'static>,
-//     Q,
-//     F: FnMut(&mut CommandBuffer, &mut SubWorld, &mut R::Result, &mut Q) + 'static,
-// >(F, PhantomData<(R, Q)>);
-
-// impl<'a, F, R: ResourceSet<'static>, Q> SystemFn for SystemFnWrapper<R, Q, F>
-// where
-//     F: FnMut(&mut CommandBuffer, &mut SubWorld, &mut R, &mut Q) + 'static,
-// {
-//     type Resources = R;
-//     type Queries = Q;
-
-//     fn run(
-//         &mut self,
-//         commands: &mut CommandBuffer,
-//         world: &mut SubWorld,
-//         resources: &mut Self::Resources,
-//         queries: &mut Self::Queries,
-//     ) {
-//         (self.0)(commands, world, resources, queries);
-//     }
-// }
 
 // This builder uses a Cons/Hlist implemented in cons.rs to generated the static query types
 // for this system. Access types are instead stored and abstracted in the top level vec here
@@ -438,44 +396,6 @@ where
 
         self
     }
-
-    // /// Builds a standard legion `System`. A system is considered a closure for all purposes. This
-    // /// closure is `FnMut`, allowing for capture of variables for tracking state for this system.
-    // /// Instead of the classic OOP architecture of a system, this lets you still maintain state
-    // /// across execution of the systems while leveraging the type semantics of closures for better
-    // /// ergonomics.
-    // pub fn build<F>(self, run_fn: F) -> Box<dyn Schedulable>
-    // where
-    //     <R as ConsFlatten>::Output: for<'a> ResourceSet<'a> + Send + Sync,
-    //     <Q as ConsFlatten>::Output: QuerySet + Send + Sync,
-    //     <<R as ConsFlatten>::Output as ResourceSet>::Result: Send + Sync,
-    //     F: FnMut(
-    //             &mut CommandBuffer,
-    //             &mut SubWorld,
-    //             &mut <<R as ConsFlatten>::Output as ResourceSet>::Result,
-    //             &mut <Q as ConsFlatten>::Output,
-    //         ) + Send
-    //         + Sync
-    //         + 'static,
-    // {
-    //     let run_fn = SystemFnWrapper(run_fn, PhantomData);
-    //     Box::new(System {
-    //         name: self.name,
-    //         run_fn: run_fn,
-    //         _resources: PhantomData::<<R as ConsFlatten>::Output>,
-    //         queries: self.queries.flatten(),
-    //         archetypes: if self.access_all_archetypes {
-    //             ArchetypeAccess::All
-    //         } else {
-    //             ArchetypeAccess::Some(BitSet::default())
-    //         },
-    //         access: SystemAccess {
-    //             resources: self.resource_access,
-    //             components: self.component_access,
-    //         },
-    //         command_buffer: HashMap::default(),
-    //     })
-    // }
 
     /// Builds a system which is not `Schedulable`, as it is not thread safe (!Send and !Sync),
     /// but still implements all the calling infrastructure of the `Runnable` trait. This provides

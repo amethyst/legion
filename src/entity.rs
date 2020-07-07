@@ -1,6 +1,6 @@
 use crate::{
     hash::U64Hasher,
-    storage::{archetype::ArchetypeIndex, ComponentIndex},
+    storage::{ArchetypeIndex, ComponentIndex},
 };
 use std::{
     collections::HashMap,
@@ -15,26 +15,33 @@ use std::{
 const BLOCK_SIZE: usize = 64;
 const BLOCK_SIZE_U64: u64 = BLOCK_SIZE as u64;
 
+/// Unique identifier for an entity in a world.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[repr(transparent)]
 pub struct Entity(u64);
 
+/// The storage location of an entity's data.
 #[derive(Debug, Copy, Clone)]
 pub struct EntityLocation(pub(crate) ArchetypeIndex, pub(crate) ComponentIndex);
 
 impl EntityLocation {
+    /// Constructs a new entity location.
     pub fn new(archetype: ArchetypeIndex, component: ComponentIndex) -> Self {
         EntityLocation(archetype, component)
     }
 
+    /// Returns the entity's archetype index.
     pub fn archetype(&self) -> ArchetypeIndex { self.0 }
 
+    /// Returns the entity's component index within its archetype.
     pub fn component(&self) -> ComponentIndex { self.1 }
 }
 
+/// A hasher optimized for entity IDs.
 pub type EntityHasher = BuildHasherDefault<U64Hasher>;
 
+/// A map of entity IDs to their storage locations.
 #[derive(Clone, Default)]
 pub struct LocationMap {
     len: usize,
@@ -53,10 +60,16 @@ impl Debug for LocationMap {
 }
 
 impl LocationMap {
+    /// Returns the number of entities in the map.
     pub fn len(&self) -> usize { self.len }
 
+    /// Returns `true` if the location map is empty.
+    pub fn is_empty(&self) -> bool { self.len() == 0 }
+
+    /// Returns `true` if the location map contains the given entity.
     pub fn contains(&self, entity: Entity) -> bool { self.get(entity).is_some() }
 
+    /// Inserts an collection of adjacent entities into the location map.
     pub fn insert(
         &mut self,
         ids: &[Entity],
@@ -88,10 +101,12 @@ impl LocationMap {
         }
     }
 
+    /// Inserts or updates the location of an entity.
     pub fn set(&mut self, entity: Entity, location: EntityLocation) {
         self.insert(&[entity], location.archetype(), location.component());
     }
 
+    /// Returns the location of an entity.
     pub fn get(&self, entity: Entity) -> Option<EntityLocation> {
         let block = entity.0 / BLOCK_SIZE_U64;
         let idx = (entity.0 - block * BLOCK_SIZE_U64) as usize;
@@ -102,6 +117,7 @@ impl LocationMap {
         }
     }
 
+    /// Removes an entity from the location map.
     pub fn remove(&mut self, entity: Entity) -> Option<EntityLocation> {
         let block = entity.0 / BLOCK_SIZE_U64;
         let idx = (entity.0 - block * BLOCK_SIZE_U64) as usize;
@@ -118,6 +134,7 @@ impl LocationMap {
     }
 }
 
+/// Allocates new entity IDs.
 #[derive(Debug, Clone)]
 pub struct EntityAllocator {
     next: Arc<AtomicU64>,
@@ -126,7 +143,7 @@ pub struct EntityAllocator {
 }
 
 impl EntityAllocator {
-    pub fn new(offset: u64, stride: u64) -> Self {
+    pub(crate) fn new(offset: u64, stride: u64) -> Self {
         assert!(stride > 0);
         Self {
             next: Arc::new(AtomicU64::new(offset * BLOCK_SIZE_U64)),
@@ -135,8 +152,10 @@ impl EntityAllocator {
         }
     }
 
+    /// Returns an iterator which yields new entity IDs.
     pub fn iter(&self) -> Allocate { Allocate::new(&self) }
 
+    /// Returns `true` if the given entity ID lies within the address space of this allocator.
     pub fn address_space_contains(&self, entity: Entity) -> bool {
         let block = entity.0 / BLOCK_SIZE_U64;
         ((block - self.offset) % self.stride) == 0
@@ -147,8 +166,10 @@ impl EntityAllocator {
             .fetch_add(self.stride * BLOCK_SIZE_U64, Ordering::Relaxed)
     }
 
+    /// Gets the block stride of the allocator.
     pub fn stride(&self) -> u64 { self.stride }
 
+    /// Gets the block offset of the allocator.
     pub fn offset(&self) -> u64 { self.offset }
 
     pub(crate) fn head(&self) -> u64 { self.next.load(Ordering::Relaxed) }
@@ -185,6 +206,7 @@ impl Default for EntityAllocator {
     fn default() -> Self { Self::new(0, 1) }
 }
 
+/// An iterator which yields new entity IDs.
 pub struct Allocate<'a> {
     allocator: &'a EntityAllocator,
     base: u64,
@@ -200,6 +222,7 @@ impl<'a> Allocate<'a> {
         }
     }
 
+    /// Returns `true` if the given ID has already been allocated.
     pub fn is_allocated(&mut self, Entity(entity): Entity) -> bool {
         let ceiling = self.base + BLOCK_SIZE_U64;
         let in_range = entity < self.base || (entity < ceiling && entity >= self.base + self.count);

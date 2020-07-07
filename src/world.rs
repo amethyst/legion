@@ -1,18 +1,17 @@
+//! Contains types related to the [World](struct.World.html) entity collection.
+
 use crate::entity::{Entity, EntityAllocator, EntityHasher, EntityLocation, LocationMap};
 use crate::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use crate::{
     event::{EventSender, Subscriber, Subscribers},
     query::{
-        filter::{filter_fns::any, EntityFilter, LayoutFilter},
+        filter::{any, EntityFilter, LayoutFilter},
         view::View,
         Query,
     },
     storage::{
-        archetype::{Archetype, ArchetypeIndex, EntityLayout},
-        component::{Component, ComponentTypeId},
-        group::{Group, GroupDef},
-        index::SearchIndex,
-        ComponentIndex, Components, PackOptions, UnknownComponentStorage,
+        Archetype, ArchetypeIndex, Component, ComponentIndex, ComponentTypeId, Components,
+        EntityLayout, Group, GroupDef, PackOptions, SearchIndex, UnknownComponentStorage,
     },
     subworld::{ComponentAccess, SubWorld},
 };
@@ -128,7 +127,7 @@ impl Default for WorldId {
 pub struct WorldOptions {
     /// A vector of component [groups](../storage/group/struct.Group.html) to provide
     /// layout hints for query optimization.
-    pub groups: Vec<Group>,
+    pub groups: Vec<GroupDef>,
 }
 
 /// A container of entities.
@@ -161,8 +160,9 @@ impl World {
 
     /// Creates a new world in its own [universe](struct.Universe.html).
     pub fn with_options(options: WorldOptions) -> Self {
+        let groups: Vec<Group> = options.groups.into_iter().map(|def| def.into()).collect();
         let mut group_members = HashMap::default();
-        for (i, group) in options.groups.iter().enumerate() {
+        for (i, group) in groups.iter().enumerate() {
             for comp in group.components() {
                 match group_members.entry(comp) {
                     Entry::Vacant(entry) => {
@@ -178,7 +178,7 @@ impl World {
             id: WorldId::default(),
             index: SearchIndex::default(),
             components: Components::default(),
-            groups: options.groups,
+            groups,
             group_members,
             archetypes: Vec::default(),
             entities: LocationMap::default(),
@@ -802,12 +802,12 @@ impl World {
     /// let world: World = registry.deserialize(json).unwrap();
     /// ```
     #[cfg(feature = "serialize")]
-    pub fn as_serializable<'a, F: LayoutFilter, W: crate::serialize::ser::WorldSerializer>(
+    pub fn as_serializable<'a, F: LayoutFilter, W: crate::serialize::WorldSerializer>(
         &'a self,
         filter: F,
         world_serializer: &'a W,
-    ) -> crate::serialize::ser::SerializableWorld<'a, F, W> {
-        crate::serialize::ser::SerializableWorld::new(&self, filter, world_serializer)
+    ) -> crate::serialize::SerializableWorld<'a, F, W> {
+        crate::serialize::SerializableWorld::new(&self, filter, world_serializer)
     }
 }
 
@@ -859,7 +859,7 @@ pub struct StorageAccessor<'a> {
 
 impl<'a> StorageAccessor<'a> {
     /// Constructs a new storage accessor.
-    pub fn new(
+    pub(crate) fn new(
         id: WorldId,
         index: &'a SearchIndex,
         components: &'a Components,
@@ -1173,7 +1173,7 @@ impl Default for ConflictPolicy {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{insert::IntoSoa, query::filter::filter_fns::any};
+    use crate::{insert::IntoSoa, query::filter::any};
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
@@ -1277,10 +1277,10 @@ mod test {
     #[test]
     fn pack() {
         use crate::query::{
-            view::{read::Read, write::Write},
+            view::{Read, Write},
             IntoQuery,
         };
-        use crate::storage::group::GroupSource;
+        use crate::storage::GroupSource;
 
         #[derive(Copy, Clone, Debug, PartialEq)]
         struct A(f32);

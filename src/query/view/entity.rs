@@ -1,17 +1,15 @@
+#![doc(hidden)]
+
 use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
 use crate::{
     entity::Entity,
     iter::indexed::IndexedIter,
     permissions::Permissions,
     query::{
-        filter::{any::Any, passthrough::Passthrough, EntityFilterTuple},
+        filter::{Any, EntityFilterTuple, Passthrough},
         QueryResult,
     },
-    storage::{
-        archetype::{Archetype, ArchetypeIndex},
-        component::{Component, ComponentTypeId},
-        Components,
-    },
+    storage::{Archetype, ArchetypeIndex, Component, ComponentTypeId, Components},
     subworld::ComponentAccess,
 };
 
@@ -61,7 +59,7 @@ impl<'data> View<'data> for Entity {
     }
 }
 
-/// A fetch iterator which pulls out shared component slices.
+#[doc(hidden)]
 pub struct Iter<'a> {
     archetypes: &'a [Archetype],
     indexes: std::slice::Iter<'a, ArchetypeIndex>,
@@ -78,6 +76,7 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
+#[doc(hidden)]
 pub struct EntityFetch<'a> {
     entities: &'a [Entity],
 }

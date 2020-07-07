@@ -1,6 +1,10 @@
+//! Contains types related to read and write access declarations. Used by the scheduler and
+//! by [SubWorld](../subworld/index.html) splits.
+
 use smallvec::SmallVec;
 use std::fmt::{Debug, Display};
 
+/// Describes read and write access to resources.
 #[derive(Clone)]
 pub struct Permissions<T: PartialEq> {
     items: SmallVec<[T; 4]>,
@@ -9,6 +13,7 @@ pub struct Permissions<T: PartialEq> {
 }
 
 impl<T: PartialEq> Permissions<T> {
+    /// Constructs a new empty permissions set.
     pub fn new() -> Self {
         Self {
             items: SmallVec::default(),
@@ -19,6 +24,7 @@ impl<T: PartialEq> Permissions<T> {
 
     fn find(&self, item: &T) -> Option<usize> { self.items.iter().position(|x| x == item) }
 
+    /// Adds a resource to the permissions set as both readable and writable.
     pub fn push(&mut self, item: T) {
         if let Some(index) = self.find(&item) {
             if index < self.shared {
@@ -41,6 +47,7 @@ impl<T: PartialEq> Permissions<T> {
         }
     }
 
+    /// Adds a resource to the permissions set as readable.
     pub fn push_read(&mut self, item: T) {
         if let Some(index) = self.find(&item) {
             // if the item had exclusive write, move it into shared
@@ -67,6 +74,7 @@ impl<T: PartialEq> Permissions<T> {
         }
     }
 
+    /// Adds a resource to the permissions set as writable.
     pub fn push_write(&mut self, item: T) {
         if let Some(index) = self.find(&item) {
             if index < self.shared {
@@ -80,6 +88,7 @@ impl<T: PartialEq> Permissions<T> {
         }
     }
 
+    /// Removes a resource from the permissions set.
     pub fn remove(&mut self, item: &T) {
         if let Some(mut index) = self.find(item) {
             if index < self.shared {
@@ -100,6 +109,7 @@ impl<T: PartialEq> Permissions<T> {
         }
     }
 
+    /// Removes read access to a resource from the permissions set.
     pub fn remove_read(&mut self, item: &T) {
         if let Some(index) = self.find(item) {
             if index < self.shared {
@@ -121,6 +131,7 @@ impl<T: PartialEq> Permissions<T> {
         }
     }
 
+    /// Removes write access to a resource from the permissions set.
     pub fn remove_write(&mut self, item: &T) {
         if let Some(index) = self.find(item) {
             if index >= self.write {
@@ -134,6 +145,7 @@ impl<T: PartialEq> Permissions<T> {
         }
     }
 
+    /// Adds all of the permissions contained in the given set to this permission set.
     pub fn add(&mut self, mut other: Self) {
         for read in other.items.drain(..other.shared) {
             self.push_read(read);
@@ -148,6 +160,7 @@ impl<T: PartialEq> Permissions<T> {
         }
     }
 
+    /// Subtracts all of the permissions contained in the given set from this permission set.
     pub fn subtract(&mut self, other: &Self) {
         for read in other.read_only() {
             self.remove_read(read);
@@ -162,16 +175,22 @@ impl<T: PartialEq> Permissions<T> {
         }
     }
 
+    /// Gets a slice of resources which are afforded read access.
     pub fn reads(&self) -> &[T] { &self.items[..self.write] }
 
+    /// Gets a slice of resources which are afforded write access.
     pub fn writes(&self) -> &[T] { &self.items[self.shared..] }
 
+    /// Gets a slice of resources which are afforded read access but not write access.
     pub fn read_only(&self) -> &[T] { &self.items[..self.shared] }
 
+    /// Gets a slice of resources which are afforded write access but not read access.
     pub fn write_only(&self) -> &[T] { &self.items[self.write..] }
 
+    /// Gets a slice of resources which are afforded both read and write access.
     pub fn readwrite(&self) -> &[T] { &self.items[self.shared..self.write] }
 
+    /// Returns `true` if all of the permissions in the given set are contained in this set.
     pub fn is_superset(&self, other: &Self) -> bool {
         for read in other.read_only() {
             // exit if reads are in exclusive write range, or are not found
@@ -201,6 +220,7 @@ impl<T: PartialEq> Permissions<T> {
         true
     }
 
+    /// Returns `true` if none of the permissions in the given set are contained in this set.
     pub fn is_disjoint(&self, other: &Self) -> bool {
         for read in other.read_only() {
             // exit if reads are in read-only or shared range

@@ -1,15 +1,16 @@
+#![doc(hidden)]
+
 use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
 use crate::{
     iter::indexed::{IndexedIter, TrustedRandomAccess},
     permissions::Permissions,
     query::{
-        filter::{passthrough::Passthrough, try_component::TryComponentFilter, EntityFilterTuple},
+        filter::{EntityFilterTuple, Passthrough, TryComponentFilter},
         QueryResult,
     },
     storage::{
-        archetype::{Archetype, ArchetypeIndex},
-        component::{Component, ComponentTypeId},
-        ComponentSlice, ComponentStorage, Components,
+        Archetype, ArchetypeIndex, Component, ComponentSlice, ComponentStorage, ComponentTypeId,
+        Components,
     },
     subworld::ComponentAccess,
 };
@@ -76,7 +77,7 @@ impl<'data, T: Component> View<'data> for TryRead<T> {
     }
 }
 
-/// A fetch iterator which pulls out shared component slices.
+#[doc(hidden)]
 pub struct TryReadIter<'a, T: Component> {
     components: Option<&'a T::Storage>,
     archetype_indexes: std::slice::Iter<'a, ArchetypeIndex>,
@@ -98,6 +99,7 @@ impl<'a, T: Component> Iterator for TryReadIter<'a, T> {
     }
 }
 
+#[doc(hidden)]
 pub enum Slice<'a, T: Component> {
     Occupied {
         version: &'a u64,
@@ -189,6 +191,7 @@ impl<'a, T: Component> Fetch for Slice<'a, T> {
     fn accepted(&mut self) {}
 }
 
+#[doc(hidden)]
 pub enum Data<'a, T: Component> {
     Occupied(&'a [T]),
     Empty(usize),

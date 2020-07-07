@@ -1,14 +1,25 @@
+//! World serialization types.
+
 use super::{
     entities::ser::EntitiesLayoutSerializer, packed::ser::PackedLayoutSerializer, WorldField,
     WorldMeta,
 };
-use crate::{query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World};
+use crate::{query::filter::LayoutFilter, storage::ComponentTypeId, world::World};
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
+/// Describes a type which knows how to deserialize the components in a world.
 pub trait WorldSerializer {
+    /// The stable type ID used to identify each component type.
     type TypeId: Serialize + Ord;
 
+    /// Converts a runtime component type ID into the serialized type ID.
     fn map_id(&self, type_id: ComponentTypeId) -> Option<Self::TypeId>;
+
+    /// Serializes a single component.
+    ///
+    /// # Safety
+    /// The pointer must point to a valid instance of the component type represented by
+    /// the given component type ID.
     unsafe fn serialize_component<S: Serializer>(
         &self,
         ty: ComponentTypeId,
@@ -17,6 +28,7 @@ pub trait WorldSerializer {
     ) -> Result<S::Ok, S::Error>;
 }
 
+/// A serializable representation of a world.
 pub struct SerializableWorld<'a, F: LayoutFilter, W: WorldSerializer> {
     world: &'a World,
     filter: F,
@@ -24,7 +36,7 @@ pub struct SerializableWorld<'a, F: LayoutFilter, W: WorldSerializer> {
 }
 
 impl<'a, F: LayoutFilter, W: WorldSerializer> SerializableWorld<'a, F, W> {
-    pub fn new(world: &'a World, filter: F, world_serializer: &'a W) -> Self {
+    pub(crate) fn new(world: &'a World, filter: F, world_serializer: &'a W) -> Self {
         Self {
             world,
             filter,

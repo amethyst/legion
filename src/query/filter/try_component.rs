@@ -2,9 +2,11 @@ use super::{
     and::And, not::Not, or::Or, passthrough::Passthrough, ActiveFilter, FilterResult, GroupMatcher,
     LayoutFilter,
 };
-use crate::storage::component::{Component, ComponentTypeId};
+use crate::storage::{Component, ComponentTypeId};
 use std::marker::PhantomData;
 
+/// A filter which matches `true` if the entity has the given component,
+/// else it will defer.
 #[derive(Debug)]
 pub struct TryComponentFilter<T: Component>(PhantomData<T>);
 
@@ -25,10 +27,7 @@ impl<T: Component> GroupMatcher for TryComponentFilter<T> {
 }
 
 impl<T: Component> LayoutFilter for TryComponentFilter<T> {
-    fn matches_layout(
-        &self,
-        components: &[crate::storage::component::ComponentTypeId],
-    ) -> FilterResult {
+    fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
         let contains = components.contains(&ComponentTypeId::of::<T>());
         if contains {
             FilterResult::Match(true)

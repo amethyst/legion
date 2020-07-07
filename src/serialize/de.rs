@@ -1,14 +1,11 @@
+//! World deserialization types.
+
 use super::{
     entities::de::EntitiesLayoutDeserializer, packed::de::PackedLayoutDeserializer, WorldField,
     WorldMeta,
 };
 use crate::{
-    storage::{
-        archetype::{ArchetypeIndex, EntityLayout},
-        component::ComponentTypeId,
-        group::Group,
-        UnknownComponentStorage,
-    },
+    storage::{ArchetypeIndex, ComponentTypeId, EntityLayout, GroupDef, UnknownComponentStorage},
     world::{Universe, World, WorldOptions},
 };
 use serde::{
@@ -16,11 +13,18 @@ use serde::{
     Deserialize, Deserializer,
 };
 
+/// Describes a type which knows how to deserialize the components in a world.
 pub trait WorldDeserializer {
+    /// The stable type ID used to identify each component type.
     type TypeId: for<'de> Deserialize<'de>;
 
+    /// Converts the serialized type ID into a runtime component type ID.
     fn unmap_id(&self, type_id: &Self::TypeId) -> Option<ComponentTypeId>;
+
+    /// Adds the specified component to the given entity layout.
     fn register_component(&self, type_id: Self::TypeId, layout: &mut EntityLayout);
+
+    /// Deserializes a slice of components and inserts them into the given storage.
     fn deserialize_component_slice<'de, D: Deserializer<'de>>(
         &self,
         type_id: ComponentTypeId,
@@ -28,6 +32,8 @@ pub trait WorldDeserializer {
         arch_index: ArchetypeIndex,
         deserializer: D,
     ) -> Result<(), D::Error>;
+
+    /// Deserializes a single component and returns it as a boxed u8 slice.
     fn deserialize_component<'de, D: Deserializer<'de>>(
         &self,
         type_id: ComponentTypeId,
@@ -124,10 +130,11 @@ impl<'de, 'a, W: WorldDeserializer> DeserializeSeed<'de> for MetaDeserializer<'a
                 .component_groups
                 .iter()
                 .map(|group| {
-                    Group::new(
+                    GroupDef::from_vec(
                         group
                             .iter()
-                            .filter_map(|id| self.world_deserializer.unmap_id(id)),
+                            .filter_map(|id| self.world_deserializer.unmap_id(id))
+                            .collect(),
                     )
                 })
                 .collect(),

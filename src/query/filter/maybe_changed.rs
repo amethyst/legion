@@ -1,9 +1,13 @@
 use super::{
     and::And, not::Not, or::Or, passthrough::Passthrough, ActiveFilter, DynamicFilter, FilterResult,
 };
-use crate::{query::view::Fetch, storage::component::Component, world::WorldId};
+use crate::{query::view::Fetch, storage::Component, world::WorldId};
 use std::{collections::HashMap, marker::PhantomData};
 
+/// A filter which performs course-grained change detection.
+///
+/// This filter will reject _most_ components which have not
+/// been changed, but not all.
 #[derive(Debug)]
 pub struct ComponentChangedFilter<T: Component> {
     _phantom: PhantomData<T>,

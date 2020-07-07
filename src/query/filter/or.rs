@@ -2,12 +2,12 @@ use super::{
     and::And, not::Not, passthrough::Passthrough, ActiveFilter, DynamicFilter, FilterResult,
     GroupMatcher, LayoutFilter,
 };
-use crate::{query::view::Fetch, storage::component::ComponentTypeId, world::WorldId};
+use crate::{query::view::Fetch, storage::ComponentTypeId, world::WorldId};
 
 /// A filter which requires all filters within `T` match.
 #[derive(Debug, Clone)]
 pub struct Or<T> {
-    pub filters: T,
+    pub(super) filters: T,
 }
 
 macro_rules! or_filter {

@@ -1,16 +1,16 @@
+#![doc(hidden)]
+
 use super::{DefaultFilter, Fetch, IntoIndexableIter, View};
 use crate::{
     iter::indexed::{IndexedIter, TrustedRandomAccess},
     permissions::Permissions,
     query::{
-        filter::{passthrough::Passthrough, try_component::TryComponentFilter, EntityFilterTuple},
+        filter::{EntityFilterTuple, Passthrough, TryComponentFilter},
         QueryResult,
     },
     storage::{
-        archetype::{Archetype, ArchetypeIndex},
-        component::{Component, ComponentTypeId},
-        packed::next_component_version,
-        ComponentSliceMut, ComponentStorage, Components,
+        next_component_version, Archetype, ArchetypeIndex, Component, ComponentSliceMut,
+        ComponentStorage, ComponentTypeId, Components,
     },
     subworld::ComponentAccess,
 };
@@ -75,7 +75,7 @@ impl<'data, T: Component> View<'data> for TryWrite<T> {
     }
 }
 
-/// A fetch iterator which pulls out shared component slices.
+#[doc(hidden)]
 pub struct TryWriteIter<'a, T: Component> {
     components: Option<&'a T::Storage>,
     archetype_indexes: std::slice::Iter<'a, ArchetypeIndex>,
@@ -98,6 +98,7 @@ impl<'a, T: Component> Iterator for TryWriteIter<'a, T> {
     }
 }
 
+#[doc(hidden)]
 pub enum Slice<'a, T: Component> {
     Occupied {
         version: &'a mut u64,
@@ -206,6 +207,7 @@ impl<'a, T: Component> Fetch for Slice<'a, T> {
     }
 }
 
+#[doc(hidden)]
 pub enum Data<'a, T: Component> {
     Occupied(&'a mut [T]),
     Empty(usize),

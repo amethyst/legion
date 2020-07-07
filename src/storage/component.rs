@@ -1,3 +1,5 @@
+//! Contains types related to entity components.
+
 use super::{packed::PackedStorage, ComponentStorage};
 use std::{
     any::TypeId,
@@ -5,6 +7,7 @@ use std::{
     hash::Hasher,
 };
 
+/// A unique ID for a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct ComponentTypeId {
     pub(crate) type_id: TypeId,
@@ -13,6 +16,7 @@ pub struct ComponentTypeId {
 }
 
 impl ComponentTypeId {
+    /// Constructs the component type ID for the given component type.
     pub fn of<T: Component>() -> Self {
         Self {
             type_id: TypeId::of::<T>(),
@@ -42,7 +46,11 @@ impl Display for ComponentTypeId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "{:?}", self.type_id) }
 }
 
+/// A marker trait for all types which can be attached to an entity.
+///
+/// This trait has a blanket impl for all applicable types.
 pub trait Component: 'static + Sized + Send + Sync {
+    /// The storage type required to hold all instances of this component in a world.
     type Storage: for<'a> ComponentStorage<'a, Self>;
 }
 

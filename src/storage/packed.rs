@@ -1,6 +1,9 @@
+//! Component storage which can pack archetypes into contiguous memory.
+
 use super::{
-    archetype::ArchetypeIndex, component::Component, ComponentIndex, ComponentMeta, ComponentSlice,
-    ComponentSliceMut, ComponentStorage, Epoch, UnknownComponentStorage,
+    archetype::ArchetypeIndex, component::Component, next_component_version, ComponentIndex,
+    ComponentMeta, ComponentSlice, ComponentSliceMut, ComponentStorage, Epoch,
+    UnknownComponentStorage,
 };
 use std::{
     alloc::Layout,
@@ -11,7 +14,6 @@ use std::{
     ptr::NonNull,
     rc::Rc,
     slice::Iter,
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 /// A memory allocation for an array of `T`.
@@ -271,9 +273,6 @@ impl<T> Drop for ComponentVec<T> {
         }
     }
 }
-
-static COMPONENT_VERSION: AtomicU64 = AtomicU64::new(0);
-pub(crate) fn next_component_version() -> u64 { COMPONENT_VERSION.fetch_add(1, Ordering::SeqCst) }
 
 /// Stores a slice of components of type `T` for each archetype.
 /// Archetype slices are sorted according to the group that component `T` belongs to.
@@ -574,6 +573,7 @@ impl<'a, T: Component> ComponentStorage<'a, T> for PackedStorage<T> {
     fn len(&self) -> usize { self.allocations.len() }
 }
 
+#[doc(hidden)]
 pub struct ComponentIter<'a, T> {
     slices: Zip<Iter<'a, (NonNull<T>, usize)>, Iter<'a, UnsafeCell<u64>>>,
 }
@@ -591,6 +591,7 @@ impl<'a, T: Component> Iterator for ComponentIter<'a, T> {
     }
 }
 
+#[doc(hidden)]
 pub struct ComponentIterMut<'a, T> {
     slices: Zip<Iter<'a, (NonNull<T>, usize)>, Iter<'a, UnsafeCell<u64>>>,
 }

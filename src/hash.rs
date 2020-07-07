@@ -1,5 +1,6 @@
 use std::hash::Hasher;
 
+/// A hasher optimized for hashing component type IDs.
 #[derive(Default)]
 pub struct ComponentTypeIdHasher(u64);
 
@@ -12,6 +13,7 @@ impl Hasher for ComponentTypeIdHasher {
     }
 }
 
+/// A hasher optimized for hashing types that are represented as a u64.
 #[derive(Default)]
 pub struct U64Hasher(u64);
 

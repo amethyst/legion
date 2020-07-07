@@ -1,8 +1,11 @@
+//! Contains types related to the [SubWorld](struct.SubWorld.html) which
+//! can split a world by component type access.
+
 use crate::{
     entity::Entity,
     permissions::Permissions,
     query::{filter::EntityFilter, view::View, Query},
-    storage::{archetype::ArchetypeIndex, component::ComponentTypeId},
+    storage::{ArchetypeIndex, ComponentTypeId},
     world::{ComponentAccessError, EntityStore, StorageAccessor, World},
 };
 use bit_set::BitSet;
@@ -17,6 +20,7 @@ pub enum ArchetypeAccess {
 }
 
 impl ArchetypeAccess {
+    /// Determines if the given archetypes are disjoint from those allowed by this archetype access,
     pub fn is_disjoint(&self, other: &ArchetypeAccess) -> bool {
         match self {
             Self::All => false,
@@ -27,6 +31,7 @@ impl ArchetypeAccess {
         }
     }
 
+    /// Returns a bitset of allowed archetype indexes if this access is `Some`.
     pub fn bitset(&self) -> Option<&BitSet> {
         match self {
             Self::All => None,
@@ -35,14 +40,19 @@ impl ArchetypeAccess {
     }
 }
 
+/// Describes which components are available for access.
 #[derive(Clone)]
 pub enum ComponentAccess<'a> {
+    /// All component types are allowed.
     All,
+    /// Some component types are allowed.
     Allow(Cow<'a, Permissions<ComponentTypeId>>),
+    /// Some component types are disallowed.
     Disallow(Cow<'a, Permissions<ComponentTypeId>>),
 }
 
 impl<'a> ComponentAccess<'a> {
+    /// Returns `truw` if the given component is accessible for reads.
     pub fn allows_read(&self, component: ComponentTypeId) -> bool {
         match self {
             Self::All => true,
@@ -51,6 +61,7 @@ impl<'a> ComponentAccess<'a> {
         }
     }
 
+    /// Returns `truw` if the given component is accessible for writes.
     pub fn allows_write(&self, component: ComponentTypeId) -> bool {
         match self {
             Self::All => true,
@@ -59,6 +70,8 @@ impl<'a> ComponentAccess<'a> {
         }
     }
 
+    /// Splits this permission set into two; the left access only allows the permissions given, while the right
+    /// allows only what is left from this set after subtracting said permissions.
     pub(crate) fn split(&mut self, access: Permissions<ComponentTypeId>) -> (Self, Self) {
         fn append_incompatible(
             denied: &mut Permissions<ComponentTypeId>,
@@ -125,6 +138,17 @@ impl<'a> ComponentAccess<'a> {
 }
 
 /// Provides access to a subset of the entities of a `World`.
+///
+/// To access a component mutably in a world, such as inside a [query](../query/index.html) or via an
+/// [entry](../entry/index.html), you need to borrow the entire world mutably. This prevents you from
+/// accessing any other data in the world at the same time.
+///
+/// In some cases, we can work around this by splitting the world. We can split a world around the
+/// component types requested by a [view](../query/view/index.html). This will create two subworlds,
+/// the left one allowing access only to the components (and mutability) declared by the view, while
+/// the right subworld will allow access to everything _but_ those components.
+///
+/// Subworlds can be recustively further split.
 #[derive(Clone)]
 pub struct SubWorld<'a> {
     world: &'a World,
@@ -251,7 +275,7 @@ impl<'a> From<&'a mut World> for SubWorld<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        query::view::{read::Read, write::Write},
+        query::view::{Read, Write},
         world::{EntityStore, World},
     };
 

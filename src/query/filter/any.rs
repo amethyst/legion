@@ -2,8 +2,9 @@ use super::{
     not::Not, passthrough::Passthrough, ActiveFilter, DynamicFilter, FilterResult, GroupMatcher,
     LayoutFilter,
 };
-use crate::{query::view::Fetch, storage::component::ComponentTypeId, world::WorldId};
+use crate::{query::view::Fetch, storage::ComponentTypeId, world::WorldId};
 
+/// A filter which always matches `true`.
 #[derive(Debug, Clone, Default)]
 pub struct Any;
 

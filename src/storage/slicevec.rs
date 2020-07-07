@@ -1,3 +1,5 @@
+//! A vector of slices.
+
 use derivative::Derivative;
 use std::iter::{FusedIterator, IntoIterator};
 
@@ -13,12 +15,6 @@ pub struct SliceVec<T> {
 }
 
 impl<T> SliceVec<T> {
-    /// Gets the length of the vector.
-    pub fn len(&self) -> usize { self.counts.len() }
-
-    /// Determines if the vector is empty.
-    pub fn is_empty(&self) -> bool { self.len() < 1 }
-
     /// Pushes a new slice onto the end of the vector.
     pub fn push<I: IntoIterator<Item = T>>(&mut self, items: I) {
         self.indices.push(self.data.len());
@@ -30,14 +26,7 @@ impl<T> SliceVec<T> {
         self.counts.push(count);
     }
 
-    /// Gets an iterator over all slices in the vector.
-    pub fn iter(&self) -> SliceVecIter<T> {
-        SliceVecIter {
-            data: &self.data,
-            counts: &self.counts,
-        }
-    }
-
+    /// Gets an iterator over slices starting from the given index.
     pub fn iter_from(&self, start: usize) -> SliceVecIter<T> {
         let index = *self.indices.get(start).unwrap_or(&self.data.len());
         SliceVecIter {
@@ -95,7 +84,7 @@ mod test {
             vec.push(slice.iter().copied());
         }
 
-        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.counts.len(), 2);
     }
 
     #[test]
@@ -107,9 +96,9 @@ mod test {
             vec.push(slice.iter().copied());
         }
 
-        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.counts.len(), 2);
 
-        for (i, slice) in vec.iter().enumerate() {
+        for (i, slice) in vec.iter_from(0).enumerate() {
             let expected = &slices[i];
             assert_eq!(slice.len(), expected.len());
             for (j, x) in slice.iter().enumerate() {

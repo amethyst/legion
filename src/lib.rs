@@ -1,3 +1,5 @@
+//#![deny(missing_docs)]
+
 //! Legion aims to be a feature rich high performance ECS library for Rust game projects with minimal boilerplate.
 //!
 //! # Getting Started
@@ -185,9 +187,9 @@ pub mod cons;
 pub mod entity;
 pub mod entry;
 pub mod event;
-mod hash;
-mod insert;
-mod iter;
+pub mod hash;
+pub mod insert;
+pub mod iter;
 pub mod permissions;
 pub mod query;
 #[cfg(feature = "serialize")]
@@ -203,15 +205,11 @@ pub use crate::{
     event::Event,
     insert::IntoSoa,
     query::{
-        filter::filter_fns::*,
-        view::{read::Read, try_read::TryRead, try_write::TryWrite, write::Write, Fetch},
+        filter::*,
+        view::{Fetch, Read, TryRead, TryWrite, Write},
         IntoQuery, Query,
     },
-    systems::{
-        resources::Resources,
-        schedule::{Executor, Schedule},
-        system::SystemBuilder,
-    },
+    systems::{Executor, Resources, Schedule, SystemBuilder},
     world::{ConflictPolicy, Duplicate, EntityPolicy, EntityStore, Move, Universe, World},
 };
 

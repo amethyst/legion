@@ -1,6 +1,11 @@
+//! Contains types related to defining shared resources which can be accessed inside systems.
+//!
+//! Use resources to share persistent data between systems or to provide a system with state
+//! external to entities.
+
 use crate::{
     hash::ComponentTypeIdHasher,
-    query::view::{read::Read, write::Write, ReadOnly},
+    query::view::{Read, ReadOnly, Write},
 };
 use downcast_rs::{impl_downcast, Downcast};
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -13,6 +18,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+/// Unique ID for a resource.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub struct ResourceTypeId {
     type_id: TypeId,
@@ -21,6 +27,7 @@ pub struct ResourceTypeId {
 }
 
 impl ResourceTypeId {
+    /// Returns the resource type ID of the given resource type.
     pub fn of<T: Resource>() -> Self {
         Self {
             type_id: TypeId::of::<T>(),
@@ -75,20 +82,22 @@ impl_downcast!(Resource);
 ///
 /// ```
 pub trait ResourceSet<'a>: Send + Sync {
+    /// The resource reference returned during a fetch.
     type Result: 'a;
 
     /// Fetches all defined resources, without checking mutability.
     ///
     /// # Safety
     /// It is up to the end user to validate proper mutability rules across the resources being accessed.
-    ///
     unsafe fn fetch_unchecked(resources: &'a Resources) -> Self::Result;
 
+    /// Fetches all defined resources.
     fn fetch_mut(resources: &'a mut Resources) -> Self::Result {
         // safe because mutable borrow ensures exclusivity
         unsafe { Self::fetch_unchecked(resources) }
     }
 
+    /// Fetches all defined resources.
     fn fetch(resources: &'a Resources) -> Self::Result
     where
         Self: ReadOnly,

@@ -1,16 +1,16 @@
+#![doc(hidden)]
+
 use super::{DefaultFilter, Fetch, IntoIndexableIter, View};
 use crate::{
     iter::indexed::IndexedIter,
     permissions::Permissions,
     query::{
-        filter::{component::ComponentFilter, passthrough::Passthrough, EntityFilterTuple},
+        filter::{ComponentFilter, EntityFilterTuple, Passthrough},
         QueryResult,
     },
     storage::{
-        archetype::{Archetype, ArchetypeIndex},
-        component::{Component, ComponentTypeId},
-        packed::next_component_version,
-        ComponentSliceMut, ComponentStorage, Components,
+        next_component_version, Archetype, ArchetypeIndex, Component, ComponentSliceMut,
+        ComponentStorage, ComponentTypeId, Components,
     },
     subworld::ComponentAccess,
 };
@@ -82,7 +82,7 @@ impl<'data, T: Component> View<'data> for Write<T> {
     }
 }
 
-/// A fetch iterator which pulls out mutable component slices.
+#[doc(hidden)]
 pub enum WriteIter<'a, T: Component> {
     Indexed {
         components: &'a T::Storage,
@@ -112,6 +112,7 @@ impl<'a, T: Component> Iterator for WriteIter<'a, T> {
     }
 }
 
+#[doc(hidden)]
 pub struct WriteFetch<'a, T: Component> {
     version: &'a mut u64,
     components: &'a mut [T],

@@ -34,7 +34,9 @@ unsafe impl<'a, T> TrustedRandomAccess for &'a mut [T] {
     fn split_at(self, index: usize) -> (Self, Self) { <[T]>::split_at_mut(self, index) }
 }
 
+/// An iterator over an indexable slice.
 #[derive(Clone, Debug)]
+#[doc(hidden)]
 #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
 pub struct IndexedIter<T> {
     inner: T,

@@ -2,9 +2,10 @@ use super::{
     and::And, not::Not, or::Or, passthrough::Passthrough, ActiveFilter, FilterResult, GroupMatcher,
     LayoutFilter,
 };
-use crate::storage::component::{Component, ComponentTypeId};
+use crate::storage::{Component, ComponentTypeId};
 use std::marker::PhantomData;
 
+/// A filter which matches `true` when the given component exists in the archetype.
 #[derive(Debug)]
 pub struct ComponentFilter<T: Component>(PhantomData<T>);
 
@@ -25,10 +26,7 @@ impl<T: Component> GroupMatcher for ComponentFilter<T> {
 }
 
 impl<T: Component> LayoutFilter for ComponentFilter<T> {
-    fn matches_layout(
-        &self,
-        components: &[crate::storage::component::ComponentTypeId],
-    ) -> FilterResult {
+    fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
         FilterResult::Match(components.contains(&ComponentTypeId::of::<T>()))
     }
 }

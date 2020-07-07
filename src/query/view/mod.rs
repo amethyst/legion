@@ -1,5 +1,7 @@
+//! Defines all view types. Views are a component of [queries](../index.html).
+
 use super::{
-    filter::{and::And, EntityFilter, EntityFilterTuple},
+    filter::{And, EntityFilter, EntityFilterTuple},
     QueryResult,
 };
 use crate::{
@@ -9,31 +11,35 @@ use crate::{
         zip::{multizip, Zip},
     },
     permissions::Permissions,
-    storage::{
-        archetype::Archetype,
-        component::{Component, ComponentTypeId},
-        Components,
-    },
+    storage::{Archetype, Component, ComponentTypeId, Components},
     subworld::ComponentAccess,
 };
 use std::marker::PhantomData;
 
-pub mod entity;
-pub mod read;
-pub mod try_read;
-pub mod try_write;
-pub mod write;
+mod entity;
+mod read;
+mod try_read;
+mod try_write;
+mod write;
+
+pub use self::read::Read;
+pub use self::try_read::TryRead;
+pub use self::try_write::TryWrite;
+pub use self::write::Write;
 
 // View and Fetch types are separate traits so that View implementations can be
 // zero sized types and therefore not need the user to provide a lifetime when they
 // declare queries.
 
+/// Declares the default filter type used by a view when it is converted into a query.
 pub trait DefaultFilter {
+    /// The filter constructed.
     type Filter: EntityFilter;
 }
 
 /// A type which can pull entitiy data out of a world.
 pub trait View<'data>: DefaultFilter + Sized {
+    /// The type of component references returned.
     type Element: Send + Sync;
     /// The fetch type yielded for each archetype.
     type Fetch: Fetch + IntoIndexableIter<Item = Self::Element> + 'data;
@@ -60,22 +66,26 @@ pub trait View<'data>: DefaultFilter + Sized {
     /// Determines if this view type is valid. Panics if checks fail.
     fn validate();
 
-    /// Determines if the given component access includes all permissions required by the view.
+    /// Returns `true` if the given component access includes all permissions required by the view.
     fn validate_access(access: &ComponentAccess) -> bool;
 
+    /// Returns the component types read by the view.
     fn reads_types() -> Self::Read;
 
+    /// Returns the component types written to by the view.
     fn writes_types() -> Self::Write;
 
-    /// Determines if the view reads the specified data type.
+    /// Returns `true` if the view reads the specified data type.
     fn reads<T: Component>() -> bool;
 
-    /// Determines if the view writes to the specified data type.
+    /// Returns `true` if the view writes to the specified data type.
     fn writes<T: Component>() -> bool;
 
+    /// Returns a permissions struct declaring the component accesses required by the view.
     fn requires_permissions() -> Permissions<ComponentTypeId>;
 }
 
+#[doc(hidden)]
 pub trait IntoIndexableIter {
     type Item: Send + Sync;
     type IntoIter: Iterator<Item = Self::Item>
@@ -88,6 +98,7 @@ pub trait IntoIndexableIter {
 
 /// A type which holds onto a slice of entitiy data retrieved from a single archetype.
 pub trait Fetch: IntoIndexableIter + Send + Sync {
+    /// The inner data representation fetched from the archetype. Typically a slice reference.
     type Data;
 
     /// Converts the fetch into the retrieved component slices
@@ -110,8 +121,9 @@ pub trait Fetch: IntoIndexableIter + Send + Sync {
     fn accepted(&mut self);
 }
 
-// A fetch which only retrieves shared references to component data.
+/// A fetch which only retrieves shared references to component data.
 pub unsafe trait ReadOnlyFetch: Fetch {
+    /// Returns the fetch's retrieved component slices
     fn get_components(&self) -> Self::Data;
 }
 
@@ -122,6 +134,7 @@ pub unsafe trait ReadOnly {}
 unsafe impl<T> ReadOnly for &T {}
 unsafe impl<T> ReadOnly for Option<&T> {}
 
+#[doc(hidden)]
 pub struct MultiFetch<'a, T> {
     fetches: T,
     _phantom: PhantomData<&'a T>,

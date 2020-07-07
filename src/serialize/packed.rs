@@ -11,11 +11,7 @@ pub mod ser {
     use crate::{
         query::filter::LayoutFilter,
         serialize::ser::WorldSerializer,
-        storage::{
-            archetype::{Archetype, ArchetypeIndex},
-            component::ComponentTypeId,
-            UnknownComponentStorage,
-        },
+        storage::{Archetype, ArchetypeIndex, ComponentTypeId, UnknownComponentStorage},
         world::World,
     };
     use itertools::Itertools;
@@ -230,9 +226,7 @@ pub mod de {
     use crate::{
         serialize::de::WorldDeserializer,
         storage::{
-            archetype::{ArchetypeIndex, EntityLayout},
-            component::ComponentTypeId,
-            ComponentIndex, UnknownComponentStorage,
+            ArchetypeIndex, ComponentIndex, ComponentTypeId, EntityLayout, UnknownComponentStorage,
         },
         world::World,
     };

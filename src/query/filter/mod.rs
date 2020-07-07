@@ -1,42 +1,59 @@
+//! Defines all filter types. Filters are a component of [queries](../index.html).
+
 use super::view::Fetch;
-use crate::{storage::component::ComponentTypeId, world::WorldId};
+use crate::{
+    storage::{Component, ComponentTypeId},
+    world::WorldId,
+};
 
-pub mod and;
-pub mod any;
-pub mod component;
-pub mod maybe_changed;
-pub mod not;
-pub mod or;
-pub mod passthrough;
-pub mod try_component;
+mod and;
+mod any;
+mod component;
+mod maybe_changed;
+mod not;
+mod or;
+mod passthrough;
+mod try_component;
 
-pub mod filter_fns {
-    use super::{
-        any::Any, component::ComponentFilter, maybe_changed::ComponentChangedFilter,
-        passthrough::Passthrough, try_component::TryComponentFilter, EntityFilterTuple,
-    };
-    use crate::storage::component::Component;
+pub use and::And;
+pub use any::Any;
+pub use component::ComponentFilter;
+pub use maybe_changed::ComponentChangedFilter;
+pub use not::Not;
+pub use or::Or;
+pub use passthrough::Passthrough;
+pub use try_component::TryComponentFilter;
 
-    pub fn component<T: Component>() -> EntityFilterTuple<ComponentFilter<T>, Passthrough> {
-        Default::default()
-    }
-
-    pub fn maybe_changed<T: Component>(
-    ) -> EntityFilterTuple<TryComponentFilter<T>, ComponentChangedFilter<T>> {
-        Default::default()
-    }
-
-    pub fn any() -> EntityFilterTuple<Any, Any> { Default::default() }
-
-    pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough> { Default::default() }
+/// Constructs a filter which requires that the entities have the given component.
+pub fn component<T: Component>() -> EntityFilterTuple<ComponentFilter<T>, Passthrough> {
+    Default::default()
 }
 
+/// Constructs a filter which requires that the component cannot be certain to have not changed.
+///
+/// This check is course grained and should be used to reject the majority of entities which have
+/// not changed, but not all entities passed by the filter are guarenteed to have been modified.
+pub fn maybe_changed<T: Component>(
+) -> EntityFilterTuple<TryComponentFilter<T>, ComponentChangedFilter<T>> {
+    Default::default()
+}
+
+/// Constructs a filter which passes all entities.
+pub fn any() -> EntityFilterTuple<Any, Any> { Default::default() }
+
+/// Constructs a filter which performs a no-op and defers to any filters it is combined with.
+pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough> { Default::default() }
+
+/// Indicates if an an archetype should be accepted or rejected.
 pub enum FilterResult {
+    /// The filter has made a decision, `true` for accept, `false` for reject.
     Match(bool),
+    /// The filter has not made a decision, defer to other filters.
     Defer,
 }
 
 impl FilterResult {
+    /// Combines the result with a logical and operator.
     #[inline]
     pub fn coalesce_and(self, other: Self) -> Self {
         match self {
@@ -48,6 +65,7 @@ impl FilterResult {
         }
     }
 
+    /// Combines the result with a logical or operator.
     #[inline]
     pub fn coalesce_or(self, other: Self) -> Self {
         match self {
@@ -59,6 +77,7 @@ impl FilterResult {
         }
     }
 
+    /// Returns `true` if the archetype should be accepted.
     #[inline]
     pub fn is_pass(&self) -> bool {
         match self {
@@ -78,36 +97,53 @@ impl std::ops::BitAnd<FilterResult> for FilterResult {
     fn bitand(self, other: FilterResult) -> Self::Output { self.coalesce_and(other) }
 }
 
+/// A filter which selects based upon which component types are attached to an entity.
+///
+/// These filters should be idempotent and immutable.
 pub trait LayoutFilter: Send + Sync {
+    /// Calculates the filter's result for the given entity layout.
     fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult;
 }
 
+/// A filter which selects based upon the data available in the archetype.
 pub trait DynamicFilter: Default + Send + Sync {
+    /// Prepares the filter to run.
     fn prepare(&mut self, world: WorldId);
+
+    /// Calculates the filter's result for the given archetype data.
     fn matches_archetype<F: Fetch>(&mut self, fetch: &F) -> FilterResult;
 }
 
 /// A marker trait for filters that are not no-ops.
 pub trait ActiveFilter {}
 
+/// Allows a filter to determine if component optimization groups can
+/// be used to accelerate queries that use this filter.
 pub trait GroupMatcher {
+    /// Returns `true` if the filter may potentially match a group.
     fn can_match_group() -> bool;
+
+    /// Returns the components that are requried to be present in a group.
     fn group_components() -> Vec<ComponentTypeId>;
 }
 
+/// A combination of a [LayoutFilter](trait.LayoutFilter.html) and a
+/// [DynamicFilter](trait.DynamicFilter.html).
 pub trait EntityFilter: Default + Send + Sync {
+    /// The layout filter type.
     type Layout: LayoutFilter + GroupMatcher + Default;
+    /// The dynamic filter type.
     type Dynamic: DynamicFilter;
 
+    /// Returns a reference to the layout filter.
     fn layout_filter(&self) -> &Self::Layout;
+
+    /// Returns a tuple of the layout and dynamic filters.
     fn filters(&mut self) -> (&Self::Layout, &mut Self::Dynamic);
 }
 
 impl<T: EntityFilter> LayoutFilter for T {
-    fn matches_layout(
-        &self,
-        components: &[crate::storage::component::ComponentTypeId],
-    ) -> FilterResult {
+    fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
         self.layout_filter().matches_layout(components)
     }
 }
@@ -129,19 +165,11 @@ impl<T: EntityFilter> GroupMatcher for T {
     fn group_components() -> Vec<ComponentTypeId> { T::Layout::group_components() }
 }
 
+#[doc(hidden)]
 #[derive(Clone, Default)]
 pub struct EntityFilterTuple<L: LayoutFilter, F: DynamicFilter> {
     pub layout_filter: L,
     pub dynamic_filter: F,
-}
-
-impl<L: LayoutFilter, F: DynamicFilter> EntityFilterTuple<L, F> {
-    pub fn new(layout_filter: L, dynamic_filter: F) -> Self {
-        Self {
-            layout_filter,
-            dynamic_filter,
-        }
-    }
 }
 
 impl<L: LayoutFilter + GroupMatcher + Default, F: DynamicFilter> EntityFilter

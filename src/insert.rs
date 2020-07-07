@@ -1,12 +1,17 @@
+//! Contains types related to inserting new entities into a [World](../world/struct.World.html)
+
 use crate::entity::Entity;
 use crate::query::filter::{FilterResult, LayoutFilter};
 use crate::storage::{
-    archetype::{Archetype, ArchetypeIndex, EntityLayout},
-    component::{Component, ComponentTypeId},
-    ComponentIndex, ComponentStorage, MultiMut, UnknownComponentStorage,
+    Archetype, ArchetypeIndex, Component, ComponentIndex, ComponentStorage, ComponentTypeId,
+    EntityLayout, MultiMut, UnknownComponentStorage,
 };
 use std::marker::PhantomData;
 
+/// Provides access to writers for writing new entities into an archetype in a world.
+///
+/// Users must claim all components contained in the archetype and write an equal number
+/// of components to each as the number of entities pushed to the writer.
 pub struct ArchetypeWriter<'a> {
     arch_index: ArchetypeIndex,
     archetype: &'a mut Archetype,
@@ -16,6 +21,7 @@ pub struct ArchetypeWriter<'a> {
 }
 
 impl<'a> ArchetypeWriter<'a> {
+    /// Constructs a new archetype writer.
     pub fn new(
         arch_index: ArchetypeIndex,
         archetype: &'a mut Archetype,
@@ -31,6 +37,7 @@ impl<'a> ArchetypeWriter<'a> {
         }
     }
 
+    /// Returns the archetype being written to.
     pub fn archetype(&self) -> &Archetype { &self.archetype }
 
     fn mark_claimed(&mut self, type_id: ComponentTypeId) {
@@ -46,6 +53,11 @@ impl<'a> ArchetypeWriter<'a> {
         self.claimed |= mask;
     }
 
+    /// Claims a component storage for a given component.
+    ///
+    /// # Panics
+    /// Panics if the storage for the requested component type has already been claimed
+    /// or does not exist in the archetype.
     pub fn claim_components<T: Component>(&mut self) -> ComponentWriter<'a, T> {
         let type_id = ComponentTypeId::of::<T>();
         self.mark_claimed(type_id);
@@ -56,6 +68,11 @@ impl<'a> ArchetypeWriter<'a> {
         }
     }
 
+    /// Claims a component storage for a given component.
+    ///
+    /// # Panics
+    /// Panics if the storage for the requested component type has already been claimed
+    /// or does not exist in the archetype.
     pub fn claim_components_unknown(
         &mut self,
         type_id: ComponentTypeId,
@@ -68,8 +85,10 @@ impl<'a> ArchetypeWriter<'a> {
         }
     }
 
+    /// Pushes an entity ID into the archetype.
     pub fn push(&mut self, entity: Entity) { self.archetype.push(entity); }
 
+    /// Returns a slice of entities inserted by this writer, and the component index of the first inserted entity.
     pub fn inserted(&self) -> (ComponentIndex, &[Entity]) {
         let start = self.initial_count;
         (ComponentIndex(start), &self.archetype.entities()[start..])
@@ -85,27 +104,41 @@ impl<'a> Drop for ArchetypeWriter<'a> {
     }
 }
 
+/// Provides the ability to append new components to the entities in an archetype.
 pub struct ComponentWriter<'a, T: Component> {
     components: &'a mut T::Storage,
     archetype: ArchetypeIndex,
 }
 
 impl<'a, T: Component> ComponentWriter<'a, T> {
+    /// Writes the given components into the component storage.
+    ///
+    /// # Safety
+    /// `ptr` must point to a valid array of `T` of length at least as long as `len`.
+    /// The data in this array will be memcopied into the world's internal storage.
+    /// If the component type is not `Copy`, then the caller must ensure that the memory
+    /// copied is not accessed until it is re-initialized. It is recommended to immediately
+    /// `std::mem::forget` the source after calling `extend_memcopy`.
     pub unsafe fn extend_memcopy(&mut self, ptr: *const T, len: usize) {
         self.components.extend_memcopy(self.archetype, ptr, len)
     }
 
+    /// Ensures that the given spare capacity is available in the target storage location.
+    /// Calling this function before calling `extend_memcopy` is not required, but may
+    /// avoid additional vector resizes.
     pub fn ensure_capacity(&mut self, space: usize) {
         self.components.ensure_capacity(self.archetype, space);
     }
 }
 
+/// Provides the ability to append new components to the entities in an archetype.
 pub struct UnknownComponentWriter<'a> {
     components: &'a mut dyn UnknownComponentStorage,
     archetype: ArchetypeIndex,
 }
 
 impl<'a> UnknownComponentWriter<'a> {
+    /// Moves all of the components from the given storage location into this writer's storage.
     pub fn move_archetype_from(
         &mut self,
         src_archetype: ArchetypeIndex,
@@ -114,6 +147,7 @@ impl<'a> UnknownComponentWriter<'a> {
         src.transfer_archetype(src_archetype, self.archetype, self.components);
     }
 
+    /// Moves a single component from the given storage location into this writer's storage.
     pub fn move_component_from(
         &mut self,
         src_archetype: ArchetypeIndex,
@@ -129,12 +163,14 @@ impl<'a> UnknownComponentWriter<'a> {
     }
 }
 
+/// Defines a type which can describe the layout of an archetype.
 pub trait ArchetypeSource {
     type Filter: LayoutFilter;
     fn filter(&self) -> Self::Filter;
     fn layout(&mut self) -> EntityLayout;
 }
 
+/// Describes a type which can write entity components into a world.
 pub trait ComponentSource: ArchetypeSource {
     fn push_components<'a>(
         &mut self,
@@ -143,20 +179,26 @@ pub trait ComponentSource: ArchetypeSource {
     );
 }
 
+/// A collection with a known length.
 pub trait KnownLength {
     fn len(&self) -> usize;
 }
 
+/// Converts a type into a [ComponentSource](trait.ComponentSource.html).
 pub trait IntoComponentSource {
+    /// The output component source.
     type Source: ComponentSource;
 
+    /// Converts this structure into a component source.
     fn into(self) -> Self::Source;
 }
 
+/// A wrapper for a Structure of Arrays used for efficient entity insertion.
 pub struct Soa<T> {
     vecs: T,
 }
 
+/// A single vector component inside an SoA.
 pub struct SoaElement<T> {
     _phantom: PhantomData<T>,
     ptr: *mut T,
@@ -176,11 +218,17 @@ impl<T> Drop for SoaElement<T> {
     }
 }
 
+/// Desribes a type which can convert itself into an [SoA](trait.Soa.html)
+/// representation for entity intertion.
 pub trait IntoSoa {
+    /// The output entity source.
     type Source;
+
+    /// Converts this into an SoA component source.
     fn into_soa(self) -> Self::Source;
 }
 
+/// A wrapper for an Array of Structures used for entity intertions.
 pub struct Aos<T, Iter> {
     _phantom: PhantomData<T>,
     iter: Iter,
@@ -190,6 +238,7 @@ impl<T, Iter> Aos<T, Iter>
 where
     Iter: Iterator<Item = T>,
 {
+    /// Constructs a new Aos.
     fn new(iter: Iter) -> Self {
         Self {
             iter,
@@ -208,6 +257,8 @@ where
     fn into(self) -> Self::Source { <Self::Source>::new(self.into_iter()) }
 }
 
+/// A layout filter used to select the appropriate archetype for interting
+/// entities from a component source into a world.
 pub struct ComponentSourceFilter<T>(PhantomData<T>);
 
 impl<T> Default for ComponentSourceFilter<T> {
@@ -216,7 +267,7 @@ impl<T> Default for ComponentSourceFilter<T> {
 
 impl LayoutFilter for ComponentSourceFilter<()> {
     fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
-        FilterResult::Match(components.len() == 0)
+        FilterResult::Match(components.is_empty())
     }
 }
 

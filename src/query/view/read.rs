@@ -1,15 +1,16 @@
+#![doc(hidden)]
+
 use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
 use crate::{
     iter::indexed::IndexedIter,
     permissions::Permissions,
     query::{
-        filter::{component::ComponentFilter, passthrough::Passthrough, EntityFilterTuple},
+        filter::{ComponentFilter, EntityFilterTuple, Passthrough},
         QueryResult,
     },
     storage::{
-        archetype::{Archetype, ArchetypeIndex},
-        component::{Component, ComponentTypeId},
-        ComponentSlice, ComponentStorage, Components,
+        Archetype, ArchetypeIndex, Component, ComponentSlice, ComponentStorage, ComponentTypeId,
+        Components,
     },
     subworld::ComponentAccess,
 };
@@ -83,7 +84,7 @@ impl<'data, T: Component> View<'data> for Read<T> {
     }
 }
 
-/// A fetch iterator which pulls out shared component slices.
+#[doc(hidden)]
 pub enum ReadIter<'a, T: Component> {
     Indexed {
         components: &'a T::Storage,
@@ -111,6 +112,7 @@ impl<'a, T: Component> Iterator for ReadIter<'a, T> {
     }
 }
 
+#[doc(hidden)]
 pub struct ReadFetch<'a, T: Component> {
     version: &'a u64,
     components: &'a [T],
