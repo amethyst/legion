@@ -82,6 +82,10 @@ impl Allocate {
     pub fn new() -> Self { Self { base: 0, count: 0 } }
 }
 
+impl Default for Allocate {
+    fn default() -> Self { Self::new() }
+}
+
 impl<'a> Iterator for Allocate {
     type Item = Entity;
 
@@ -243,10 +247,10 @@ impl Canon {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant) => {
                 let uuid = Uuid::new_v4();
-                let name = uuid.as_bytes();
-                vacant.insert(name.clone());
-                names.to_id.insert(name.clone(), entity);
-                *name
+                let name = *uuid.as_bytes();
+                vacant.insert(name);
+                names.to_id.insert(name, entity);
+                name
             }
         }
     }

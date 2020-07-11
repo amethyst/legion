@@ -151,8 +151,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
             let cache = if F::can_match_group() {
                 let components = F::group_components();
                 components
-                    .iter()
-                    .next()
+                    .get(0)
                     .and_then(|t| world.group(*t))
                     .map(|(i, g)| (i, g.exact_match(&components)))
                     .and_then(|(group, subgroup)| {
