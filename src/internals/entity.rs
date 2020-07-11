@@ -36,7 +36,7 @@ pub mod serde {
             UNIVERSE.with(|f| {
                 let universe = f.borrow();
                 if let Some(ref universe) = *universe {
-                    let name = universe.canon().get_name(*self);
+                    let name = Uuid::from_bytes(universe.canon().get_name(*self));
                     name.serialize(serializer)
                 } else {
                     use serde::ser::Error;
