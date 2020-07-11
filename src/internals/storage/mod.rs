@@ -17,6 +17,7 @@ pub mod packed;
 pub mod slicevec;
 
 /// Contains information about the type of a component.
+#[derive(Copy, Clone, PartialEq)]
 pub struct ComponentMeta {
     size: usize,
     align: usize,

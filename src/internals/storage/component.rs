@@ -25,6 +25,9 @@ impl ComponentTypeId {
         }
     }
 
+    /// Returns the internal TypeID of the component.
+    pub fn type_id(&self) -> TypeId { self.type_id }
+
     pub(crate) fn of_id(type_id: TypeId) -> Self {
         Self {
             type_id,
