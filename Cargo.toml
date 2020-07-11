@@ -17,7 +17,7 @@ travis-ci = { repository = "TomGillen/legion", branch = "master" }
 default = ["par-iter", "serialize", "crossbeam-events"]
 par-iter = ["rayon"]
 extended-tuple-impls = []
-serialize = ["serde", "erased-serde"]
+serialize = ["serde", "erased-serde", "uuid/serde"]
 crossbeam-events = ["crossbeam-channel"]
 
 [dependencies]
@@ -29,6 +29,7 @@ paste = "0.1"
 parking_lot = "0.11"
 bit-set = "0.5"
 tracing = "0.1"
+uuid = { version = "0.8", features = ["v4"] }
 rayon = { version = "1.3", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
 erased-serde = { version = "0.3", optional = true }

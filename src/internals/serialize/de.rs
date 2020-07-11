@@ -2,19 +2,17 @@
 
 use super::{
     entities::de::EntitiesLayoutDeserializer, packed::de::PackedLayoutDeserializer, WorldField,
-    WorldMeta,
 };
 use crate::internals::{
     storage::{
         archetype::{ArchetypeIndex, EntityLayout},
         component::ComponentTypeId,
-        group::GroupDef,
         UnknownComponentStorage,
     },
-    world::{Universe, World, WorldOptions},
+    world::World,
 };
 use serde::{
-    de::{DeserializeSeed, MapAccess, Visitor},
+    de::{MapAccess, Visitor},
     Deserialize, Deserializer,
 };
 
@@ -46,27 +44,13 @@ pub trait WorldDeserializer {
     ) -> Result<Box<[u8]>, D::Error>;
 }
 
-pub struct Wrapper<T: WorldDeserializer>(pub T);
-
-impl<'de, W: WorldDeserializer> DeserializeSeed<'de> for Wrapper<W> {
-    type Value = World;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_map(WorldVisitor {
-            world_deserializer: self.0,
-        })
-    }
+pub struct WorldVisitor<'a, W: WorldDeserializer> {
+    pub world_deserializer: &'a W,
+    pub world: &'a mut World,
 }
 
-struct WorldVisitor<W: WorldDeserializer> {
-    world_deserializer: W,
-}
-
-impl<'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<W> {
-    type Value = World;
+impl<'a, 'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<'a, W> {
+    type Value = ();
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         formatter.write_str("map")
@@ -76,75 +60,28 @@ impl<'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<W> {
     where
         V: MapAccess<'de>,
     {
-        let mut world = None;
+        crate::internals::entity::serde::UNIVERSE.with(|cell| {
+            *cell.borrow_mut() = Some(self.world.universe().clone());
 
-        while let Some(key) = map.next_key()? {
-            match key {
-                WorldField::_Meta => {
-                    if world.is_some() {
-                        return Err(serde::de::Error::duplicate_field("_meta"));
-                    }
-                    world = Some(map.next_value_seed(MetaDeserializer {
-                        world_deserializer: &self.world_deserializer,
-                    })?);
-                }
-                WorldField::Packed => {
-                    if let Some(world) = &mut world {
+            while let Some(key) = map.next_key()? {
+                match key {
+                    WorldField::Packed => {
                         map.next_value_seed(PackedLayoutDeserializer {
-                            world_deserializer: &self.world_deserializer,
-                            world,
+                            world_deserializer: self.world_deserializer,
+                            world: self.world,
                         })?;
-                    } else {
-                        return Err(serde::de::Error::missing_field("_meta"));
                     }
-                }
-                WorldField::Entities => {
-                    if let Some(world) = &mut world {
+                    WorldField::Entities => {
                         map.next_value_seed(EntitiesLayoutDeserializer {
-                            world_deserializer: &self.world_deserializer,
-                            world,
+                            world_deserializer: self.world_deserializer,
+                            world: self.world,
                         })?;
-                    } else {
-                        return Err(serde::de::Error::missing_field("_meta"));
                     }
                 }
             }
-        }
 
-        let world = world.ok_or_else(|| serde::de::Error::missing_field("_meta"))?;
-        Ok(world)
-    }
-}
-
-struct MetaDeserializer<'a, W: WorldDeserializer> {
-    world_deserializer: &'a W,
-}
-
-impl<'de, 'a, W: WorldDeserializer> DeserializeSeed<'de> for MetaDeserializer<'a, W> {
-    type Value = World;
-
-    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let meta = WorldMeta::<W::TypeId>::deserialize(deserializer)?;
-        let universe = Universe::sharded(meta.entity_id_offset, meta.entity_id_stride);
-        universe.entity_allocator().skip(meta.entity_id_next);
-        let options = WorldOptions {
-            groups: meta
-                .component_groups
-                .iter()
-                .map(|group| {
-                    GroupDef::from_vec(
-                        group
-                            .iter()
-                            .filter_map(|id| self.world_deserializer.unmap_id(id))
-                            .collect(),
-                    )
-                })
-                .collect(),
-        };
-
-        Ok(universe.create_world_with_options(options))
+            *cell.borrow_mut() = None;
+            Ok(())
+        })
     }
 }

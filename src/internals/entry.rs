@@ -232,7 +232,7 @@ impl<'a> Entry<'a> {
                 add_constructors: &[|| Box::new(T::Storage::default())],
                 remove: &[],
             };
-            self.world.get_archetype(&mut source)
+            self.world.get_archetype_for_components(&mut source)
         };
         unsafe {
             let idx = self.world.transfer_archetype(
@@ -266,7 +266,7 @@ impl<'a> Entry<'a> {
                 add_constructors: &[],
                 remove: &[ComponentTypeId::of::<T>()],
             };
-            self.world.get_archetype(&mut source)
+            self.world.get_archetype_for_components(&mut source)
         };
         unsafe {
             let idx = self.world.transfer_archetype(

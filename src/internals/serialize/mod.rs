@@ -1,5 +1,6 @@
 //! Contains types required to serialize and deserialize a world via the serde library.
 
+use super::world::Universe;
 use crate::internals::{
     storage::{
         archetype::{ArchetypeIndex, EntityLayout},
@@ -8,7 +9,7 @@ use crate::internals::{
     },
     world::World,
 };
-use de::WorldDeserializer;
+use de::{WorldDeserializer, WorldVisitor};
 use ser::WorldSerializer;
 use serde::{de::DeserializeSeed, Serializer};
 use std::{collections::HashMap, hash::Hash, marker::PhantomData};
@@ -122,6 +123,22 @@ where
     {
         self.register::<C>(ComponentTypeId::of::<C>().into())
     }
+
+    /// Constructs a serde::DeserializeSeed which will deserialize into an exist world.
+    pub fn as_deserialize_into_world<'a>(
+        &'a self,
+        world: &'a mut World,
+    ) -> WorldDeserializerWrapper<'a, Self> {
+        WorldDeserializerWrapper(&self, world)
+    }
+
+    /// Constructs a serde::DeserializeSeed which will deserialize into a new world in the given universe.
+    pub fn as_deserialize<'a>(
+        &'a self,
+        universe: &'a Universe,
+    ) -> UniverseDeserializerWrapper<'a, Self> {
+        UniverseDeserializerWrapper(&self, universe)
+    }
 }
 
 impl<T: TypeKey> Default for Registry<T> {
@@ -214,15 +231,34 @@ where
     }
 }
 
-impl<'de, T: TypeKey> DeserializeSeed<'de> for Registry<T> {
+pub struct WorldDeserializerWrapper<'a, T: WorldDeserializer>(pub &'a T, pub &'a mut World);
+
+impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for WorldDeserializerWrapper<'a, W> {
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_map(WorldVisitor {
+            world_deserializer: self.0,
+            world: self.1,
+        })
+    }
+}
+
+pub struct UniverseDeserializerWrapper<'a, T: WorldDeserializer>(pub &'a T, pub &'a Universe);
+
+impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for UniverseDeserializerWrapper<'a, W> {
     type Value = World;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let wrapped = de::Wrapper(self);
-        wrapped.deserialize(deserializer)
+        let mut world = self.1.create_world();
+        WorldDeserializerWrapper(self.0, &mut world).deserialize(deserializer)?;
+        Ok(world)
     }
 }
 
@@ -249,17 +285,8 @@ impl Into<ComponentTypeId> for SerializableTypeId {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct WorldMeta<T> {
-    entity_id_offset: u64,
-    entity_id_stride: u64,
-    entity_id_next: u64,
-    component_groups: Vec<Vec<T>>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum WorldField {
-    _Meta,
     Packed,
     Entities,
 }
@@ -268,13 +295,15 @@ enum WorldField {
 mod test {
     use super::Registry;
     use crate::internals::{
+        entity::Entity,
         query::filter::filter_fns::any,
-        world::{EntityStore, World},
+        world::{EntityStore, Universe, World},
     };
 
     #[test]
     fn serialize_json() {
-        let mut world = World::default();
+        let universe = Universe::new();
+        let mut world = universe.create_world();
 
         let entity = world.extend(vec![
             (1usize, false, 1isize),
@@ -283,32 +312,49 @@ mod test {
             (4usize, false, 4isize),
         ])[0];
 
-        world.extend(vec![
-            (5usize, 5isize),
-            (6usize, 6isize),
-            (7usize, 7isize),
-            (8usize, 8isize),
-        ]);
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct ContainsEntityRef(Entity);
+
+        let with_ref = world.extend(vec![
+            (5usize, 5isize, ContainsEntityRef(entity)),
+            (6usize, 6isize, ContainsEntityRef(entity)),
+            (7usize, 7isize, ContainsEntityRef(entity)),
+            (8usize, 8isize, ContainsEntityRef(entity)),
+        ])[0];
 
         let mut registry = Registry::<String>::new();
         registry.register::<usize>("usize".to_string());
         registry.register::<bool>("bool".to_string());
         registry.register::<isize>("isize".to_string());
+        registry.register::<ContainsEntityRef>("entity_ref".to_string());
 
         let json = serde_json::to_value(&world.as_serializable(any(), &registry)).unwrap();
         println!("{:#}", json);
 
         use serde::de::DeserializeSeed;
-        let world: World = registry.deserialize(json).unwrap();
-        let entity = world.entry_ref(entity).unwrap();
-        assert_eq!(entity.get_component::<usize>().unwrap(), &1usize);
-        assert_eq!(entity.get_component::<bool>().unwrap(), &false);
-        assert_eq!(entity.get_component::<isize>().unwrap(), &1isize);
+        let world: World = registry
+            .as_deserialize(&universe)
+            .deserialize(json)
+            .unwrap();
+        let entry = world.entry_ref(entity).unwrap();
+        assert_eq!(entry.get_component::<usize>().unwrap(), &1usize);
+        assert_eq!(entry.get_component::<bool>().unwrap(), &false);
+        assert_eq!(entry.get_component::<isize>().unwrap(), &1isize);
+        assert_eq!(
+            world
+                .entry_ref(with_ref)
+                .unwrap()
+                .get_component::<ContainsEntityRef>()
+                .unwrap()
+                .0,
+            entity
+        );
     }
 
     #[test]
     fn serialize_bincode() {
-        let mut world = World::default();
+        let universe = Universe::new();
+        let mut world = universe.create_world();
 
         let entity = world.extend(vec![
             (1usize, false, 1isize),
@@ -339,7 +385,10 @@ mod test {
                 .with_fixint_encoding()
                 .allow_trailing_bytes(),
         );
-        let world: World = registry.deserialize(&mut deserializer).unwrap();
+        let world: World = registry
+            .as_deserialize(&universe)
+            .deserialize(&mut deserializer)
+            .unwrap();
         let entity = world.entry_ref(entity).unwrap();
         assert_eq!(entity.get_component::<usize>().unwrap(), &1usize);
         assert_eq!(entity.get_component::<bool>().unwrap(), &false);

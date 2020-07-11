@@ -146,13 +146,13 @@
 //! ```
 
 pub use crate::internals::{
-    entity::{Allocate, Entity, EntityAllocator, EntityLocation, LocationMap},
+    entity::{Allocate, Entity, EntityLocation, LocationMap},
     entry::{Entry, EntryMut, EntryRef},
     event::{Event, EventSender},
     permissions::Permissions,
     subworld::{ArchetypeAccess, ComponentAccess, SubWorld},
     world::{
-        ComponentAccessError, ConflictPolicy, Duplicate, EntityPolicy, EntityStore, MergeError,
-        Merger, Move, StorageAccessor, Universe, UniverseId, World, WorldId, WorldOptions,
+        ComponentAccessError, Duplicate, EntityStore, MergeError, Merger, Move, StorageAccessor,
+        World, WorldId, WorldOptions, Universe, UniverseId
     },
 };

@@ -1,6 +1,6 @@
 //! Contains types related to the [World](struct.World.html) entity collection.
 
-use super::entity::{Entity, EntityAllocator, EntityHasher, EntityLocation, LocationMap};
+use super::entity::{Allocate, Canon, Entity, EntityLocation, EntityName, LocationMap};
 use super::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use super::{
     entry::{Entry, EntryMut, EntryRef},
@@ -24,7 +24,10 @@ use itertools::Itertools;
 use std::{
     collections::HashMap,
     ops::Range,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 type MapEntry<'a, K, V> = std::collections::hash_map::Entry<'a, K, V>;
@@ -42,38 +45,17 @@ impl Default for UniverseId {
     fn default() -> Self { Self::next() }
 }
 
-/// A Universe defines an [entity](struct.Entity.html) ID address space which can be shared between multiple [Worlds](struct.World.html).
-///
-/// A universe can be sharded to divide the entity address space between multiple universes. This can be useful in cases where entities
-/// need to be allocated in two worlds which cannot share a single runtime universe; for example when running a network application across
-/// multiple devices, or when mixing runtime created entities with offline serialized entities. Entities allocated in different shards of
-/// a sharded universe are guaranteed to have unique entity IDs across both worlds.
-///
-/// Sharding a universe splits the address space into _n_ shards, where each universe is assigned a unique index from among the shards:
-///
-/// ```
-/// # use legion::*;
-/// // create universe in shard 7 of 9
-/// let universe = Universe::sharded(7, 9);
-/// ```
+/// A Universe defines a namespace where canonical entity names will always resolve to the same
+/// [Entity](../entity/struct.Entity.html).
 #[derive(Debug, Clone, Default)]
 pub struct Universe {
     id: UniverseId,
-    entity_allocator: EntityAllocator,
+    canon: Arc<Canon>,
 }
 
 impl Universe {
     /// Creates a new universe across the entire entity address space.
     pub fn new() -> Self { Self::default() }
-
-    /// Creates a new universe with a sharded entity address space.
-    /// `n` represents the index of the shard from a set of `of` shards.
-    pub fn sharded(n: u64, of: u64) -> Self {
-        Self {
-            id: UniverseId::next(),
-            entity_allocator: EntityAllocator::new(n, of),
-        }
-    }
 
     /// Creates a new [World](struct.World.html) in this universe with default options.
     pub fn create_world(&self) -> World { self.create_world_with_options(WorldOptions::default()) }
@@ -82,12 +64,12 @@ impl Universe {
     pub fn create_world_with_options(&self, options: WorldOptions) -> World {
         World {
             id: WorldId::next(self.id),
-            entity_allocator: self.entity_allocator.clone(),
+            universe: self.clone(),
             ..World::with_options(options)
         }
     }
 
-    pub(crate) fn entity_allocator(&self) -> &EntityAllocator { &self.entity_allocator }
+    pub(crate) fn canon(&self) -> &Canon { &self.canon }
 }
 
 /// Error type representing a failure to aquire a storage accessor.
@@ -144,6 +126,7 @@ pub struct WorldOptions {
 /// The entities in a world may be efficiently searched and iterated via [queries](../query/index.html).
 #[derive(Debug)]
 pub struct World {
+    universe: Universe,
     id: WorldId,
     index: SearchIndex,
     components: Components,
@@ -151,7 +134,6 @@ pub struct World {
     group_members: HashMap<ComponentTypeId, usize>,
     archetypes: Vec<Archetype>,
     entities: LocationMap,
-    entity_allocator: EntityAllocator,
     allocation_buffer: Vec<Entity>,
     subscribers: Subscribers,
 }
@@ -180,15 +162,19 @@ impl World {
                 }
             }
         }
+
+        let universe = Universe::default();
+        let id = WorldId::next(universe.id);
+
         Self {
-            id: WorldId::default(),
+            universe,
+            id,
             index: SearchIndex::default(),
             components: Components::default(),
             groups,
             group_members,
             archetypes: Vec::default(),
             entities: LocationMap::default(),
-            entity_allocator: EntityAllocator::default(),
             allocation_buffer: Vec::default(),
             subscribers: Subscribers::default(),
         }
@@ -205,6 +191,29 @@ impl World {
 
     /// Returns `true` if the world contains an entity with the given ID.
     pub fn contains(&self, entity: Entity) -> bool { self.entities.contains(entity) }
+
+    /// Appends a named entity to the word, replacing any existing entity with the given canonical name.
+    /// Returns the ID of the entity.
+    pub fn push_named<T>(&mut self, name: &EntityName, components: T) -> Entity
+    where
+        Option<T>: IntoComponentSource,
+    {
+        let entity_id = self.universe.canon.get_id(name);
+        self.remove(entity_id);
+
+        let mut components = <Option<T> as IntoComponentSource>::into(Some(components));
+
+        let arch_index = self.get_archetype_for_components(&mut components);
+        let archetype = &mut self.archetypes[arch_index.0 as usize];
+        let mut writer =
+            ArchetypeWriter::new(arch_index, archetype, self.components.get_multi_mut());
+        components.push_components(&mut writer, std::iter::once(entity_id));
+
+        let (base, entities) = writer.inserted();
+        self.entities.insert(entities, arch_index, base);
+
+        entity_id
+    }
 
     /// Appends a new entity to the world. Returns the ID of the new entity.
     /// `components` should be a tuple of components to attach to the entity.
@@ -262,11 +271,11 @@ impl World {
     pub fn extend(&mut self, components: impl IntoComponentSource) -> &[Entity] {
         let mut components = components.into();
 
-        let arch_index = self.get_archetype(&mut components);
+        let arch_index = self.get_archetype_for_components(&mut components);
         let archetype = &mut self.archetypes[arch_index.0 as usize];
         let mut writer =
             ArchetypeWriter::new(arch_index, archetype, self.components.get_multi_mut());
-        components.push_components(&mut writer, self.entity_allocator.iter());
+        components.push_components(&mut writer, Allocate::new());
 
         let (base, entities) = writer.inserted();
         self.entities.insert(entities, arch_index, base);
@@ -359,7 +368,7 @@ impl World {
     /// defined when this world was created.
     pub fn pack(&mut self, options: PackOptions) { self.components.pack(&options); }
 
-    pub(crate) fn entity_allocator(&self) -> &EntityAllocator { &self.entity_allocator }
+    pub(crate) fn universe(&self) -> &Universe { &self.universe }
 
     pub(crate) fn components(&self) -> &Components { &self.components }
 
@@ -370,8 +379,6 @@ impl World {
     pub(crate) fn archetypes_mut(&mut self) -> &mut [Archetype] { &mut self.archetypes }
 
     pub(crate) fn entities_mut(&mut self) -> &mut LocationMap { &mut self.entities }
-
-    pub(crate) fn groups(&self) -> &[Group] { &self.groups }
 
     pub(crate) unsafe fn transfer_archetype(
         &mut self,
@@ -429,7 +436,7 @@ impl World {
         ComponentIndex(to_arch.entities().len() - 1)
     }
 
-    pub(crate) fn get_archetype<T: ArchetypeSource>(
+    pub(crate) fn get_archetype_for_components<T: ArchetypeSource>(
         &mut self,
         components: &mut T,
     ) -> ArchetypeIndex {
@@ -441,7 +448,16 @@ impl World {
         }
     }
 
-    pub(crate) fn insert_archetype(&mut self, layout: EntityLayout) -> ArchetypeIndex {
+    pub(crate) fn get_or_insert_archetype(&mut self, layout: EntityLayout) -> ArchetypeIndex {
+        let index = self.index.search(&layout).next();
+        if let Some(index) = index {
+            index
+        } else {
+            self.insert_archetype(layout)
+        }
+    }
+
+    fn insert_archetype(&mut self, layout: EntityLayout) -> ArchetypeIndex {
         // create and insert new archetype
         self.index.push(&layout);
         let arch_index = ArchetypeIndex(self.archetypes.len() as u32);
@@ -520,11 +536,8 @@ impl World {
     }
 
     /// Merges the given world into this world by moving all entities out of the given world.
-    pub fn move_from(
-        &mut self,
-        source: &mut World,
-    ) -> Result<HashMap<Entity, Entity, EntityHasher>, MergeError> {
-        self.merge_from(source, &any(), &mut Move, None, EntityPolicy::default())
+    pub fn move_from(&mut self, source: &mut World) -> Result<(), MergeError> {
+        self.merge_from(source, &any(), &mut Move)
     }
 
     /// Merges the given world into this world by cloning all entities from the given world via a [Duplicate](struct.Duplicate.html).
@@ -532,8 +545,8 @@ impl World {
         &mut self,
         source: &mut World,
         cloner: &mut Duplicate,
-    ) -> Result<HashMap<Entity, Entity, EntityHasher>, MergeError> {
-        self.merge_from(source, &any(), cloner, None, EntityPolicy::default())
+    ) -> Result<(), MergeError> {
+        self.merge_from(source, &any(), cloner)
     }
 
     /// Merges a world into this world.
@@ -549,43 +562,20 @@ impl World {
     ///
     /// # Examples
     ///
-    /// Moving all entities from the source world, while preserving their IDs. This will error
-    /// if the ID conflicts with IDs in the destination world.
+    /// Moving all entities from the source world, into the desintation world.
     /// ```
     /// # use legion::*;
-    ///! # use legion::world::{EntityPolicy, ConflictPolicy, Move};
+    ///! # use legion::world::Move;
     /// let mut world_a = World::new();
     /// let mut world_b = World::new();
     ///
-    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut Move, None, EntityPolicy::Move(ConflictPolicy::Error));
-    /// ```
-    ///
-    /// Moving all entities from the source world, while reallocating IDs from the
-    /// destination world's address space.
-    /// ```
-    /// # use legion::*;
-    ///! # use legion::world::{EntityPolicy, ConflictPolicy, Move};
-    /// let mut world_a = World::new();
-    /// let mut world_b = World::new();
-    ///
-    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut Move, None, EntityPolicy::Reallocate);
-    /// ```
-    ///
-    /// Moving all entities from the source world, replacing entities in the destination
-    /// with entities from the source if they conflict.
-    /// ```
-    /// # use legion::*;
-    ///! # use legion::world::{EntityPolicy, ConflictPolicy, Move};
-    /// let mut world_a = World::new();
-    /// let mut world_b = World::new();
-    ///
-    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut Move, None, EntityPolicy::Move(ConflictPolicy::Replace));
+    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut Move);
     /// ```
     ///
     /// Cloning all entities from the source world, converting all `i32` components to `f64` components.
     /// ```
     /// # use legion::*;
-    /// # use legion::world::{EntityPolicy, ConflictPolicy, Duplicate};
+    /// # use legion::world::Duplicate;
     /// let mut world_a = World::new();
     /// let mut world_b = World::new();
     ///
@@ -595,86 +585,35 @@ impl World {
     /// merger.register_clone::<String>();
     /// merger.register_convert(|comp: &i32| *comp as f32);
     ///
-    /// let _ = world_a.merge_from(
-    ///     &mut world_b,
-    ///     &any(),
-    ///     &mut merger,
-    ///     None,
-    ///     EntityPolicy::Move(ConflictPolicy::Error),
-    /// );
+    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut merger);
     /// ```
     pub fn merge_from<F: LayoutFilter, M: Merger>(
         &mut self,
         source: &mut World,
         filter: &F,
         merger: &mut M,
-        remap: Option<&HashMap<Entity, Entity, EntityHasher>>,
-        policy: EntityPolicy,
-    ) -> Result<HashMap<Entity, Entity, EntityHasher>, MergeError> {
-        let mut entity_mappings = HashMap::default();
-        let mut to_push = Vec::new();
+    ) -> Result<(), MergeError> {
+        // we can only merge worlds which are part of the same universe
+        if self.id.universe() != source.id.universe() {
+            return Err(MergeError::DifferentUniverses);
+        }
 
-        let shared_universe = self.id.universe() == source.id.universe();
-
+        // find the archetypes in the source that we want to merge into the destination
         for src_arch in source.archetypes.iter_mut().filter(|arch| {
             filter
                 .matches_layout(arch.layout().component_types())
                 .is_pass()
         }) {
-            let allocator_clone = self.entity_allocator.clone();
-            let mut allocator = allocator_clone.iter();
-
-            to_push.reserve(src_arch.entities().len());
-
-            match policy {
-                EntityPolicy::Move(ref conflict_policy) => {
-                    for src_entity in src_arch.entities() {
-                        let src_entity = remap
-                            .and_then(|remap| remap.get(src_entity))
-                            .unwrap_or(src_entity);
-
-                        let owns_address =
-                            self.entity_allocator.address_space_contains(*src_entity);
-                        let conflicted = (!shared_universe && owns_address)
-                            || self.entities.get(*src_entity).is_some();
-                        let entity = if conflicted {
-                            match conflict_policy {
-                                ConflictPolicy::Error => {
-                                    return Err(MergeError::ConflictingEntityIDs)
-                                }
-                                ConflictPolicy::Reallocate => {
-                                    let dst_entity = allocator.next().unwrap();
-                                    entity_mappings.insert(*src_entity, dst_entity);
-                                    dst_entity
-                                }
-                                ConflictPolicy::Replace => {
-                                    if owns_address && !allocator.is_allocated(*src_entity) {
-                                        return Err(MergeError::InvalidFutureEntityID);
-                                    }
-                                    self.remove(*src_entity);
-                                    *src_entity
-                                }
-                            }
-                        } else {
-                            *src_entity
-                        };
-
-                        to_push.push(entity);
-                    }
-                }
-                EntityPolicy::Reallocate => {
-                    for src_entity in src_arch.entities() {
-                        let src_entity = remap
-                            .and_then(|remap| remap.get(src_entity))
-                            .unwrap_or(src_entity);
-                        let dst_entity = allocator.next().unwrap();
-                        entity_mappings.insert(*src_entity, dst_entity);
-                        to_push.push(dst_entity);
-                    }
-                }
+            // find conflicts, and remove the existing entity, to be replaced with that defined in the source
+            // conflicting IDs can only happen if both worlds have their own definition of a named canon entity
+            for src_entity in src_arch.entities() {
+                self.remove(*src_entity);
             }
 
+            // construct the destination entity layout
             let layout = merger.convert_layout((**src_arch.layout()).clone());
+
+            // find or construct the destination archetype
             let dst_arch_index = if !M::prefers_new_archetype() || src_arch.entities().len() < 32 {
                 self.index.search(&layout).next()
             } else {
@@ -682,13 +621,17 @@ impl World {
             };
             let dst_arch_index = dst_arch_index.unwrap_or_else(|| self.insert_archetype(layout));
             let dst_arch = &mut self.archetypes[dst_arch_index.0 as usize];
+
+            // build a writer for the destination archetype
             let mut writer =
                 ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
-            for entity in to_push.drain(..) {
-                writer.push(entity);
+            // push entity IDs into the archetype
+            for entity in src_arch.entities() {
+                writer.push(*entity);
             }
 
+            // merge components into the archetype
             merger.merge_archetype(
                 0..source.entities.len(),
                 &mut source.entities,
@@ -697,11 +640,12 @@ impl World {
                 &mut writer,
             );
 
+            // record entity locations
             let (base, entities) = writer.inserted();
             self.entities.insert(entities, dst_arch_index, base);
         }
 
-        Ok(entity_mappings)
+        Ok(())
     }
 
     /// Merges a single entity from the source world into the destination world.
@@ -710,53 +654,38 @@ impl World {
         source: &mut World,
         entity: Entity,
         merger: &mut M,
-        remap: Option<Entity>,
-        policy: EntityPolicy,
-    ) -> Result<Entity, MergeError> {
-        let shared_universe = self.id.universe() == source.id.universe();
+    ) -> Result<(), MergeError> {
+        // we can only merge worlds which are part of the same universe
+        if self.id.universe() != source.id.universe() {
+            return Err(MergeError::DifferentUniverses);
+        }
+
+        // find conflicts, and remove the existing entity, to be replaced with that defined in the source
+        // conflicting IDs can only happen if both worlds have their own definition of a named canon entity
+        self.remove(entity);
+
+        // find the source
         let src_location = source
             .entities
             .get(entity)
             .expect("entity not found in source world");
         let src_arch = &mut source.archetypes[src_location.archetype()];
 
-        let allocator_clone = self.entity_allocator.clone();
-        let mut allocator = allocator_clone.iter();
-
-        let dst_entity = match policy {
-            EntityPolicy::Reallocate => allocator.next().unwrap(),
-            EntityPolicy::Move(ref conflict_policy) => {
-                let src_entity = remap.unwrap_or(entity);
-                let owns_address = self.entity_allocator.address_space_contains(src_entity);
-                let conflicted =
-                    (!shared_universe && owns_address) || self.entities.get(src_entity).is_some();
-
-                if conflicted {
-                    match conflict_policy {
-                        ConflictPolicy::Error => return Err(MergeError::ConflictingEntityIDs),
-                        ConflictPolicy::Reallocate => allocator.next().unwrap(),
-                        ConflictPolicy::Replace => {
-                            if owns_address && !allocator.is_allocated(src_entity) {
-                                return Err(MergeError::InvalidFutureEntityID);
-                            }
-                            self.remove(src_entity);
-                            src_entity
-                        }
-                    }
-                } else {
-                    src_entity
-                }
-            }
-        };
-
+        // construct the destination entity layout
         let layout = merger.convert_layout((**src_arch.layout()).clone());
+
+        // find or construct the destination archetype
         let dst_arch_index = self.insert_archetype(layout);
         let dst_arch = &mut self.archetypes[dst_arch_index.0 as usize];
+
+        // build a writer for the destination archetype
         let mut writer =
             ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
-        writer.push(dst_entity);
+        // push entity ID into the archetype
+        writer.push(entity);
 
+        // merge components into the archetype
         let index = src_location.component().0;
         merger.merge_archetype(
             index..(index + 1),
@@ -766,10 +695,11 @@ impl World {
             &mut writer,
         );
 
+        // record entity location
         let (base, entities) = writer.inserted();
         self.entities.insert(entities, dst_arch_index, base);
 
-        Ok(dst_entity)
+        Ok(())
     }
 
     /// Creates a serde serializable representation of the world.
@@ -794,7 +724,8 @@ impl World {
     /// Serializing all entities with a `Position` component to JSON.
     /// ```
     /// # use legion::*;
-    /// # let world = World::new();
+    /// # let universe = Universe::new();
+    /// # let world = universe.create_world();
     /// # #[derive(serde::Serialize, serde::Deserialize)]
     /// # struct Position;
     /// // create a registry which uses strings as the external type ID
@@ -807,9 +738,9 @@ impl World {
     /// let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry)).unwrap();
     /// println!("{:#}", json);
     ///
-    /// // registries are also serde deserializers
+    /// // registries can also be used to deserialize
     /// use serde::de::DeserializeSeed;
-    /// let world: World = registry.deserialize(json).unwrap();
+    /// let world: World = registry.as_deserialize(&universe).deserialize(json).unwrap();
     /// ```
     #[cfg(feature = "serialize")]
     pub fn as_serializable<
@@ -1152,37 +1083,8 @@ impl Merger for Duplicate {
 /// An error type which indicates that a world merge failed.
 #[derive(Debug)]
 pub enum MergeError {
-    /// The source world contains IDs which conflcit with the destination.
-    ConflictingEntityIDs,
-    /// The source world contains IDs which lie in the destination's address space but which have
-    /// not yet been allocated by the destination.
-    InvalidFutureEntityID,
-}
-
-/// Determines how world merges handle entity IDs.
-pub enum EntityPolicy {
-    /// Entity IDs will be moved from the source world into the destination.
-    Move(ConflictPolicy),
-    /// Entity IDs will be re-allocated in the destination world.
-    Reallocate,
-}
-
-impl Default for EntityPolicy {
-    fn default() -> Self { Self::Move(ConflictPolicy::default()) }
-}
-
-/// Determines how world merges handle entity ID conflicts.
-pub enum ConflictPolicy {
-    /// Return an error result.
-    Error,
-    /// Keep the ID, replacing any existing entity in the destination with the source entity.
-    Replace,
-    /// Allocate a new ID for the source entity, leaving any existing entities in the destination as-is.
-    Reallocate,
-}
-
-impl Default for ConflictPolicy {
-    fn default() -> Self { Self::Error }
+    /// The two worlds exist in differnce universes.
+    DifferentUniverses,
 }
 
 #[cfg(test)]
@@ -1357,8 +1259,7 @@ mod test {
             (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
         ])[0];
 
-        b.merge_from(&mut a, &any(), &mut Move, None, EntityPolicy::default())
-            .unwrap();
+        b.merge_from(&mut a, &any(), &mut Move).unwrap();
 
         assert!(a.entry(entity_a).is_none());
         assert_eq!(
@@ -1389,14 +1290,7 @@ mod test {
             (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
         ])[0];
 
-        b.merge_from_single(
-            &mut a,
-            entities[0],
-            &mut Move,
-            None,
-            EntityPolicy::default(),
-        )
-        .unwrap();
+        b.merge_from_single(&mut a, entities[0], &mut Move).unwrap();
 
         assert!(a.entry(entities[0]).is_none());
         assert_eq!(
@@ -1440,14 +1334,7 @@ mod test {
         merger.register_copy::<Pos>();
         merger.register_clone::<Rot>();
 
-        b.merge_from(
-            &mut a,
-            &any(),
-            &mut merger,
-            None,
-            EntityPolicy::Move(ConflictPolicy::Error),
-        )
-        .unwrap();
+        b.merge_from(&mut a, &any(), &mut merger).unwrap();
 
         assert_eq!(
             *a.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
@@ -1498,14 +1385,8 @@ mod test {
         merger.register_copy::<Pos>();
         merger.register_clone::<Rot>();
 
-        b.merge_from_single(
-            &mut a,
-            entities[0],
-            &mut merger,
-            None,
-            EntityPolicy::Move(ConflictPolicy::Error),
-        )
-        .unwrap();
+        b.merge_from_single(&mut a, entities[0], &mut merger)
+            .unwrap();
 
         assert_eq!(
             *a.entry(entities[0])
@@ -1568,14 +1449,7 @@ mod test {
         let mut merger = Duplicate::default();
         merger.register_convert::<Pos, f32, _>(|comp| comp.0 as f32);
 
-        b.merge_from(
-            &mut a,
-            &any(),
-            &mut merger,
-            None,
-            EntityPolicy::Move(ConflictPolicy::Error),
-        )
-        .unwrap();
+        b.merge_from(&mut a, &any(), &mut merger).unwrap();
 
         assert_eq!(
             *a.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
@@ -1591,106 +1465,5 @@ mod test {
             Rot(0.1, 0.2, 0.3)
         );
         assert!(b.entry(entity_a).unwrap().get_component::<Rot>().is_none());
-    }
-
-    #[test]
-    fn move_conflict_reallocate() {
-        let mut a = World::default();
-        let mut b = World::default();
-
-        let entity_a = a.extend(vec![
-            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
-            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
-        ])[0];
-
-        let entity_b = b.extend(vec![
-            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
-            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
-        ])[0];
-
-        let mappings = b
-            .merge_from(
-                &mut a,
-                &any(),
-                &mut Move,
-                None,
-                EntityPolicy::Move(ConflictPolicy::Reallocate),
-            )
-            .unwrap();
-
-        assert_eq!(mappings.len(), 2);
-        assert!(a.entry(entity_a).is_none());
-        assert_eq!(
-            *b.entry(entity_b).unwrap().get_component::<Pos>().unwrap(),
-            Pos(7., 8., 9.)
-        );
-        assert_eq!(
-            *b.entry(*mappings.get(&entity_a).unwrap())
-                .unwrap()
-                .get_component::<Pos>()
-                .unwrap(),
-            Pos(1., 2., 3.)
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn move_conflict_error() {
-        let mut a = World::default();
-        let mut b = World::default();
-
-        a.extend(vec![
-            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
-            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
-        ]);
-
-        b.extend(vec![
-            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
-            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
-        ]);
-
-        b.merge_from(
-            &mut a,
-            &any(),
-            &mut Move,
-            None,
-            EntityPolicy::Move(ConflictPolicy::Error),
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn move_conflict_replace() {
-        let mut a = World::default();
-        let mut b = World::default();
-
-        let entity = a.extend(vec![
-            (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
-            (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
-        ])[0];
-
-        b.extend(vec![
-            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
-            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
-        ]);
-
-        assert_eq!(
-            *b.entry(entity).unwrap().get_component::<Pos>().unwrap(),
-            Pos(7., 8., 9.)
-        );
-
-        b.merge_from(
-            &mut a,
-            &any(),
-            &mut Move,
-            None,
-            EntityPolicy::Move(ConflictPolicy::Replace),
-        )
-        .unwrap();
-
-        assert_eq!(
-            *b.entry(entity).unwrap().get_component::<Pos>().unwrap(),
-            Pos(1., 2., 3.)
-        );
     }
 }

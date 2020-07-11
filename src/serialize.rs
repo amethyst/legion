@@ -14,7 +14,8 @@
 //! Serializing all entities with a `Position` component to JSON.
 //! ```
 //! # use legion::*;
-//! # let world = World::new();
+//! # let universe = Universe::new();
+//! # let world = universe.create_world();
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct Position;
 //! // create a registry which uses strings as the external type ID
@@ -29,7 +30,7 @@
 //!
 //! // registries are also serde deserializers
 //! use serde::de::DeserializeSeed;
-//! let world: World = registry.deserialize(json).unwrap();
+//! let world: World = registry.as_deserialize(&universe).deserialize(json).unwrap();
 //! ```
 
 pub use crate::internals::serialize::{

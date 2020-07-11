@@ -2,24 +2,100 @@ use super::{
     hash::U64Hasher,
     storage::{archetype::ArchetypeIndex, ComponentIndex},
 };
+use parking_lot::Mutex;
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     fmt::Debug,
     hash::BuildHasherDefault,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
+use uuid::Uuid;
 
-const BLOCK_SIZE: usize = 64;
-const BLOCK_SIZE_U64: u64 = BLOCK_SIZE as u64;
-
-/// Unique identifier for an entity in a world.
+/// An opaque identifier for an entity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[repr(transparent)]
 pub struct Entity(u64);
+
+#[cfg(feature = "serialize")]
+pub mod serde {
+    use super::Entity;
+    use crate::internals::world::Universe;
+    use serde::{Deserialize, Serialize, Serializer};
+    use std::cell::RefCell;
+    use uuid::Uuid;
+
+    thread_local! {
+        pub static UNIVERSE: RefCell<Option<Universe>> = RefCell::new(None);
+    }
+
+    impl Serialize for Entity {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            UNIVERSE.with(|f| {
+                let universe = f.borrow();
+                if let Some(ref universe) = *universe {
+                    let name = universe.canon().get_name(*self);
+                    name.serialize(serializer)
+                } else {
+                    use serde::ser::Error;
+                    Err(S::Error::custom("no universe context"))
+                }
+            })
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Entity {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            UNIVERSE.with(|f| {
+                let universe = f.borrow();
+                if let Some(ref universe) = *universe {
+                    let name = Uuid::deserialize(deserializer)?;
+                    let entity = universe.canon().get_id(name.as_bytes());
+                    Ok(entity)
+                } else {
+                    use serde::de::Error;
+                    Err(D::Error::custom("no universe context"))
+                }
+            })
+        }
+    }
+}
+
+const BLOCK_SIZE: u64 = 16;
+const BLOCK_SIZE_USIZE: usize = BLOCK_SIZE as usize;
+
+static NEXT_ENTITY: AtomicU64 = AtomicU64::new(0);
+
+/// An iterator which yields new entity IDs.
+pub struct Allocate {
+    base: u64,
+    count: u64,
+}
+
+impl Allocate {
+    /// Constructs a new enity ID allocator iterator.
+    pub fn new() -> Self { Self { base: 0, count: 0 } }
+}
+
+impl<'a> Iterator for Allocate {
+    type Item = Entity;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count == 0 {
+            self.base = NEXT_ENTITY.fetch_add(BLOCK_SIZE, Ordering::Relaxed);
+            self.count = BLOCK_SIZE;
+        }
+
+        self.count -= 1;
+        Some(Entity(self.base + self.count))
+    }
+}
 
 /// The storage location of an entity's data.
 #[derive(Debug, Copy, Clone)]
@@ -45,7 +121,7 @@ pub type EntityHasher = BuildHasherDefault<U64Hasher>;
 #[derive(Clone, Default)]
 pub struct LocationMap {
     len: usize,
-    blocks: HashMap<u64, Box<[Option<EntityLocation>; BLOCK_SIZE]>, EntityHasher>,
+    blocks: HashMap<u64, Box<[Option<EntityLocation>; BLOCK_SIZE_USIZE]>, EntityHasher>,
 }
 
 impl Debug for LocationMap {
@@ -79,18 +155,18 @@ impl LocationMap {
         let mut current_block = u64::MAX;
         let mut block_vec = None;
         for (i, entity) in ids.iter().enumerate() {
-            let block = entity.0 / BLOCK_SIZE_U64;
+            let block = entity.0 / BLOCK_SIZE;
             if current_block != block {
                 block_vec = Some(
                     self.blocks
                         .entry(block)
-                        .or_insert_with(|| Box::new([None; BLOCK_SIZE])),
+                        .or_insert_with(|| Box::new([None; BLOCK_SIZE_USIZE])),
                 );
                 current_block = block;
             }
 
             if let Some(ref mut vec) = block_vec {
-                let idx = (entity.0 - block * BLOCK_SIZE_U64) as usize;
+                let idx = (entity.0 - block * BLOCK_SIZE) as usize;
                 if vec[idx]
                     .replace(EntityLocation(arch, ComponentIndex(base + i)))
                     .is_none()
@@ -108,8 +184,8 @@ impl LocationMap {
 
     /// Returns the location of an entity.
     pub fn get(&self, entity: Entity) -> Option<EntityLocation> {
-        let block = entity.0 / BLOCK_SIZE_U64;
-        let idx = (entity.0 - block * BLOCK_SIZE_U64) as usize;
+        let block = entity.0 / BLOCK_SIZE;
+        let idx = (entity.0 - block * BLOCK_SIZE) as usize;
         if let Some(&result) = self.blocks.get(&block).and_then(|v| v.get(idx)) {
             result
         } else {
@@ -119,8 +195,8 @@ impl LocationMap {
 
     /// Removes an entity from the location map.
     pub fn remove(&mut self, entity: Entity) -> Option<EntityLocation> {
-        let block = entity.0 / BLOCK_SIZE_U64;
-        let idx = (entity.0 - block * BLOCK_SIZE_U64) as usize;
+        let block = entity.0 / BLOCK_SIZE;
+        let idx = (entity.0 - block * BLOCK_SIZE) as usize;
         if let Some(loc) = self.blocks.get_mut(&block).and_then(|v| v.get_mut(idx)) {
             let original = *loc;
             if original.is_some() {
@@ -134,113 +210,44 @@ impl LocationMap {
     }
 }
 
-/// Allocates new entity IDs.
-#[derive(Debug, Clone)]
-pub struct EntityAllocator {
-    next: Arc<AtomicU64>,
-    stride: u64,
-    offset: u64,
+pub type EntityName = [u8; 16];
+
+#[derive(Default, Debug)]
+struct Names {
+    to_name: HashMap<Entity, EntityName, EntityHasher>,
+    to_id: HashMap<EntityName, Entity>,
 }
 
-impl EntityAllocator {
-    pub(crate) fn new(offset: u64, stride: u64) -> Self {
-        assert!(stride > 0);
-        Self {
-            next: Arc::new(AtomicU64::new(offset * BLOCK_SIZE_U64)),
-            stride,
-            offset,
-        }
-    }
+#[derive(Default, Debug)]
+pub struct Canon {
+    names: Mutex<Names>,
+}
 
-    /// Returns an iterator which yields new entity IDs.
-    pub fn iter(&self) -> Allocate { Allocate::new(&self) }
-
-    /// Returns `true` if the given entity ID lies within the address space of this allocator.
-    pub fn address_space_contains(&self, entity: Entity) -> bool {
-        let block = entity.0 / BLOCK_SIZE_U64;
-        ((block - self.offset) % self.stride) == 0
-    }
-
-    fn next_block(&self) -> u64 {
-        self.next
-            .fetch_add(self.stride * BLOCK_SIZE_U64, Ordering::Relaxed)
-    }
-
-    /// Gets the block stride of the allocator.
-    pub fn stride(&self) -> u64 { self.stride }
-
-    /// Gets the block offset of the allocator.
-    pub fn offset(&self) -> u64 { self.offset }
-
-    pub(crate) fn head(&self) -> u64 { self.next.load(Ordering::Relaxed) }
-
-    pub(crate) fn skip(&self, id: u64) {
-        let mut block = id / BLOCK_SIZE_U64;
-
-        // round up if we are part way through a block
-        if id % BLOCK_SIZE_U64 != 0 {
-            block += 1;
-        }
-
-        loop {
-            let head = self.head();
-            let current_block = head / BLOCK_SIZE_U64;
-            if current_block >= block {
-                break;
-            }
-
-            let new_block = block + (block - self.offset) % self.stride;
-
-            if self
-                .next
-                .compare_and_swap(head, new_block, Ordering::Relaxed)
-                == head
-            {
-                break;
+impl Canon {
+    pub fn get_id(&self, name: &EntityName) -> Entity {
+        let mut names = self.names.lock();
+        match names.to_id.entry(*name) {
+            Entry::Occupied(occupied) => *occupied.get(),
+            Entry::Vacant(vacant) => {
+                let entity = Allocate::new().next().unwrap();
+                vacant.insert(entity);
+                names.to_name.insert(entity, *name);
+                entity
             }
         }
     }
-}
 
-impl Default for EntityAllocator {
-    fn default() -> Self { Self::new(0, 1) }
-}
-
-/// An iterator which yields new entity IDs.
-pub struct Allocate<'a> {
-    allocator: &'a EntityAllocator,
-    base: u64,
-    count: u64,
-}
-
-impl<'a> Allocate<'a> {
-    fn new(allocator: &'a EntityAllocator) -> Self {
-        Self {
-            allocator,
-            base: 0,
-            count: 0,
+    pub fn get_name(&self, entity: Entity) -> EntityName {
+        let mut names = self.names.lock();
+        match names.to_name.entry(entity) {
+            Entry::Occupied(occupied) => *occupied.get(),
+            Entry::Vacant(vacant) => {
+                let uuid = Uuid::new_v4();
+                let name = uuid.as_bytes();
+                vacant.insert(name.clone());
+                names.to_id.insert(name.clone(), entity);
+                *name
+            }
         }
-    }
-
-    /// Returns `true` if the given ID has already been allocated.
-    pub fn is_allocated(&mut self, Entity(entity): Entity) -> bool {
-        let ceiling = self.base + BLOCK_SIZE_U64;
-        let in_range = entity < self.base || (entity < ceiling && entity >= self.base + self.count);
-        in_range && self.allocator.address_space_contains(Entity(entity))
-    }
-}
-
-impl<'a> Iterator for Allocate<'a> {
-    type Item = Entity;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.count == 0 {
-            self.base = self.allocator.next_block();
-            self.count = BLOCK_SIZE_U64;
-        }
-
-        self.count -= 1;
-        Some(Entity(self.base + self.count))
     }
 }

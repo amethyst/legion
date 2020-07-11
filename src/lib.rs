@@ -205,7 +205,7 @@ pub use crate::{
     },
     storage::{GroupSource, IntoSoa},
     systems::{Resources, Schedule, SystemBuilder},
-    world::{Entity, EntityStore, Universe, World, WorldOptions},
+    world::{Entity, EntityStore, World, WorldOptions, Universe},
 };
 
 #[cfg(feature = "serialize")]

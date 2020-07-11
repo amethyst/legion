@@ -2,7 +2,6 @@
 
 use super::{
     entities::ser::EntitiesLayoutSerializer, packed::ser::PackedLayoutSerializer, WorldField,
-    WorldMeta,
 };
 use crate::internals::{
     query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World,
@@ -68,50 +67,34 @@ where
     W: WorldSerializer,
 {
     let human_readable = serializer.is_human_readable();
-    let mut root = serializer.serialize_map(Some(2))?;
+    let mut root = serializer.serialize_map(Some(1))?;
 
-    // serialize world metadata
-    root.serialize_entry(
-        &WorldField::_Meta,
-        &WorldMeta {
-            entity_id_stride: world.entity_allocator().stride(),
-            entity_id_offset: world.entity_allocator().offset(),
-            entity_id_next: world.entity_allocator().head(),
-            component_groups: world
-                .groups()
-                .iter()
-                .filter(|group| group.components().count() > 1)
-                .map(|group| {
-                    group
-                        .components()
-                        .filter_map(|type_id| world_serializer.map_id(type_id))
-                        .collect()
-                })
-                .collect(),
-        },
-    )?;
+    crate::internals::entity::serde::UNIVERSE.with(|cell| {
+        *cell.borrow_mut() = Some(world.universe().clone());
 
-    if human_readable {
-        // serialize per-entity representation
-        root.serialize_entry(
-            &WorldField::Entities,
-            &EntitiesLayoutSerializer {
-                world_serializer,
-                world,
-                filter,
-            },
-        )?;
-    } else {
-        // serialize machine-optimised representation
-        root.serialize_entry(
-            &WorldField::Packed,
-            &PackedLayoutSerializer {
-                world_serializer,
-                world,
-                filter,
-            },
-        )?;
-    }
+        if human_readable {
+            // serialize per-entity representation
+            root.serialize_entry(
+                &WorldField::Entities,
+                &EntitiesLayoutSerializer {
+                    world_serializer,
+                    world,
+                    filter,
+                },
+            )?;
+        } else {
+            // serialize machine-optimised representation
+            root.serialize_entry(
+                &WorldField::Packed,
+                &PackedLayoutSerializer {
+                    world_serializer,
+                    world,
+                    filter,
+                },
+            )?;
+        }
 
-    root.end()
+        *cell.borrow_mut() = None;
+        root.end()
+    })
 }

@@ -183,6 +183,7 @@ pub mod de {
                     V: MapAccess<'de>,
                 {
                     while let Some(entity) = map.next_key()? {
+                        self.world.remove(entity);
                         map.next_value_seed(EntityDeserializer {
                             world_deserializer: self.world_deserializer,
                             world: self.world,
@@ -247,7 +248,7 @@ pub mod de {
                         }
                     }
 
-                    let arch_index = self.world.insert_archetype(layout);
+                    let arch_index = self.world.get_or_insert_archetype(layout);
                     let comp_index = self.world.archetypes()[arch_index].entities().len();
                     self.world.archetypes_mut()[arch_index].push(self.entity);
                     self.world.entities_mut().insert(

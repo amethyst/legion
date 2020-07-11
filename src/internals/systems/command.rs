@@ -5,11 +5,16 @@
 //! Command buffers are flushed at the end of the schedule, or by adding a
 //! `flush_command_buffers` step to the schedule.
 
-use crate::internals::{
-    entity::{Entity, EntityAllocator},
-    insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource, KnownLength},
-    storage::{archetype::EntityLayout, component::Component},
-    world::{World, WorldId},
+use crate::{
+    internals::{
+        entity::Entity,
+        insert::{
+            ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource, KnownLength,
+        },
+        storage::{archetype::EntityLayout, component::Component},
+        world::{World, WorldId},
+    },
+    world::Allocate,
 };
 use derivative::Derivative;
 use smallvec::SmallVec;
@@ -212,7 +217,7 @@ enum Command {
 pub struct CommandBuffer {
     world_id: WorldId,
     commands: VecDeque<Command>,
-    entity_allocator: EntityAllocator,
+    entity_allocator: Allocate,
     pending_insertion: SmallVec<[Entity; 64]>,
 }
 
@@ -223,7 +228,7 @@ impl CommandBuffer {
             world_id: world.id(),
             commands: Default::default(),
             pending_insertion: SmallVec::new(),
-            entity_allocator: world.entity_allocator().clone(),
+            entity_allocator: Allocate::new(),
         }
     }
 
@@ -292,8 +297,10 @@ impl CommandBuffer {
         let count = components.len();
 
         self.pending_insertion.reserve(count);
-        self.pending_insertion
-            .extend(self.entity_allocator.iter().take(count));
+        for _ in 0..count {
+            self.pending_insertion
+                .push(self.entity_allocator.next().unwrap());
+        }
 
         let range = start..self.pending_insertion.len();
 

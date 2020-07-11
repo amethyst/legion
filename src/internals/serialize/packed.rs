@@ -40,18 +40,16 @@ pub mod ser {
                 .world
                 .archetypes()
                 .iter()
-                .enumerate()
-                .filter(|(_, arch)| {
+                .filter(|arch| {
                     self.filter
                         .matches_layout(arch.layout().component_types())
                         .is_pass()
                 })
-                .map(|(i, arch)| (ArchetypeIndex(i as u32), arch))
                 .collect::<Vec<_>>();
 
             let type_mappings = archetypes
                 .iter()
-                .flat_map(|(_, arch)| arch.layout().component_types())
+                .flat_map(|arch| arch.layout().component_types())
                 .unique()
                 .filter_map(|id| {
                     self.world_serializer
@@ -62,7 +60,7 @@ pub mod ser {
 
             let archetype_defs = archetypes
                 .iter()
-                .map(|(_, archetype)| {
+                .map(|archetype| {
                     let components = archetype
                         .layout()
                         .component_types()
@@ -100,7 +98,7 @@ pub mod ser {
         world_serializer: &'a W,
         world: &'a World,
         type_mappings: HashMap<ComponentTypeId, W::TypeId>,
-        archetypes: Vec<(ArchetypeIndex, &'a Archetype)>,
+        archetypes: Vec<&'a Archetype>,
     }
 
     impl<'a, W: WorldSerializer> Serialize for Components<'a, W> {
@@ -137,7 +135,7 @@ pub mod ser {
         storage: &'a dyn UnknownComponentStorage,
         world_serializer: &'a W,
         type_id: ComponentTypeId,
-        archetypes: &'a [(ArchetypeIndex, &'a Archetype)],
+        archetypes: &'a [&'a Archetype],
     }
 
     impl<'a, W: WorldSerializer> Serialize for SerializableComponentStorage<'a, W> {
@@ -149,8 +147,8 @@ pub mod ser {
                 .archetypes
                 .iter()
                 .enumerate()
-                .filter_map(|(local_index, (arch_index, _))| {
-                    self.storage.get_raw(*arch_index).map(|(ptr, len)| {
+                .filter_map(|(local_index, arch)| {
+                    self.storage.get_raw(arch.index()).map(|(ptr, len)| {
                         (local_index, ptr, self.storage.element_vtable().size(), len)
                     })
                 })
@@ -263,13 +261,17 @@ pub mod de {
                     &mut self,
                     archetype: ArchetypeDef<S::TypeId>,
                 ) -> ArchetypeIndex {
+                    for entity in &archetype.entities {
+                        self.world.remove(*entity);
+                    }
+
                     let mut layout = EntityLayout::default();
                     for component in archetype.components {
                         self.world_deserializer
                             .register_component(component, &mut layout);
                     }
 
-                    let index = self.world.insert_archetype(layout);
+                    let index = self.world.get_or_insert_archetype(layout);
                     let base = self.world.archetypes()[index].entities().len();
                     self.world.entities_mut().insert(
                         &archetype.entities,
