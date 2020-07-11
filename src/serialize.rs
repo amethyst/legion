@@ -36,5 +36,5 @@
 pub use crate::internals::serialize::{
     de::WorldDeserializer,
     ser::{SerializableWorld, WorldSerializer},
-    Registry, SerializableTypeId, TypeKey,
+    Registry, SerializableTypeId, TypeKey, UniverseDeserializerWrapper, WorldDeserializerWrapper,
 };

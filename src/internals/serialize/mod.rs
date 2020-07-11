@@ -231,6 +231,8 @@ where
     }
 }
 
+/// Wraps a [WorldDeserializer](de/trait.WorldDeserializer.html) and a world and implements
+/// `serde::DeserializeSeed` for deserializing into the world.
 pub struct WorldDeserializerWrapper<'a, T: WorldDeserializer>(pub &'a T, pub &'a mut World);
 
 impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for WorldDeserializerWrapper<'a, W> {
@@ -247,6 +249,8 @@ impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for WorldDeserializerWr
     }
 }
 
+/// Wraps a [WorldDeserializer](de/trait.WorldDeserializer.html) and a universe and implements
+/// `serde::DeserializeSeed` for deserializing into a new world.
 pub struct UniverseDeserializerWrapper<'a, T: WorldDeserializer>(pub &'a T, pub &'a Universe);
 
 impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for UniverseDeserializerWrapper<'a, W> {
