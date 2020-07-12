@@ -317,20 +317,20 @@ mod test {
         ])[0];
 
         #[derive(serde::Serialize, serde::Deserialize)]
-        struct ContainsEntityRef(Entity);
+        struct EntityRef(Entity);
 
         let with_ref = world.extend(vec![
-            (5usize, 5isize, ContainsEntityRef(entity)),
-            (6usize, 6isize, ContainsEntityRef(entity)),
-            (7usize, 7isize, ContainsEntityRef(entity)),
-            (8usize, 8isize, ContainsEntityRef(entity)),
+            (5usize, 5isize, EntityRef(entity)),
+            (6usize, 6isize, EntityRef(entity)),
+            (7usize, 7isize, EntityRef(entity)),
+            (8usize, 8isize, EntityRef(entity)),
         ])[0];
 
         let mut registry = Registry::<String>::new();
         registry.register::<usize>("usize".to_string());
         registry.register::<bool>("bool".to_string());
         registry.register::<isize>("isize".to_string());
-        registry.register::<ContainsEntityRef>("entity_ref".to_string());
+        registry.register::<EntityRef>("entity_ref".to_string());
 
         let json = serde_json::to_value(&world.as_serializable(any(), &registry)).unwrap();
         println!("{:#}", json);
@@ -348,7 +348,7 @@ mod test {
             world
                 .entry_ref(with_ref)
                 .unwrap()
-                .get_component::<ContainsEntityRef>()
+                .get_component::<EntityRef>()
                 .unwrap()
                 .0,
             entity

@@ -235,7 +235,7 @@ pub mod de {
         world::World,
     };
     use serde::{
-        de::{DeserializeSeed, MapAccess, SeqAccess, Visitor},
+        de::{DeserializeSeed, IgnoredAny, MapAccess, SeqAccess, Visitor},
         Deserialize, Deserializer,
     };
 
@@ -402,6 +402,8 @@ pub mod de {
                                 world_deserializer: self.world_deserializer,
                                 archetype_indexes: &self.archetype_indexes,
                             })?;
+                        } else {
+                            map.next_value::<IgnoredAny>()?;
                         }
                     }
 

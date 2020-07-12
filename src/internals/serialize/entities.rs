@@ -149,7 +149,7 @@ pub mod de {
         world::World,
     };
     use serde::{
-        de::{DeserializeSeed, MapAccess, Visitor},
+        de::{DeserializeSeed, IgnoredAny, MapAccess, Visitor},
         Deserializer,
     };
     use std::collections::HashMap;
@@ -245,6 +245,8 @@ pub mod de {
                                     world_deserializer: self.world_deserializer,
                                 })?,
                             );
+                        } else {
+                            map.next_value::<IgnoredAny>()?;
                         }
                     }
 
