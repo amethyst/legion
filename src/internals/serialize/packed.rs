@@ -485,7 +485,50 @@ pub mod de {
         where
             D: serde::Deserializer<'de>,
         {
-            self.world_deserializer.deserialize_component_slice(
+            impl<'de, 'a, W: WorldDeserializer> Visitor<'de> for SliceDeserializer<'a, W> {
+                type Value = ();
+
+                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                    formatter.write_str("component sequence")
+                }
+
+                fn visit_seq<S>(self, mut seq: S) -> Result<Self::Value, S::Error>
+                where
+                    S: SeqAccess<'de>,
+                {
+                    if let Some(size_hint) = seq.size_hint() {
+                        self.storage.ensure_capacity(self.arch_index, size_hint);
+                    }
+
+                    while let Some(_) = seq.next_element_seed(ComponentDeserializer {
+                        storage: self.storage,
+                        world_deserializer: self.world_deserializer,
+                        arch_index: self.arch_index,
+                        type_id: self.type_id,
+                    })? {}
+                    Ok(())
+                }
+            }
+
+            deserializer.deserialize_seq(self)
+        }
+    }
+
+    struct ComponentDeserializer<'a, W: WorldDeserializer> {
+        storage: &'a mut dyn UnknownComponentStorage,
+        world_deserializer: &'a W,
+        arch_index: ArchetypeIndex,
+        type_id: ComponentTypeId,
+    }
+
+    impl<'de, 'a, W: WorldDeserializer> DeserializeSeed<'de> for ComponentDeserializer<'a, W> {
+        type Value = ();
+
+        fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            self.world_deserializer.deserialize_insert_component(
                 self.type_id,
                 self.storage,
                 self.arch_index,

@@ -27,8 +27,8 @@ pub trait WorldDeserializer {
     /// Adds the specified component to the given entity layout.
     fn register_component(&self, type_id: Self::TypeId, layout: &mut EntityLayout);
 
-    /// Deserializes a slice of components and inserts them into the given storage.
-    fn deserialize_component_slice<'de, D: Deserializer<'de>>(
+    /// Deserializes a component and inserts it into the given storage.
+    fn deserialize_insert_component<'de, D: Deserializer<'de>>(
         &self,
         type_id: ComponentTypeId,
         storage: &mut dyn UnknownComponentStorage,

@@ -33,12 +33,12 @@ impl<T> TypeKey for T where
 }
 
 type SerializeFn = fn(*const u8, &mut dyn FnMut(&dyn erased_serde::Serialize));
-type DeserializeSliceFn = fn(
+type DeserializeSingleFn = fn(
     &mut dyn UnknownComponentStorage,
     ArchetypeIndex,
     &mut dyn erased_serde::Deserializer,
 ) -> Result<(), erased_serde::Error>;
-type DeserializeSingleFn =
+type DeserializeSingleBoxedFn =
     fn(&mut dyn erased_serde::Deserializer) -> Result<Box<[u8]>, erased_serde::Error>;
 
 /// A world (de)serializer which describes how to (de)serialize the component types in a world.
@@ -47,8 +47,15 @@ where
     T: TypeKey,
 {
     _phantom: PhantomData<T>,
-    serialize_fns:
-        HashMap<ComponentTypeId, (T, SerializeFn, DeserializeSliceFn, DeserializeSingleFn)>,
+    serialize_fns: HashMap<
+        ComponentTypeId,
+        (
+            T,
+            SerializeFn,
+            DeserializeSingleFn,
+            DeserializeSingleBoxedFn,
+        ),
+    >,
     constructors: HashMap<T, (ComponentTypeId, fn(&mut EntityLayout))>,
 }
 
@@ -75,19 +82,19 @@ where
             let component = unsafe { &*(ptr as *const C) };
             (serialize)(component);
         };
-        let deserialize_fn =
+        let deserialize_single_fn =
             |storage: &mut dyn UnknownComponentStorage,
              arch: ArchetypeIndex,
              deserializer: &mut dyn erased_serde::Deserializer| {
-                let mut components = erased_serde::deserialize::<Vec<C>>(deserializer)?;
+                let component = erased_serde::deserialize::<C>(deserializer)?;
                 unsafe {
-                    let ptr = components.as_ptr();
-                    storage.extend_memcopy_raw(arch, ptr as *const u8, components.len());
-                    components.set_len(0);
+                    let ptr = &component as *const C as *const u8;
+                    storage.extend_memcopy_raw(arch, ptr, 1);
+                    std::mem::forget(component)
                 }
                 Ok(())
             };
-        let deserialize_single_fn = |deserializer: &mut dyn erased_serde::Deserializer| {
+        let deserialize_single_boxed_fn = |deserializer: &mut dyn erased_serde::Deserializer| {
             let component = erased_serde::deserialize::<C>(deserializer)?;
             unsafe {
                 let vec = std::slice::from_raw_parts(
@@ -105,8 +112,8 @@ where
             (
                 mapped_type_id.clone(),
                 serialize_fn,
-                deserialize_fn,
                 deserialize_single_fn,
+                deserialize_single_boxed_fn,
             ),
         );
         self.constructors
@@ -198,7 +205,7 @@ where
         }
     }
 
-    fn deserialize_component_slice<'de, D: serde::Deserializer<'de>>(
+    fn deserialize_insert_component<'de, D: serde::Deserializer<'de>>(
         &self,
         type_id: ComponentTypeId,
         storage: &mut dyn UnknownComponentStorage,

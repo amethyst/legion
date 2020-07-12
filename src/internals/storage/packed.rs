@@ -506,6 +506,12 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
     }
 
     fn increment_epoch(&mut self) { self.epoch += 1; }
+
+    fn ensure_capacity(&mut self, ArchetypeIndex(archetype): ArchetypeIndex, capacity: usize) {
+        let slice_index = self.index[archetype as usize];
+        let allocation = &mut self.allocations[slice_index];
+        allocation.ensure_capacity(self.epoch, capacity);
+    }
 }
 
 impl<T: Component> Default for PackedStorage<T> {
@@ -527,12 +533,6 @@ impl<'a, T: Component> ComponentStorage<'a, T> for PackedStorage<T> {
 
     unsafe fn extend_memcopy(&mut self, archetype: ArchetypeIndex, ptr: *const T, count: usize) {
         self.extend_memcopy_raw(archetype, ptr as *const u8, count);
-    }
-
-    fn ensure_capacity(&mut self, ArchetypeIndex(archetype): ArchetypeIndex, capacity: usize) {
-        let slice_index = self.index[archetype as usize];
-        let allocation = &mut self.allocations[slice_index];
-        allocation.ensure_capacity(self.epoch, capacity);
     }
 
     fn get(&'a self, ArchetypeIndex(archetype): ArchetypeIndex) -> Option<ComponentSlice<'a, T>> {

@@ -135,6 +135,10 @@ pub trait UnknownComponentStorage: Downcast + Send + Sync {
     /// copied is not accessed until it is re-initialized. It is recommended to immediately
     /// `std::mem::forget` the source after calling `extend_memcopy_raw`.
     unsafe fn extend_memcopy_raw(&mut self, archetype: ArchetypeIndex, ptr: *const u8, len: usize);
+
+    /// Ensures that the given spare capacity is available for component insertions. This is a performance hint and
+    /// should not be required before `extend_memcopy` is called.
+    fn ensure_capacity(&mut self, archetype: ArchetypeIndex, space: usize);
 }
 impl_downcast!(UnknownComponentStorage);
 
@@ -232,10 +236,6 @@ pub trait ComponentStorage<'a, T: Component>: UnknownComponentStorage + Default 
     /// The components located at `ptr` are memcopied into the storage. If `T` is not `Copy`, then the
     /// previous memory location should no longer be accessed.
     unsafe fn extend_memcopy(&mut self, archetype: ArchetypeIndex, ptr: *const T, len: usize);
-
-    /// Ensures that the given spare capacity is available for component insertions. This is a performance hint and
-    /// should not be required before `extend_memcopy` is called.
-    fn ensure_capacity(&mut self, archetype: ArchetypeIndex, space: usize);
 
     /// Gets the component slice for the specified archetype.
     fn get(&'a self, archetype: ArchetypeIndex) -> Option<ComponentSlice<'a, T>>;
