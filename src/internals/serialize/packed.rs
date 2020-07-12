@@ -500,12 +500,15 @@ pub mod de {
                         self.storage.ensure_capacity(self.arch_index, size_hint);
                     }
 
-                    while let Some(_) = seq.next_element_seed(ComponentDeserializer {
-                        storage: self.storage,
-                        world_deserializer: self.world_deserializer,
-                        arch_index: self.arch_index,
-                        type_id: self.type_id,
-                    })? {}
+                    while seq
+                        .next_element_seed(ComponentDeserializer {
+                            storage: self.storage,
+                            world_deserializer: self.world_deserializer,
+                            arch_index: self.arch_index,
+                            type_id: self.type_id,
+                        })?
+                        .is_some()
+                    {}
                     Ok(())
                 }
             }
