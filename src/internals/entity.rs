@@ -8,6 +8,7 @@ use std::{
     hash::BuildHasherDefault,
     sync::atomic::{AtomicU64, Ordering},
 };
+use thiserror::Error;
 use uuid::Uuid;
 
 /// An opaque identifier for an entity.
@@ -219,10 +220,14 @@ impl LocationMap {
 pub type EntityName = [u8; 16];
 
 /// Error returned on unsucessful attempt to canonize an entity.
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Error, Debug, Copy, Clone, PartialEq, Hash)]
 pub enum CanonizeError {
-    /// The entity or name already exist with a different pair.
-    AlreadyExists(Entity, EntityName),
+    /// The entity already exists bound to a different name.
+    #[error("the entity is already bound to name {0:?}")]
+    EntityAlreadyBound(Entity, EntityName),
+    /// The name already exists bound to a different entity.
+    #[error("the name is already bound to a different entity")]
+    NameAlreadyBound(Entity, EntityName),
 }
 
 /// Contains the canon names of entities.
@@ -270,12 +275,17 @@ impl Canon {
 
     /// Canonizes the given entity and name pair.
     pub fn canonize(&mut self, entity: Entity, name: EntityName) -> Result<(), CanonizeError> {
+        if let Some(existing) = self.to_id.get(&name) {
+            if existing != &entity {
+                return Err(CanonizeError::NameAlreadyBound(*existing, name));
+            }
+        }
         match self.to_name.entry(entity) {
             Entry::Occupied(occupied) => {
                 if occupied.get() == &name {
                     Ok(())
                 } else {
-                    Err(CanonizeError::AlreadyExists(entity, *occupied.get()))
+                    Err(CanonizeError::EntityAlreadyBound(entity, *occupied.get()))
                 }
             }
             Entry::Vacant(vacant) => {

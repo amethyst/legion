@@ -32,6 +32,7 @@ use std::{
         Arc,
     },
 };
+use thiserror::Error;
 
 type MapEntry<'a, K, V> = std::collections::hash_map::Entry<'a, K, V>;
 
@@ -1088,9 +1089,10 @@ impl Merger for Duplicate {
 }
 
 /// An error type which indicates that a world merge failed.
-#[derive(Debug)]
+#[derive(Error, Debug, Copy, Clone, PartialEq, Hash)]
 pub enum MergeError {
     /// The two worlds exist in differnce universes.
+    #[error("source and destination worlds belong to different universes")]
     DifferentUniverses,
 }
 
