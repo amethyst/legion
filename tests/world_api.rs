@@ -231,7 +231,7 @@ fn merge() {
         world_2_entities.push(*e);
     }
 
-    world_1.move_from(&mut world_2).unwrap();
+    world_1.move_from(&mut world_2, &any()).unwrap();
 
     for (i, e) in world_2_entities.iter().enumerate() {
         assert!(world_1.contains(*e));

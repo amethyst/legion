@@ -2,7 +2,6 @@ use super::{
     hash::U64Hasher,
     storage::{archetype::ArchetypeIndex, ComponentIndex},
 };
-use parking_lot::Mutex;
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::Debug,
@@ -33,10 +32,11 @@ pub mod serde {
         where
             S: Serializer,
         {
-            UNIVERSE.with(|f| {
-                let universe = f.borrow();
+            UNIVERSE.with(|cell| {
+                let universe = cell.borrow();
                 if let Some(ref universe) = *universe {
-                    let name = Uuid::from_bytes(universe.canon().get_name(*self));
+                    let mut canon = universe.canon_mut();
+                    let name = Uuid::from_bytes(canon.canonize_id(*self));
                     name.serialize(serializer)
                 } else {
                     use serde::ser::Error;
@@ -51,11 +51,12 @@ pub mod serde {
         where
             D: serde::Deserializer<'de>,
         {
-            UNIVERSE.with(|f| {
-                let universe = f.borrow();
+            UNIVERSE.with(|cell| {
+                let universe = cell.borrow();
                 if let Some(ref universe) = *universe {
                     let name = Uuid::deserialize(deserializer)?;
-                    let entity = universe.canon().get_id(name.as_bytes());
+                    let mut canon = universe.canon_mut();
+                    let entity = canon.canonize_name(name.as_bytes());
                     Ok(entity)
                 } else {
                     use serde::de::Error;
@@ -217,39 +218,38 @@ impl LocationMap {
 pub type EntityName = [u8; 16];
 
 #[derive(Default, Debug)]
-struct Names {
+pub struct Canon {
     to_name: HashMap<Entity, EntityName, EntityHasher>,
     to_id: HashMap<EntityName, Entity>,
 }
 
-#[derive(Default, Debug)]
-pub struct Canon {
-    names: Mutex<Names>,
-}
-
 impl Canon {
-    pub fn get_id(&self, name: &EntityName) -> Entity {
-        let mut names = self.names.lock();
-        match names.to_id.entry(*name) {
+    pub fn get_id(&self, name: &EntityName) -> Option<Entity> { self.to_id.get(name).copied() }
+
+    pub fn get_name(&self, entity: Entity) -> Option<EntityName> {
+        self.to_name.get(&entity).copied()
+    }
+
+    pub fn canonize_name(&mut self, name: &EntityName) -> Entity {
+        match self.to_id.entry(*name) {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant) => {
                 let entity = Allocate::new().next().unwrap();
                 vacant.insert(entity);
-                names.to_name.insert(entity, *name);
+                self.to_name.insert(entity, *name);
                 entity
             }
         }
     }
 
-    pub fn get_name(&self, entity: Entity) -> EntityName {
-        let mut names = self.names.lock();
-        match names.to_name.entry(entity) {
+    pub fn canonize_id(&mut self, entity: Entity) -> EntityName {
+        match self.to_name.entry(entity) {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant) => {
                 let uuid = Uuid::new_v4();
                 let name = *uuid.as_bytes();
                 vacant.insert(name);
-                names.to_id.insert(name, entity);
+                self.to_id.insert(name, entity);
                 name
             }
         }

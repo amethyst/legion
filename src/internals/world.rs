@@ -1,12 +1,14 @@
 //! Contains types related to the [World](struct.World.html) entity collection.
 
-use super::entity::{Allocate, Canon, Entity, EntityLocation, EntityName, LocationMap};
+use super::entity::{
+    Allocate, Canon, Entity, EntityHasher, EntityLocation, EntityName, LocationMap,
+};
 use super::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use super::{
     entry::{Entry, EntryMut, EntryRef},
     event::{EventSender, Subscriber, Subscribers},
     query::{
-        filter::{filter_fns::any, EntityFilter, LayoutFilter},
+        filter::{EntityFilter, LayoutFilter},
         view::View,
         Query,
     },
@@ -21,6 +23,7 @@ use super::{
 };
 use bit_set::BitSet;
 use itertools::Itertools;
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{
     collections::HashMap,
     ops::Range,
@@ -50,7 +53,7 @@ impl Default for UniverseId {
 #[derive(Debug, Clone, Default)]
 pub struct Universe {
     id: UniverseId,
-    canon: Arc<Canon>,
+    canon: Arc<RwLock<Canon>>,
 }
 
 impl Universe {
@@ -69,7 +72,11 @@ impl Universe {
         }
     }
 
-    pub(crate) fn canon(&self) -> &Canon { &self.canon }
+    /// Returns an RAII object which can deref into the universe's canon.
+    pub fn canon(&self) -> RwLockReadGuard<'_, Canon> { self.canon.read_recursive() }
+
+    /// Returns an RAII object which can deref mut into the universe's canon.
+    pub fn canon_mut(&self) -> RwLockWriteGuard<'_, Canon> { self.canon.write() }
 }
 
 /// Error type representing a failure to aquire a storage accessor.
@@ -198,7 +205,7 @@ impl World {
     where
         Option<T>: IntoComponentSource,
     {
-        let entity_id = self.universe.canon.get_id(name);
+        let entity_id = self.universe.canon_mut().canonize_name(name);
         self.remove(entity_id);
 
         let mut components = <Option<T> as IntoComponentSource>::into(Some(components));
@@ -535,18 +542,66 @@ impl World {
         self.split::<V>()
     }
 
-    /// Merges the given world into this world by moving all entities out of the given world.
-    pub fn move_from(&mut self, source: &mut World) -> Result<(), MergeError> {
-        self.merge_from(source, &any(), &mut Move)
-    }
-
-    /// Merges the given world into this world by cloning all entities from the given world via a [Duplicate](struct.Duplicate.html).
-    pub fn clone_from(
+    /// Merges the given world into this world by moving all entities out of the source world.
+    pub fn move_from<F: LayoutFilter>(
         &mut self,
         source: &mut World,
-        cloner: &mut Duplicate,
+        filter: &F,
     ) -> Result<(), MergeError> {
-        self.merge_from(source, &any(), cloner)
+        // we can only merge worlds which are part of the same universe
+        if self.id.universe() != source.id.universe() {
+            return Err(MergeError::DifferentUniverses);
+        }
+
+        // find the archetypes in the source that we want to merge into the destination
+        for src_arch in source.archetypes.iter_mut().filter(|arch| {
+            filter
+                .matches_layout(arch.layout().component_types())
+                .is_pass()
+        }) {
+            // find conflicts, and remove the existing entity, to be replaced with that defined in the source
+            // conflicting IDs can only happen if both worlds have their own definition of a named canon entity
+            for src_entity in src_arch.entities() {
+                self.remove(*src_entity);
+            }
+
+            // find or construct the destination archetype
+            let layout = &**src_arch.layout();
+            let dst_arch_index = if src_arch.entities().len() < 32 {
+                self.index.search(layout).next()
+            } else {
+                None
+            };
+            let dst_arch_index =
+                dst_arch_index.unwrap_or_else(|| self.insert_archetype(layout.clone()));
+            let dst_arch = &mut self.archetypes[dst_arch_index.0 as usize];
+
+            // build a writer for the destination archetype
+            let mut writer =
+                ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
+
+            // push entity IDs into the archetype
+            for entity in src_arch.entities() {
+                writer.push(*entity);
+            }
+
+            // merge components into the archetype
+            for component in src_arch.layout().component_types() {
+                let src_storage = source.components.get_mut(*component).unwrap();
+                let mut dst_storage = writer.claim_components_unknown(*component);
+                dst_storage.move_archetype_from(src_arch.index(), src_storage);
+            }
+
+            for entity in src_arch.drain() {
+                source.entities.remove(entity);
+            }
+
+            // record entity locations
+            let (base, entities) = writer.inserted();
+            self.entities.insert(entities, dst_arch_index, base);
+        }
+
+        Ok(())
     }
 
     /// Merges a world into this world.
@@ -562,16 +617,6 @@ impl World {
     ///
     /// # Examples
     ///
-    /// Moving all entities from the source world, into the desintation world.
-    /// ```
-    /// # use legion::*;
-    ///! # use legion::world::Move;
-    /// let mut world_a = World::new();
-    /// let mut world_b = World::new();
-    ///
-    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut Move);
-    /// ```
-    ///
     /// Cloning all entities from the source world, converting all `i32` components to `f64` components.
     /// ```
     /// # use legion::*;
@@ -585,21 +630,27 @@ impl World {
     /// merger.register_clone::<String>();
     /// merger.register_convert(|comp: &i32| *comp as f32);
     ///
-    /// let _ = world_a.merge_from(&mut world_b, &any(), &mut merger);
+    /// let _ = world_a.clone_from(&world_b, &any(), &mut merger);
     /// ```
-    pub fn merge_from<F: LayoutFilter, M: Merger>(
+    pub fn clone_from<F: LayoutFilter, M: Merger>(
         &mut self,
-        source: &mut World,
+        source: &World,
         filter: &F,
         merger: &mut M,
-    ) -> Result<(), MergeError> {
+    ) -> Result<HashMap<Entity, Entity, EntityHasher>, MergeError> {
         // we can only merge worlds which are part of the same universe
         if self.id.universe() != source.id.universe() {
             return Err(MergeError::DifferentUniverses);
         }
 
+        let mut allocator = Allocate::new();
+        let universe = self.universe.clone();
+        let canon = universe.canon();
+
+        let mut mappings = HashMap::default();
+
         // find the archetypes in the source that we want to merge into the destination
-        for src_arch in source.archetypes.iter_mut().filter(|arch| {
+        for src_arch in source.archetypes.iter().filter(|arch| {
             filter
                 .matches_layout(arch.layout().component_types())
                 .is_pass()
@@ -626,17 +677,25 @@ impl World {
             let mut writer =
                 ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
-            // push entity IDs into the archetype
             for entity in src_arch.entities() {
-                writer.push(*entity);
+                // assign new IDs, _unless_ the entity is canon
+                let dst_entity = if canon.get_name(*entity).is_none() {
+                    allocator.next().unwrap()
+                } else {
+                    *entity
+                };
+
+                mappings.insert(*entity, dst_entity);
+
+                // push entity IDs into the archetype
+                writer.push(dst_entity);
             }
 
             // merge components into the archetype
             merger.merge_archetype(
                 0..source.entities.len(),
-                &mut source.entities,
                 src_arch,
-                &mut source.components,
+                &source.components,
                 &mut writer,
             );
 
@@ -645,20 +704,24 @@ impl World {
             self.entities.insert(entities, dst_arch_index, base);
         }
 
-        Ok(())
+        Ok(mappings)
     }
 
     /// Merges a single entity from the source world into the destination world.
-    pub fn merge_from_single<M: Merger>(
+    pub fn clone_from_single<M: Merger>(
         &mut self,
-        source: &mut World,
+        source: &World,
         entity: Entity,
         merger: &mut M,
-    ) -> Result<(), MergeError> {
+    ) -> Result<Entity, MergeError> {
         // we can only merge worlds which are part of the same universe
         if self.id.universe() != source.id.universe() {
             return Err(MergeError::DifferentUniverses);
         }
+
+        let mut allocator = Allocate::new();
+        let universe = self.universe.clone();
+        let canon = universe.canon();
 
         // find conflicts, and remove the existing entity, to be replaced with that defined in the source
         // conflicting IDs can only happen if both worlds have their own definition of a named canon entity
@@ -669,7 +732,7 @@ impl World {
             .entities
             .get(entity)
             .expect("entity not found in source world");
-        let src_arch = &mut source.archetypes[src_location.archetype()];
+        let src_arch = &source.archetypes[src_location.archetype()];
 
         // construct the destination entity layout
         let layout = merger.convert_layout((**src_arch.layout()).clone());
@@ -683,15 +746,19 @@ impl World {
             ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
         // push entity ID into the archetype
-        writer.push(entity);
+        let dst_entity = if canon.get_name(entity).is_none() {
+            allocator.next().unwrap()
+        } else {
+            entity
+        };
+        writer.push(dst_entity);
 
         // merge components into the archetype
         let index = src_location.component().0;
         merger.merge_archetype(
             index..(index + 1),
-            &mut source.entities,
             src_arch,
-            &mut source.components,
+            &source.components,
             &mut writer,
         );
 
@@ -699,7 +766,7 @@ impl World {
         let (base, entities) = writer.inserted();
         self.entities.insert(entities, dst_arch_index, base);
 
-        Ok(())
+        Ok(dst_entity)
     }
 
     /// Creates a serde serializable representation of the world.
@@ -877,64 +944,10 @@ pub trait Merger {
     fn merge_archetype(
         &mut self,
         src_entity_range: Range<usize>,
-        src_entities: &mut LocationMap,
-        src_arch: &mut Archetype,
-        src_components: &mut Components,
+        src_arch: &Archetype,
+        src_components: &Components,
         dst: &mut ArchetypeWriter,
     );
-}
-
-/// A [merger](trait.Merger.html) which moves entities from the source world into the destination.
-pub struct Move;
-
-impl Merger for Move {
-    fn prefers_new_archetype() -> bool { true }
-
-    fn merge_archetype(
-        &mut self,
-        src_entity_range: Range<usize>,
-        src_entities: &mut LocationMap,
-        src_arch: &mut Archetype,
-        src_components: &mut Components,
-        dst: &mut ArchetypeWriter,
-    ) {
-        if src_entity_range.len() == src_arch.entities().len() {
-            // faster transfer for complete archetypes
-            for component in src_arch.layout().component_types() {
-                let src_storage = src_components.get_mut(*component).unwrap();
-                let mut dst_storage = dst.claim_components_unknown(*component);
-                dst_storage.move_archetype_from(src_arch.index(), src_storage);
-            }
-
-            for entity in src_arch.drain() {
-                src_entities.remove(entity);
-            }
-        } else {
-            // per-entity transfer for partial ranges
-            for component in src_arch.layout().component_types() {
-                let src_storage = src_components.get_mut(*component).unwrap();
-                let mut dst_storage = dst.claim_components_unknown(*component);
-
-                for entity_index in src_entity_range.clone().rev() {
-                    dst_storage.move_component_from(
-                        src_arch.index(),
-                        ComponentIndex(entity_index),
-                        src_storage,
-                    );
-                }
-            }
-
-            // swap-remove entities in the same order as we swap-removed the components
-            for entity_index in src_entity_range.rev() {
-                let removed = src_arch.swap_remove(entity_index);
-                let location = src_entities.remove(removed).unwrap();
-                if entity_index < src_arch.entities().len() {
-                    let swapped = src_arch.entities()[entity_index];
-                    src_entities.set(swapped, location);
-                }
-            }
-        }
-    }
 }
 
 /// A [merger](trait.Merger.html) which clones entities from the source world into the destination,
@@ -951,7 +964,7 @@ pub struct Duplicate {
                 dyn FnMut(
                     Range<usize>,
                     &Archetype,
-                    &mut dyn UnknownComponentStorage,
+                    &dyn UnknownComponentStorage,
                     &mut ArchetypeWriter,
                 ),
             >,
@@ -972,7 +985,7 @@ impl Duplicate {
         let convert = Box::new(
             move |src_entities: Range<usize>,
                   src_arch: &Archetype,
-                  src: &mut dyn UnknownComponentStorage,
+                  src: &dyn UnknownComponentStorage,
                   dst: &mut ArchetypeWriter| {
                 let src = src.downcast_ref::<T::Storage>().unwrap();
                 let mut dst = dst.claim_components::<T>();
@@ -1009,7 +1022,7 @@ impl Duplicate {
         let convert = Box::new(
             move |src_entities: Range<usize>,
                   src_arch: &Archetype,
-                  src: &mut dyn UnknownComponentStorage,
+                  src: &dyn UnknownComponentStorage,
                   dst: &mut ArchetypeWriter| {
                 let src = src.downcast_ref::<Source::Storage>().unwrap();
                 let mut dst = dst.claim_components::<Target>();
@@ -1038,12 +1051,7 @@ impl Duplicate {
         dst_type: ComponentTypeId,
         constructor: fn() -> Box<dyn UnknownComponentStorage>,
         duplicate_fn: Box<
-            dyn FnMut(
-                Range<usize>,
-                &Archetype,
-                &mut dyn UnknownComponentStorage,
-                &mut ArchetypeWriter,
-            ),
+            dyn FnMut(Range<usize>, &Archetype, &dyn UnknownComponentStorage, &mut ArchetypeWriter),
         >,
     ) {
         self.duplicate_fns
@@ -1066,14 +1074,13 @@ impl Merger for Duplicate {
     fn merge_archetype(
         &mut self,
         src_entity_range: Range<usize>,
-        _: &mut LocationMap,
-        src_arch: &mut Archetype,
-        src_components: &mut Components,
+        src_arch: &Archetype,
+        src_components: &Components,
         dst: &mut ArchetypeWriter,
     ) {
         for src_type in src_arch.layout().component_types() {
             if let Some((_, _, convert)) = self.duplicate_fns.get_mut(src_type) {
-                let src_storage = src_components.get_mut(*src_type).unwrap();
+                let src_storage = src_components.get(*src_type).unwrap();
                 convert(src_entity_range.clone(), src_arch, src_storage, dst);
             }
         }
@@ -1090,7 +1097,7 @@ pub enum MergeError {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::internals::insert::IntoSoa;
+    use crate::internals::{insert::IntoSoa, query::filter::filter_fns::any};
 
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Pos(f32, f32, f32);
@@ -1259,7 +1266,7 @@ mod test {
             (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
         ])[0];
 
-        b.merge_from(&mut a, &any(), &mut Move).unwrap();
+        b.move_from(&mut a, &any()).unwrap();
 
         assert!(a.entry(entity_a).is_none());
         assert_eq!(
@@ -1268,48 +1275,6 @@ mod test {
         );
         assert_eq!(
             *b.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
-            Pos(1., 2., 3.)
-        );
-    }
-
-    #[test]
-    fn move_from_single() {
-        let universe = Universe::new();
-        let mut a = universe.create_world();
-        let mut b = universe.create_world();
-
-        let entities = a
-            .extend(vec![
-                (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
-                (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
-            ])
-            .to_vec();
-
-        let entity_b = b.extend(vec![
-            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
-            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
-        ])[0];
-
-        b.merge_from_single(&mut a, entities[0], &mut Move).unwrap();
-
-        assert!(a.entry(entities[0]).is_none());
-        assert_eq!(
-            *a.entry(entities[1])
-                .unwrap()
-                .get_component::<Pos>()
-                .unwrap(),
-            Pos(4., 5., 6.)
-        );
-
-        assert_eq!(
-            *b.entry(entity_b).unwrap().get_component::<Pos>().unwrap(),
-            Pos(7., 8., 9.)
-        );
-        assert_eq!(
-            *b.entry(entities[0])
-                .unwrap()
-                .get_component::<Pos>()
-                .unwrap(),
             Pos(1., 2., 3.)
         );
     }
@@ -1334,14 +1299,17 @@ mod test {
         merger.register_copy::<Pos>();
         merger.register_clone::<Rot>();
 
-        b.merge_from(&mut a, &any(), &mut merger).unwrap();
+        let map = b.clone_from(&a, &any(), &mut merger).unwrap();
 
         assert_eq!(
             *a.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
             Pos(1., 2., 3.)
         );
         assert_eq!(
-            *b.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
+            *b.entry(map[&entity_a])
+                .unwrap()
+                .get_component::<Pos>()
+                .unwrap(),
             Pos(1., 2., 3.)
         );
         assert_eq!(
@@ -1354,7 +1322,10 @@ mod test {
             Rot(0.1, 0.2, 0.3)
         );
         assert_eq!(
-            *b.entry(entity_a).unwrap().get_component::<Rot>().unwrap(),
+            *b.entry(map[&entity_a])
+                .unwrap()
+                .get_component::<Rot>()
+                .unwrap(),
             Rot(0.1, 0.2, 0.3)
         );
         assert_eq!(
@@ -1385,8 +1356,7 @@ mod test {
         merger.register_copy::<Pos>();
         merger.register_clone::<Rot>();
 
-        b.merge_from_single(&mut a, entities[0], &mut merger)
-            .unwrap();
+        let cloned = b.clone_from_single(&a, entities[0], &mut merger).unwrap();
 
         assert_eq!(
             *a.entry(entities[0])
@@ -1396,10 +1366,7 @@ mod test {
             Pos(1., 2., 3.)
         );
         assert_eq!(
-            *b.entry(entities[0])
-                .unwrap()
-                .get_component::<Pos>()
-                .unwrap(),
+            *b.entry(cloned).unwrap().get_component::<Pos>().unwrap(),
             Pos(1., 2., 3.)
         );
         assert_eq!(
@@ -1415,10 +1382,7 @@ mod test {
             Rot(0.1, 0.2, 0.3)
         );
         assert_eq!(
-            *b.entry(entities[0])
-                .unwrap()
-                .get_component::<Rot>()
-                .unwrap(),
+            *b.entry(cloned).unwrap().get_component::<Rot>().unwrap(),
             Rot(0.1, 0.2, 0.3)
         );
         assert_eq!(
@@ -1449,14 +1413,17 @@ mod test {
         let mut merger = Duplicate::default();
         merger.register_convert::<Pos, f32, _>(|comp| comp.0 as f32);
 
-        b.merge_from(&mut a, &any(), &mut merger).unwrap();
+        let map = b.clone_from(&a, &any(), &mut merger).unwrap();
 
         assert_eq!(
             *a.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
             Pos(1., 2., 3.)
         );
         assert_eq!(
-            *b.entry(entity_a).unwrap().get_component::<f32>().unwrap(),
+            *b.entry(map[&entity_a])
+                .unwrap()
+                .get_component::<f32>()
+                .unwrap(),
             1f32
         );
 
@@ -1464,6 +1431,10 @@ mod test {
             *a.entry(entity_a).unwrap().get_component::<Rot>().unwrap(),
             Rot(0.1, 0.2, 0.3)
         );
-        assert!(b.entry(entity_a).unwrap().get_component::<Rot>().is_none());
+        assert!(b
+            .entry(map[&entity_a])
+            .unwrap()
+            .get_component::<Rot>()
+            .is_none());
     }
 }
