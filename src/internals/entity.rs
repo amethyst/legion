@@ -215,8 +215,17 @@ impl LocationMap {
     }
 }
 
+/// A 16 byte UUID which uniquely identifies an entity.
 pub type EntityName = [u8; 16];
 
+/// Error returned on unsucessful attempt to canonize an entity.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum CanonizeError {
+    /// The entity or name already exist with a different pair.
+    AlreadyExists(Entity, EntityName),
+}
+
+/// Contains the canon names of entities.
 #[derive(Default, Debug)]
 pub struct Canon {
     to_name: HashMap<Entity, EntityName, EntityHasher>,
@@ -224,12 +233,15 @@ pub struct Canon {
 }
 
 impl Canon {
+    /// Returns the [Entity](struct.Entity.html) ID associated with the given [EntityName](struct.EntityName.html).
     pub fn get_id(&self, name: &EntityName) -> Option<Entity> { self.to_id.get(name).copied() }
 
+    /// Returns the [EntityName](struct.EntityName.html) associated with the given [Entity](struct.Entity.html) ID.
     pub fn get_name(&self, entity: Entity) -> Option<EntityName> {
         self.to_name.get(&entity).copied()
     }
 
+    /// Canonizes a given [EntityName](struct.EntityName.html) and returns the associated [Entity](struct.Entity.html) ID.
     pub fn canonize_name(&mut self, name: &EntityName) -> Entity {
         match self.to_id.entry(*name) {
             Entry::Occupied(occupied) => *occupied.get(),
@@ -242,6 +254,7 @@ impl Canon {
         }
     }
 
+    /// Canonizes a given [Entity](struct.Entity.html) ID and returns the associated [EntityName](struct.EntityName.html).
     pub fn canonize_id(&mut self, entity: Entity) -> EntityName {
         match self.to_name.entry(entity) {
             Entry::Occupied(occupied) => *occupied.get(),
@@ -251,6 +264,24 @@ impl Canon {
                 vacant.insert(name);
                 self.to_id.insert(name, entity);
                 name
+            }
+        }
+    }
+
+    /// Canonizes the given entity and name pair.
+    pub fn canonize(&mut self, entity: Entity, name: EntityName) -> Result<(), CanonizeError> {
+        match self.to_name.entry(entity) {
+            Entry::Occupied(occupied) => {
+                if occupied.get() == &name {
+                    Ok(())
+                } else {
+                    Err(CanonizeError::AlreadyExists(entity, *occupied.get()))
+                }
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(name);
+                self.to_id.insert(name, entity);
+                Ok(())
             }
         }
     }
