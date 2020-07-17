@@ -561,7 +561,6 @@ impl World {
                 .is_pass()
         }) {
             // find conflicts, and remove the existing entity, to be replaced with that defined in the source
-            // conflicting IDs can only happen if both worlds have their own definition of a named canon entity
             for src_entity in src_arch.entities() {
                 self.remove(*src_entity);
             }
@@ -646,7 +645,7 @@ impl World {
 
         let mut allocator = Allocate::new();
         let universe = self.universe.clone();
-        let canon = universe.canon();
+        let mut canon = universe.canon_mut();
 
         let mut mappings = HashMap::default();
 
@@ -656,10 +655,12 @@ impl World {
                 .matches_layout(arch.layout().component_types())
                 .is_pass()
         }) {
+            // assign destination IDs
             // find conflicts, and remove the existing entity, to be replaced with that defined in the source
-            // conflicting IDs can only happen if both worlds have their own definition of a named canon entity
             for src_entity in src_arch.entities() {
-                self.remove(*src_entity);
+                let dst_entity = merger.assign_id(*src_entity, &mut allocator, &mut *canon);
+                self.remove(dst_entity);
+                mappings.insert(*src_entity, dst_entity);
             }
 
             // construct the destination entity layout
@@ -678,18 +679,9 @@ impl World {
             let mut writer =
                 ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
-            for entity in src_arch.entities() {
-                // assign new IDs, _unless_ the entity is canon
-                let dst_entity = if canon.get_name(*entity).is_none() {
-                    allocator.next().unwrap()
-                } else {
-                    *entity
-                };
-
-                mappings.insert(*entity, dst_entity);
-
-                // push entity IDs into the archetype
-                writer.push(dst_entity);
+            // push entity IDs into the archetype
+            for entity in mappings.values() {
+                writer.push(*entity);
             }
 
             // merge components into the archetype
@@ -722,11 +714,13 @@ impl World {
 
         let mut allocator = Allocate::new();
         let universe = self.universe.clone();
-        let canon = universe.canon();
+        let mut canon = universe.canon_mut();
+
+        // determine the destination ID
+        let dst_entity = merger.assign_id(entity, &mut allocator, &mut *canon);
 
         // find conflicts, and remove the existing entity, to be replaced with that defined in the source
-        // conflicting IDs can only happen if both worlds have their own definition of a named canon entity
-        self.remove(entity);
+        self.remove(dst_entity);
 
         // find the source
         let src_location = source
@@ -746,12 +740,7 @@ impl World {
         let mut writer =
             ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
-        // push entity ID into the archetype
-        let dst_entity = if canon.get_name(entity).is_none() {
-            allocator.next().unwrap()
-        } else {
-            entity
-        };
+        // push the entity ID into the archetype
         writer.push(dst_entity);
 
         // merge components into the archetype
@@ -936,6 +925,18 @@ pub trait Merger {
     /// Indicates if the merger prefers to merge into a new empty archetype.
     #[inline]
     fn prefers_new_archetype() -> bool { false }
+
+    /// Returns the ID to use in the destination world when cloning the given entity.
+    #[inline]
+    #[allow(unused_variables)]
+    fn assign_id(
+        &mut self,
+        existing: Entity,
+        allocator: &mut Allocate,
+        canon: &mut Canon,
+    ) -> Entity {
+        allocator.next().unwrap()
+    }
 
     /// Calculates the destination entity layout for the given source layout.
     #[inline]
