@@ -3,6 +3,7 @@ use super::{
     storage::{archetype::ArchetypeIndex, ComponentIndex},
 };
 use std::{
+    cell::RefCell,
     collections::{hash_map::Entry, HashMap},
     fmt::Debug,
     hash::BuildHasherDefault,
@@ -12,9 +13,22 @@ use thiserror::Error;
 use uuid::Uuid;
 
 /// An opaque identifier for an entity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Entity(u64);
+
+thread_local! {
+    pub static ID_CLONE_MAPPINGS: RefCell<HashMap<Entity, Entity, EntityHasher>> = RefCell::new(HashMap::default());
+}
+
+impl Clone for Entity {
+    fn clone(&self) -> Self {
+        ID_CLONE_MAPPINGS.with(|cell| {
+            let map = cell.borrow();
+            *map.get(self).unwrap_or(self)
+        })
+    }
+}
 
 #[cfg(feature = "serialize")]
 pub mod serde {

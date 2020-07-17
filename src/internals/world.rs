@@ -2,6 +2,7 @@
 
 use super::entity::{
     Allocate, Canon, Entity, EntityHasher, EntityLocation, EntityName, LocationMap,
+    ID_CLONE_MAPPINGS,
 };
 use super::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use super::{
@@ -604,12 +605,10 @@ impl World {
         Ok(())
     }
 
-    /// Merges a world into this world.
+    /// Clones the entities from a world into this world.
     ///
     /// A [filter](../query/trait.LayoutFilter.html) selects which entities to merge.  
     /// A [merger](trait.Merger.html) describes how to perform the merge operation.  
-    /// A map of entity IDs can be provided to manually remap entity IDs from the source world before they are handled by the entity policy.  
-    /// A [policy](enum.EntityPolicy.html) describes how to handle entity ID allocation and conflict resolution.
     ///
     /// If any entity IDs are remapped by the policy, their mappings will be returned in the result.
     ///
@@ -643,26 +642,36 @@ impl World {
             return Err(MergeError::DifferentUniverses);
         }
 
-        let mut allocator = Allocate::new();
         let universe = self.universe.clone();
         let mut canon = universe.canon_mut();
-
+        let mut allocator = Allocate::new();
         let mut mappings = HashMap::default();
 
-        // find the archetypes in the source that we want to merge into the destination
+        // assign destination IDs
         for src_arch in source.archetypes.iter().filter(|arch| {
             filter
                 .matches_layout(arch.layout().component_types())
                 .is_pass()
         }) {
-            // assign destination IDs
             // find conflicts, and remove the existing entity, to be replaced with that defined in the source
             for src_entity in src_arch.entities() {
                 let dst_entity = merger.assign_id(*src_entity, &mut allocator, &mut *canon);
                 self.remove(dst_entity);
                 mappings.insert(*src_entity, dst_entity);
             }
+        }
 
+        // set the entity mappings as context for Entity::clone
+        ID_CLONE_MAPPINGS.with(|cell| {
+            std::mem::swap(&mut *cell.borrow_mut(), &mut mappings);
+        });
+
+        // clone entities
+        for src_arch in source.archetypes.iter().filter(|arch| {
+            filter
+                .matches_layout(arch.layout().component_types())
+                .is_pass()
+        }) {
             // construct the destination entity layout
             let layout = merger.convert_layout((**src_arch.layout()).clone());
 
@@ -680,13 +689,17 @@ impl World {
                 ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
             // push entity IDs into the archetype
-            for entity in mappings.values() {
-                writer.push(*entity);
-            }
+            ID_CLONE_MAPPINGS.with(|cell| {
+                let map = cell.borrow();
+                for entity in src_arch.entities() {
+                    let entity = map.get(entity).unwrap_or(entity);
+                    writer.push(*entity);
+                }
+            });
 
             // merge components into the archetype
             merger.merge_archetype(
-                0..source.entities.len(),
+                0..src_arch.entities().len(),
                 src_arch,
                 &source.components,
                 &mut writer,
@@ -697,10 +710,15 @@ impl World {
             self.entities.insert(entities, dst_arch_index, base);
         }
 
+        // switch the map context back to recover our hashmap
+        ID_CLONE_MAPPINGS.with(|cell| {
+            std::mem::swap(&mut *cell.borrow_mut(), &mut mappings);
+        });
+
         Ok(mappings)
     }
 
-    /// Merges a single entity from the source world into the destination world.
+    /// Clones a single entity from the source world into the destination world.
     pub fn clone_from_single<M: Merger>(
         &mut self,
         source: &World,
@@ -743,6 +761,11 @@ impl World {
         // push the entity ID into the archetype
         writer.push(dst_entity);
 
+        // set the entity mappings as context for Entity::clone
+        ID_CLONE_MAPPINGS.with(|cell| {
+            cell.borrow_mut().insert(entity, dst_entity);
+        });
+
         // merge components into the archetype
         let index = src_location.component().0;
         merger.merge_archetype(
@@ -755,6 +778,10 @@ impl World {
         // record entity location
         let (base, entities) = writer.inserted();
         self.entities.insert(entities, dst_arch_index, base);
+
+        ID_CLONE_MAPPINGS.with(|cell| {
+            cell.borrow_mut().clear();
+        });
 
         Ok(dst_entity)
     }
@@ -1334,6 +1361,44 @@ mod test {
         assert_eq!(
             *b.entry(entity_b).unwrap().get_component::<Rot>().unwrap(),
             Rot(0.7, 0.8, 0.9)
+        );
+    }
+
+    #[test]
+    fn clone_update_entity_refs() {
+        let universe = Universe::new();
+        let mut a = universe.create_world();
+        let mut b = universe.create_world();
+
+        let entity_1 = a.push((Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)));
+        let entity_2 = a.push((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6), entity_1));
+        a.entry(entity_1).unwrap().add_component(entity_2);
+
+        b.extend(vec![
+            (Pos(7., 8., 9.), Rot(0.7, 0.8, 0.9)),
+            (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
+        ]);
+
+        let mut merger = Duplicate::default();
+        merger.register_copy::<Pos>();
+        merger.register_clone::<Rot>();
+        merger.register_clone::<Entity>();
+
+        let map = b.clone_from(&a, &any(), &mut merger).unwrap();
+
+        assert_eq!(
+            *b.entry(map[&entity_1])
+                .unwrap()
+                .get_component::<Entity>()
+                .unwrap(),
+            map[&entity_2]
+        );
+        assert_eq!(
+            *b.entry(map[&entity_2])
+                .unwrap()
+                .get_component::<Entity>()
+                .unwrap(),
+            map[&entity_1]
         );
     }
 
