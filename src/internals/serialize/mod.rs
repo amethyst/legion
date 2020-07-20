@@ -360,6 +360,8 @@ mod test {
                 .0,
             entity
         );
+
+        assert_eq!(8, world.len());
     }
 
     #[test]
@@ -404,5 +406,7 @@ mod test {
         assert_eq!(entity.get_component::<usize>().unwrap(), &1usize);
         assert_eq!(entity.get_component::<bool>().unwrap(), &false);
         assert_eq!(entity.get_component::<isize>().unwrap(), &1isize);
+
+        assert_eq!(8, world.len());
     }
 }

@@ -152,7 +152,7 @@ pub use crate::internals::{
     permissions::Permissions,
     subworld::{ArchetypeAccess, ComponentAccess, SubWorld},
     world::{
-        ComponentAccessError, Duplicate, EntityStore, MergeError, Merger, StorageAccessor,
-        Universe, UniverseId, World, WorldId, WorldOptions,
+        ComponentAccessError, Duplicate, EntityRewrite, EntityStore, MergeError, Merger,
+        StorageAccessor, Universe, UniverseId, World, WorldId, WorldOptions,
     },
 };

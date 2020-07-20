@@ -645,7 +645,7 @@ impl World {
         let universe = self.universe.clone();
         let mut canon = universe.canon_mut();
         let mut allocator = Allocate::new();
-        let mut mappings = HashMap::default();
+        let mut reallocated = HashMap::default();
 
         // assign destination IDs
         for src_arch in source.archetypes.iter().filter(|arch| {
@@ -657,9 +657,21 @@ impl World {
             for src_entity in src_arch.entities() {
                 let dst_entity = merger.assign_id(*src_entity, &mut allocator, &mut *canon);
                 self.remove(dst_entity);
-                mappings.insert(*src_entity, dst_entity);
+                reallocated.insert(*src_entity, dst_entity);
             }
         }
+
+        let mut reallocated = Some(reallocated);
+        let mut mappings = match merger.entity_map() {
+            EntityRewrite::Auto(Some(mut overrides)) => {
+                for (a, b) in reallocated.as_ref().unwrap().iter() {
+                    overrides.entry(*a).or_insert(*b);
+                }
+                overrides
+            }
+            EntityRewrite::Auto(None) => reallocated.take().unwrap(),
+            EntityRewrite::Explicit(overrides) => overrides,
+        };
 
         // set the entity mappings as context for Entity::clone
         ID_CLONE_MAPPINGS.with(|cell| {
@@ -710,12 +722,15 @@ impl World {
             self.entities.insert(entities, dst_arch_index, base);
         }
 
-        // switch the map context back to recover our hashmap
-        ID_CLONE_MAPPINGS.with(|cell| {
-            std::mem::swap(&mut *cell.borrow_mut(), &mut mappings);
+        let reallocated = reallocated.unwrap_or_else(|| {
+            // switch the map context back to recover our hashmap
+            ID_CLONE_MAPPINGS.with(|cell| {
+                std::mem::swap(&mut *cell.borrow_mut(), &mut mappings);
+            });
+            mappings
         });
 
-        Ok(mappings)
+        Ok(reallocated)
     }
 
     /// Clones a single entity from the source world into the destination world.
@@ -761,9 +776,22 @@ impl World {
         // push the entity ID into the archetype
         writer.push(dst_entity);
 
+        let mut mappings = match merger.entity_map() {
+            EntityRewrite::Auto(Some(mut overrides)) => {
+                overrides.entry(entity).or_insert(dst_entity);
+                overrides
+            }
+            EntityRewrite::Auto(None) => {
+                let mut map = HashMap::default();
+                map.insert(entity, dst_entity);
+                map
+            }
+            EntityRewrite::Explicit(overrides) => overrides,
+        };
+
         // set the entity mappings as context for Entity::clone
         ID_CLONE_MAPPINGS.with(|cell| {
-            cell.borrow_mut().insert(entity, dst_entity);
+            std::mem::swap(&mut *cell.borrow_mut(), &mut mappings);
         });
 
         // merge components into the archetype
@@ -953,6 +981,9 @@ pub trait Merger {
     #[inline]
     fn prefers_new_archetype() -> bool { false }
 
+    /// Indicates how the merger wishes entity IDs to be adjusted while cloning a world.
+    fn entity_map(&mut self) -> EntityRewrite { EntityRewrite::default() }
+
     /// Returns the ID to use in the destination world when cloning the given entity.
     #[inline]
     #[allow(unused_variables)]
@@ -977,6 +1008,20 @@ pub trait Merger {
         src_components: &Components,
         dst: &mut ArchetypeWriter,
     );
+}
+
+/// Describes how a merger wishes `Entity` references inside cloned components to be
+/// rewritten.
+pub enum EntityRewrite {
+    /// Replace references to entities which have been cloned with the ID of their clone.
+    /// May also provide a map of additional IDs to replace.
+    Auto(Option<HashMap<Entity, Entity, EntityHasher>>),
+    /// Replace IDs according to the given map.
+    Explicit(HashMap<Entity, Entity, EntityHasher>),
+}
+
+impl Default for EntityRewrite {
+    fn default() -> Self { Self::Auto(None) }
 }
 
 /// A [merger](trait.Merger.html) which clones entities from the source world into the destination,
