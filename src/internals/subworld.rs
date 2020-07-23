@@ -275,9 +275,12 @@ impl<'a> From<&'a mut World> for SubWorld<'a> {
 
 #[cfg(test)]
 mod tests {
-    use crate::internals::{
-        query::view::{read::Read, write::Write},
-        world::{EntityStore, World},
+    use crate::{
+        internals::{
+            query::view::{read::Read, write::Write},
+            world::{EntityStore, World},
+        },
+        world::ComponentError,
     };
 
     #[test]
@@ -290,17 +293,18 @@ mod tests {
             .entry_ref(entity)
             .unwrap()
             .get_component::<usize>()
-            .is_some());
+            .is_ok());
     }
 
     #[test]
-    #[should_panic]
     fn writeread_left_excluded() {
         let mut world = World::new();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Write<usize>>();
-        let _ = left.entry_ref(entity).unwrap().get_component::<bool>();
+        let entry = left.entry_ref(entity).unwrap();
+        let result = entry.get_component::<bool>();
+        assert!(matches!(result, Err(ComponentError::Denied { .. })));
     }
 
     #[test]
@@ -313,17 +317,18 @@ mod tests {
             .entry_ref(entity)
             .unwrap()
             .get_component::<bool>()
-            .is_some());
+            .is_ok());
     }
 
     #[test]
-    #[should_panic]
     fn writeread_right_excluded() {
         let mut world = World::new();
         let entity = world.push((1usize, false));
 
         let (_, right) = world.split::<Write<usize>>();
-        let _ = right.entry_ref(entity).unwrap().get_component::<usize>();
+        let entry = right.entry_ref(entity).unwrap();
+        let result = entry.get_component::<usize>();
+        assert!(matches!(result, Err(ComponentError::Denied { .. })));
     }
 
     // --------
@@ -338,17 +343,18 @@ mod tests {
             .entry_ref(entity)
             .unwrap()
             .get_component::<usize>()
-            .is_some());
+            .is_ok());
     }
 
     #[test]
-    #[should_panic]
     fn readread_left_excluded() {
         let mut world = World::new();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Read<usize>>();
-        let _ = left.entry_ref(entity).unwrap().get_component::<bool>();
+        let entry = left.entry_ref(entity).unwrap();
+        let result = entry.get_component::<bool>();
+        assert!(matches!(result, Err(ComponentError::Denied { .. })));
     }
 
     #[test]
@@ -361,7 +367,7 @@ mod tests {
             .entry_ref(entity)
             .unwrap()
             .get_component::<bool>()
-            .is_some());
+            .is_ok());
     }
 
     #[test]
@@ -374,7 +380,7 @@ mod tests {
             .entry_ref(entity)
             .unwrap()
             .get_component::<usize>()
-            .is_some());
+            .is_ok());
     }
 
     // --------
@@ -389,17 +395,18 @@ mod tests {
             .entry_mut(entity)
             .unwrap()
             .get_component_mut::<usize>()
-            .is_some());
+            .is_ok());
     }
 
     #[test]
-    #[should_panic]
     fn writewrite_left_excluded() {
         let mut world = World::new();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Write<usize>>();
-        let _ = left.entry_mut(entity).unwrap().get_component_mut::<bool>();
+        let mut entry = left.entry_mut(entity).unwrap();
+        let result = entry.get_component_mut::<bool>();
+        assert!(matches!(result, Err(ComponentError::Denied { .. })));
     }
 
     #[test]
@@ -412,42 +419,42 @@ mod tests {
             .entry_mut(entity)
             .unwrap()
             .get_component_mut::<bool>()
-            .is_some());
+            .is_ok());
     }
 
     #[test]
-    #[should_panic]
     fn writewrite_right_excluded() {
         let mut world = World::new();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Write<usize>>();
-        let _ = right
-            .entry_mut(entity)
-            .unwrap()
-            .get_component_mut::<usize>();
+        let mut entry = right.entry_mut(entity).unwrap();
+        let result = entry.get_component_mut::<usize>();
+        assert!(matches!(result, Err(ComponentError::Denied { .. })));
     }
 
     // --------
 
     #[test]
-    #[should_panic]
     fn readwrite_left_included() {
         let mut world = World::new();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Read<usize>>();
-        let _ = left.entry_mut(entity).unwrap().get_component_mut::<usize>();
+        let mut entry = left.entry_mut(entity).unwrap();
+        let result = entry.get_component_mut::<usize>();
+        assert!(matches!(result, Err(ComponentError::Denied { .. })));
     }
 
     #[test]
-    #[should_panic]
     fn readwrite_left_excluded() {
         let mut world = World::new();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Read<usize>>();
-        let _ = left.entry_mut(entity).unwrap().get_component_mut::<bool>();
+        let mut entry = left.entry_mut(entity).unwrap();
+        let result = entry.get_component_mut::<bool>();
+        assert!(matches!(result, Err(ComponentError::Denied { .. })));
     }
 
     #[test]
@@ -460,19 +467,17 @@ mod tests {
             .entry_mut(entity)
             .unwrap()
             .get_component_mut::<bool>()
-            .is_some());
+            .is_ok());
     }
 
     #[test]
-    #[should_panic]
     fn readwrite_right_excluded() {
         let mut world = World::new();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Read<usize>>();
-        let _ = right
-            .entry_mut(entity)
-            .unwrap()
-            .get_component_mut::<usize>();
+        let mut entry = right.entry_mut(entity).unwrap();
+        let result = entry.get_component_mut::<usize>();
+        assert!(matches!(result, Err(ComponentError::Denied { .. })));
     }
 }

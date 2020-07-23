@@ -48,12 +48,12 @@ fn get_component() {
 
     for (i, e) in entities.iter().enumerate() {
         match world.entry_ref(*e).unwrap().get_component() {
-            Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
-            None => assert_eq!(components.get(i).map(|(x, _)| x), None),
+            Ok(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
+            Err(_) => assert_eq!(components.get(i).map(|(x, _)| x), None),
         }
         match world.entry_ref(*e).unwrap().get_component() {
-            Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
-            None => assert_eq!(components.get(i).map(|(_, x)| x), None),
+            Ok(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
+            Err(_) => assert_eq!(components.get(i).map(|(_, x)| x), None),
         }
     }
 }
@@ -71,7 +71,7 @@ fn get_component_wrong_type() {
         .entry_ref(entity)
         .unwrap()
         .get_component::<i32>()
-        .is_none());
+        .is_err());
 }
 
 #[test]
@@ -163,12 +163,12 @@ fn delete_last() {
     for (i, e) in entities.iter().take(entities.len() - 1).enumerate() {
         assert_eq!(true, world.contains(*e));
         match world.entry_ref(*e).unwrap().get_component() {
-            Some(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
-            None => assert_eq!(components.get(i).map(|(x, _)| x), None),
+            Ok(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
+            Err(_) => assert_eq!(components.get(i).map(|(x, _)| x), None),
         }
         match world.entry_ref(*e).unwrap().get_component() {
-            Some(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
-            None => assert_eq!(components.get(i).map(|(_, x)| x), None),
+            Ok(x) => assert_eq!(components.get(i).map(|(_, x)| x), Some(&x as &Rot)),
+            Err(_) => assert_eq!(components.get(i).map(|(_, x)| x), None),
         }
     }
 }
@@ -198,12 +198,12 @@ fn delete_first() {
     for (i, e) in entities.iter().skip(1).enumerate() {
         assert_eq!(true, world.contains(*e));
         match world.entry_ref(*e).unwrap().get_component() {
-            Some(x) => assert_eq!(components.get(i + 1).map(|(x, _)| x), Some(&x as &Pos)),
-            None => assert_eq!(components.get(i + 1).map(|(x, _)| x), None),
+            Ok(x) => assert_eq!(components.get(i + 1).map(|(x, _)| x), Some(&x as &Pos)),
+            Err(_) => assert_eq!(components.get(i + 1).map(|(x, _)| x), None),
         }
         match world.entry_ref(*e).unwrap().get_component() {
-            Some(x) => assert_eq!(components.get(i + 1).map(|(_, x)| x), Some(&x as &Rot)),
-            None => assert_eq!(components.get(i + 1).map(|(_, x)| x), None),
+            Ok(x) => assert_eq!(components.get(i + 1).map(|(_, x)| x), Some(&x as &Rot)),
+            Err(_) => assert_eq!(components.get(i + 1).map(|(_, x)| x), None),
         }
     }
 }
@@ -330,11 +330,8 @@ fn delete_entities_on_drop() {
 
     for e in rx {
         println!("{:?}", e);
-        match e {
-            legion::world::Event::EntityRemoved(entity, _arch_id) => {
-                assert!(entities.remove(&entity));
-            }
-            _ => {}
+        if let legion::world::Event::EntityRemoved(entity, _arch_id) = e {
+            assert!(entities.remove(&entity));
         }
     }
 

@@ -1319,7 +1319,7 @@ mod test {
         let mut count = 0;
         for chunk in query.iter_chunks_mut(&mut world) {
             let (x, _) = chunk.into_components();
-            count += x.into_iter().count();
+            count += x.iter().count();
         }
 
         assert_eq!(count, 30000);
@@ -1508,6 +1508,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn clone_from_convert() {
         let universe = Universe::new();
         let mut a = universe.create_world();
@@ -1548,6 +1549,6 @@ mod test {
             .entry(map[&entity_a])
             .unwrap()
             .get_component::<Rot>()
-            .is_none());
+            .is_err());
     }
 }

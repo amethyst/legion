@@ -88,7 +88,7 @@ fn query_try_write_entity_data() {
     }
     assert_eq!(
         world.entry(entity).unwrap().get_component::<Rot>(),
-        Some(&Rot(9.0, 9.0, 9.0))
+        Ok(&Rot(9.0, 9.0, 9.0))
     );
 }
 
@@ -499,7 +499,7 @@ fn query_try_with_changed_filter() {
             .unwrap()
             .get_component::<Sum>()
             .map(|x| *x),
-        Some(Sum(0.))
+        Ok(Sum(0.))
     );
     assert_eq!(
         world
@@ -507,7 +507,7 @@ fn query_try_with_changed_filter() {
             .unwrap()
             .get_component::<Sum>()
             .map(|x| *x),
-        Some(Sum(1.))
+        Ok(Sum(1.))
     );
     assert_eq!(
         world
@@ -515,7 +515,7 @@ fn query_try_with_changed_filter() {
             .unwrap()
             .get_component::<Sum>()
             .map(|x| *x),
-        Some(Sum(2.))
+        Ok(Sum(2.))
     );
     assert_eq!(
         world
@@ -523,7 +523,7 @@ fn query_try_with_changed_filter() {
             .unwrap()
             .get_component::<Sum>()
             .map(|x| *x),
-        Some(Sum(3.))
+        Ok(Sum(3.))
     );
 
     count = 0;
@@ -550,6 +550,6 @@ fn query_try_with_changed_filter() {
             .unwrap()
             .get_component::<Sum>()
             .map(|x| *x),
-        Some(Sum(4.))
+        Ok(Sum(4.))
     );
 }

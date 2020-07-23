@@ -147,7 +147,7 @@
 
 pub use crate::internals::{
     entity::{Allocate, Canon, CanonizeError, Entity, EntityLocation, EntityName, LocationMap},
-    entry::{Entry, EntryMut, EntryRef},
+    entry::{ComponentError, Entry, EntryMut, EntryRef},
     event::{Event, EventSender},
     permissions::Permissions,
     subworld::{ArchetypeAccess, ComponentAccess, SubWorld},
