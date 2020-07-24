@@ -37,6 +37,7 @@ use std::iter::repeat;
 pub trait Schedulable: Runnable + Send + Sync {}
 impl<T> Schedulable for T where T: Runnable + Send + Sync {}
 
+/// Trait describing a thread local system that has exclusive access to [World].
 pub trait ThreadLocalRunnable {
     /// Allows system to initialize data stored in resources or world.
     fn init(&mut self, _world: &mut World, _resourcess: &mut Resources) {}
