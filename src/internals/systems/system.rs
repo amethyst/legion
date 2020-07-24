@@ -138,8 +138,8 @@ where
     R: for<'a> ResourceSet<'a>,
     Q: QuerySet,
     F: SystemFn<R, Q>,
-    I: FnMut(&mut World, &mut Resources),
-    D: FnMut(&mut World, &mut Resources),
+    I: FnOnce(&mut World, &mut Resources),
+    D: FnOnce(&mut World, &mut Resources),
 {
     fn name(&self) -> &SystemId { &self.name }
 
@@ -164,13 +164,13 @@ where
     }
 
     fn init(&mut self, world: &mut World, resources: &mut Resources) {
-        if let Some(init) = &mut self.init_fn {
+        if let Some(init) = self.init_fn.take() {
             init(world, resources);
         }
     }
 
     fn dispose(&mut self, world: &mut World, resources: &mut Resources) {
-        if let Some(dispose) = &mut self.dispose_fn {
+        if let Some(dispose) = self.dispose_fn.take() {
             dispose(world, resources);
         }
     }
@@ -310,8 +310,8 @@ impl<Q, R, I, D> SystemBuilder<Q, R, I, D>
 where
     Q: 'static + Send + ConsFlatten,
     R: 'static + Send + ConsFlatten,
-    I: FnMut(&mut World, &mut Resources),
-    D: FnMut(&mut World, &mut Resources),
+    I: FnOnce(&mut World, &mut Resources),
+    D: FnOnce(&mut World, &mut Resources),
 {
     /// Defines a query to provide this system for its execution. Multiple queries can be provided,
     /// and queries are cached internally for efficiency for filtering and archetype ID handling.
@@ -438,7 +438,7 @@ where
     /// Init functions are called by `Schedule::init()` in the order systems were added to the schedule.
     pub fn with_init<F>(self, init_fn: F) -> SystemBuilder<Q, R, F, D>
     where
-        F: FnMut(&mut World, &mut Resources),
+        F: FnOnce(&mut World, &mut Resources),
     {
         SystemBuilder {
             name: self.name,
@@ -459,7 +459,7 @@ where
     /// Dispose functions are called by `Schedule::dispose()` in the order systems were added to the schedule.
     pub fn with_dispose<F>(self, dispose_fn: F) -> SystemBuilder<Q, R, I, F>
     where
-        F: FnMut(&mut World, &mut Resources),
+        F: FnOnce(&mut World, &mut Resources),
     {
         SystemBuilder {
             name: self.name,
