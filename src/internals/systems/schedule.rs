@@ -37,6 +37,17 @@ use std::iter::repeat;
 pub trait Schedulable: Runnable + Send + Sync {}
 impl<T> Schedulable for T where T: Runnable + Send + Sync {}
 
+pub trait ThreadLocalRunnable {
+    /// Allows system to initialize data stored in resources or world.
+    fn init(&mut self, _world: &mut World, _resourcess: &mut Resources) {}
+
+    /// Allows system to dispose data stored in resources or world
+    fn dispose(&mut self, _world: &mut World, _resourcess: &mut Resources) {}
+
+    /// Runs the system.
+    fn run(&mut self, world: &mut World, resources: &mut Resources);
+}
+
 /// Trait describing a schedulable type. This is implemented by `System`
 pub trait Runnable {
     /// Gets the name of the system.
@@ -50,6 +61,12 @@ pub trait Runnable {
 
     /// Prepares the system for execution against a world.
     fn prepare(&mut self, world: &World);
+
+    /// Allows system to initialize data stored in resources or world.
+    fn init(&mut self, world: &mut World, resources: &mut Resources);
+
+    /// Allows system to dispose data stored in resources or world
+    fn dispose(&mut self, world: &mut World, resources: &mut Resources);
 
     /// Gets the set of archetypes the system will access when run,
     /// as determined when the system was last prepared.
@@ -71,6 +88,41 @@ pub trait Runnable {
     fn run(&mut self, world: &mut World, resources: &mut Resources) {
         unsafe { self.run_unsafe(world, resources) };
     }
+}
+
+lazy_static::lazy_static! {
+    static ref THREAD_LOCAL_SYSTEM_ID: SystemId = "thread_local".into();
+}
+
+impl<T: ThreadLocalRunnable> Runnable for T {
+    fn name(&self) -> &SystemId { &*THREAD_LOCAL_SYSTEM_ID }
+
+    fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) { (&[], &[]) }
+
+    fn writes(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) { (&[], &[]) }
+
+    fn prepare(&mut self, _world: &World) {}
+
+    fn init(&mut self, world: &mut World, resources: &mut Resources) {
+        self.init(world, resources);
+    }
+
+    fn dispose(&mut self, world: &mut World, resources: &mut Resources) {
+        self.dispose(world, resources);
+    }
+
+    fn accesses_archetypes(&self) -> &ArchetypeAccess { &ArchetypeAccess::All }
+
+    unsafe fn run_unsafe(&mut self, _world: &World, _resources: &Resources) {}
+
+    fn command_buffer_mut(&mut self, _world: WorldId) -> Option<&mut CommandBuffer> { None }
+
+    fn run(&mut self, world: &mut World, resources: &mut Resources) { self.run(world, resources) }
+}
+
+/// Allows a simple function to be interpreted as ThreadLocalRunnable
+impl<T: FnMut(&mut World, &mut Resources)> ThreadLocalRunnable for T {
+    fn run(&mut self, world: &mut World, resources: &mut Resources) { self(world, resources); }
 }
 
 /// Executes a sequence of systems, potentially in parallel, and then commits their command buffers.
@@ -295,6 +347,22 @@ impl Executor {
         self.systems.into_iter().map(|s| s.0.into_inner()).collect()
     }
 
+    /// Calls [Runnable::init] for all contained systems.
+    pub fn init(&mut self, world: &mut World, resources: &mut Resources) {
+        self.systems.iter_mut().for_each(|system| {
+            let system = unsafe { system.get_mut() };
+            system.init(world, resources);
+        })
+    }
+
+    /// Calls [Runnable::dispose] for all contained systems.
+    pub fn dispose(&mut self, world: &mut World, resources: &mut Resources) {
+        self.systems.iter_mut().for_each(|system| {
+            let system = unsafe { system.get_mut() };
+            system.dispose(world, resources);
+        })
+    }
+
     /// Executes all systems and then flushes their command buffers.
     pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
         self.run_systems(world, resources);
@@ -457,18 +525,6 @@ impl Builder {
         }
     }
 
-    /// Adds a thread local function to the schedule. This function will be executed on the main thread.
-    pub fn add_thread_local_fn<F: FnMut(&mut World, &mut Resources) + 'static>(
-        mut self,
-        f: F,
-    ) -> Self {
-        self.finalize_executor();
-        self.steps.push(Step::ThreadLocalFn(
-            Box::new(f) as Box<dyn FnMut(&mut World, &mut Resources)>
-        ));
-        self
-    }
-
     /// Adds a thread local system to the schedule. This system will be executed on the main thread.
     pub fn add_thread_local<S: Runnable + 'static>(mut self, system: S) -> Self {
         self.finalize_executor();
@@ -496,8 +552,6 @@ pub enum Step {
     Systems(Executor),
     /// Flush system command buffers.
     FlushCmdBuffers,
-    /// A thread local function.
-    ThreadLocalFn(Box<dyn FnMut(&mut World, &mut Resources)>),
     /// A thread local system
     ThreadLocalSystem(Box<dyn Runnable>),
 }
@@ -530,6 +584,36 @@ impl Schedule {
     /// Creates a new schedule builder.
     pub fn builder() -> Builder { Builder::default() }
 
+    /// Calls [Runnable::init] of all systems in the order they were added to the schedule.
+    pub fn init(&mut self, world: &mut World, resources: &mut Resources) {
+        for step in &mut self.steps {
+            match step {
+                Step::Systems(executor) => {
+                    executor.init(world, resources);
+                }
+                Step::ThreadLocalSystem(system) => {
+                    system.init(world, resources);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Calls [Runnable::dispose] of all systems in the order they were added to the schedule.
+    pub fn dispose(&mut self, world: &mut World, resources: &mut Resources) {
+        for step in &mut self.steps {
+            match step {
+                Step::Systems(executor) => {
+                    executor.dispose(world, resources);
+                }
+                Step::ThreadLocalSystem(system) => {
+                    system.dispose(world, resources);
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Executes all of the steps in the schedule.
     pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
         enum ToFlush<'a> {
@@ -550,7 +634,6 @@ impl Schedule {
                         ToFlush::System(cmd) => cmd.flush(world),
                     });
                 }
-                Step::ThreadLocalFn(function) => function(world, resources),
                 Step::ThreadLocalSystem(system) => {
                     system.prepare(world);
                     system.run(world, resources);
@@ -685,5 +768,93 @@ mod tests {
 
         assert!(entity.is_some());
         assert!(world.entry(entity.unwrap()).is_some());
+    }
+
+    #[test]
+    fn multiple_thread_local_types() {
+        let mut world = World::default();
+        let mut resources = Resources::default();
+
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        struct TestComp(u32);
+
+        let entity = world.push((TestComp(0),));
+
+        let system_one = SystemBuilder::new("one")
+            .with_query(Write::<TestComp>::query())
+            .build(move |_, world, _, query| {
+                query.iter_mut(world).for_each(|test| {
+                    test.0 += 1;
+                })
+            });
+
+        #[derive(Default)]
+        struct SystemTwo {}
+
+        impl ThreadLocalRunnable for SystemTwo {
+            fn run(&mut self, world: &mut World, _resources: &mut Resources) {
+                Write::<TestComp>::query().iter_mut(world).for_each(|test| {
+                    test.0 += 1;
+                });
+            }
+        }
+
+        fn system_three(world: &mut World, _resources: &mut Resources) {
+            Write::<TestComp>::query().iter_mut(world).for_each(|test| {
+                test.0 += 1;
+            });
+        }
+
+        let mut schedule = Schedule::builder()
+            .add_thread_local(system_one)
+            .add_thread_local(SystemTwo::default())
+            .add_thread_local(system_three)
+            .build();
+
+        schedule.execute(&mut world, &mut resources);
+
+        // Make sure all three systems executed
+        assert!(
+            world
+                .entry(entity)
+                .unwrap()
+                .get_component::<TestComp>()
+                .unwrap()
+                .0
+                == 3
+        );
+    }
+
+    #[test]
+    fn call_init_and_dispose() {
+        let mut world = World::default();
+        let mut resources = Resources::default();
+
+        let init_called = Arc::new(Mutex::new(false));
+        let dispose_called = Arc::new(Mutex::new(false));
+
+        {
+            let init_called = init_called.clone();
+            let dispose_called = dispose_called.clone();
+
+            let system = SystemBuilder::new("system")
+                .with_init(move |_world, _resources| {
+                    let mut init_called = init_called.lock().unwrap();
+                    *init_called = true;
+                })
+                .with_dispose(move |_world, _resources| {
+                    let mut dispose_called = dispose_called.lock().unwrap();
+                    *dispose_called = true;
+                })
+                .build(|_, _, _, _| {});
+
+            let mut schedule = Schedule::builder().add_system(system).build();
+            schedule.init(&mut world, &mut resources);
+            schedule.execute(&mut world, &mut resources);
+            schedule.dispose(&mut world, &mut resources);
+        }
+
+        assert!(*init_called.lock().unwrap());
+        assert!(*dispose_called.lock().unwrap());
     }
 }

@@ -119,11 +119,13 @@ impl<T: Into<Cow<'static, str>>> From<T> for SystemId {
 ///
 /// Queries are stored generically within this struct, and the `SystemQuery` types are generated
 /// on each `run` call, wrapping the world and providing the set to the user in their closure.
-pub struct System<R, Q, F> {
+pub struct System<R, Q, F, I, D> {
     name: SystemId,
     _resources: PhantomData<R>,
     queries: Q,
     run_fn: F,
+    init_fn: Option<I>,
+    dispose_fn: Option<D>,
     archetypes: ArchetypeAccess,
     access: SystemAccess,
 
@@ -131,11 +133,13 @@ pub struct System<R, Q, F> {
     command_buffer: HashMap<WorldId, CommandBuffer>,
 }
 
-impl<R, Q, F> Runnable for System<R, Q, F>
+impl<R, Q, F, I, D> Runnable for System<R, Q, F, I, D>
 where
     R: for<'a> ResourceSet<'a>,
     Q: QuerySet,
     F: SystemFn<R, Q>,
+    I: FnMut(&mut World, &mut Resources),
+    D: FnMut(&mut World, &mut Resources),
 {
     fn name(&self) -> &SystemId { &self.name }
 
@@ -156,6 +160,18 @@ where
     fn prepare(&mut self, world: &World) {
         if let ArchetypeAccess::Some(bitset) = &mut self.archetypes {
             self.queries.filter_archetypes(world, bitset);
+        }
+    }
+
+    fn init(&mut self, world: &mut World, resources: &mut Resources) {
+        if let Some(init) = &mut self.init_fn {
+            init(world, resources);
+        }
+    }
+
+    fn dispose(&mut self, world: &mut World, resources: &mut Resources) {
+        if let Some(dispose) = &mut self.dispose_fn {
+            dispose(world, resources);
         }
     }
 
@@ -255,16 +271,23 @@ where
 ///                }
 ///            });
 /// ```
-pub struct SystemBuilder<Q = (), R = ()> {
+pub struct SystemBuilder<
+    Q = (),
+    R = (),
+    I = fn(&mut World, &mut Resources),
+    D = fn(&mut World, &mut Resources),
+> {
     name: SystemId,
     queries: Q,
     resources: R,
     resource_access: Permissions<ResourceTypeId>,
     component_access: Permissions<ComponentTypeId>,
     access_all_archetypes: bool,
+    init_fn: Option<I>,
+    dispose_fn: Option<D>,
 }
 
-impl SystemBuilder<(), ()> {
+impl SystemBuilder<(), (), fn(&mut World, &mut Resources), fn(&mut World, &mut Resources)> {
     /// Create a new system builder to construct a new system.
     ///
     /// Please note, the `name` argument for this method is just for debugging and visualization
@@ -277,14 +300,18 @@ impl SystemBuilder<(), ()> {
             resource_access: Permissions::default(),
             component_access: Permissions::default(),
             access_all_archetypes: false,
+            init_fn: None,
+            dispose_fn: None,
         }
     }
 }
 
-impl<Q, R> SystemBuilder<Q, R>
+impl<Q, R, I, D> SystemBuilder<Q, R, I, D>
 where
     Q: 'static + Send + ConsFlatten,
     R: 'static + Send + ConsFlatten,
+    I: FnMut(&mut World, &mut Resources),
+    D: FnMut(&mut World, &mut Resources),
 {
     /// Defines a query to provide this system for its execution. Multiple queries can be provided,
     /// and queries are cached internally for efficiency for filtering and archetype ID handling.
@@ -294,7 +321,7 @@ where
     pub fn with_query<V, F>(
         mut self,
         query: Query<V, F>,
-    ) -> SystemBuilder<<Q as ConsAppend<Query<V, F>>>::Output, R>
+    ) -> SystemBuilder<<Q as ConsAppend<Query<V, F>>>::Output, R, I, D>
     where
         V: for<'a> View<'a>,
         F: 'static + EntityFilter,
@@ -309,6 +336,8 @@ where
             resource_access: self.resource_access,
             component_access: self.component_access,
             access_all_archetypes: self.access_all_archetypes,
+            init_fn: self.init_fn,
+            dispose_fn: self.dispose_fn,
         }
     }
 
@@ -316,7 +345,7 @@ where
     ///
     /// This will inform the dispatcher to not allow any writes access to this resource while
     /// this system is running. Parralel reads still occur during execution.
-    pub fn read_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<Read<T>>>::Output>
+    pub fn read_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<Read<T>>>::Output, I, D>
     where
         T: 'static + Resource,
         R: ConsAppend<Read<T>>,
@@ -331,6 +360,8 @@ where
             resource_access: self.resource_access,
             component_access: self.component_access,
             access_all_archetypes: self.access_all_archetypes,
+            init_fn: self.init_fn,
+            dispose_fn: self.dispose_fn,
         }
     }
 
@@ -338,7 +369,9 @@ where
     ///
     /// This will inform the dispatcher to not allow any parallel access to this resource while
     /// this system is running.
-    pub fn write_resource<T>(mut self) -> SystemBuilder<Q, <R as ConsAppend<Write<T>>>::Output>
+    pub fn write_resource<T>(
+        mut self,
+    ) -> SystemBuilder<Q, <R as ConsAppend<Write<T>>>::Output, I, D>
     where
         T: 'static + Resource,
         R: ConsAppend<Write<T>>,
@@ -353,6 +386,8 @@ where
             resource_access: self.resource_access,
             component_access: self.component_access,
             access_all_archetypes: self.access_all_archetypes,
+            init_fn: self.init_fn,
+            dispose_fn: self.dispose_fn,
         }
     }
 
@@ -396,6 +431,48 @@ where
         self
     }
 
+    /// Adds init function to the system which is used to initialize data in resources or world.
+    /// This could be used to insert resources or create entities required by the system prior
+    /// to the first system execution.
+    ///
+    /// Init functions are called by `Schedule::init()` in the order systems were added to the schedule.
+    pub fn with_init<F>(self, init_fn: F) -> SystemBuilder<Q, R, F, D>
+    where
+        F: FnMut(&mut World, &mut Resources),
+    {
+        SystemBuilder {
+            name: self.name,
+            queries: self.queries,
+            resources: self.resources,
+            resource_access: self.resource_access,
+            component_access: self.component_access,
+            access_all_archetypes: self.access_all_archetypes,
+            init_fn: Some(init_fn),
+            dispose_fn: self.dispose_fn,
+        }
+    }
+
+    /// Adds dispose function to the system which is used to cleanup data in resources or world.
+    /// This could be used to remove any resources or entities used by the system when schedule
+    /// is disposed.
+    ///
+    /// Dispose functions are called by `Schedule::dispose()` in the order systems were added to the schedule.
+    pub fn with_dispose<F>(self, dispose_fn: F) -> SystemBuilder<Q, R, I, F>
+    where
+        F: FnMut(&mut World, &mut Resources),
+    {
+        SystemBuilder {
+            name: self.name,
+            queries: self.queries,
+            resources: self.resources,
+            resource_access: self.resource_access,
+            component_access: self.component_access,
+            access_all_archetypes: self.access_all_archetypes,
+            init_fn: self.init_fn,
+            dispose_fn: Some(dispose_fn),
+        }
+    }
+
     /// Builds a system which is not `Schedulable`, as it is not thread safe (!Send and !Sync),
     /// but still implements all the calling infrastructure of the `Runnable` trait. This provides
     /// a way for legion consumers to leverage the `System` construction and type-handling of
@@ -403,7 +480,7 @@ where
     pub fn build<F>(
         self,
         run_fn: F,
-    ) -> System<<R as ConsFlatten>::Output, <Q as ConsFlatten>::Output, F>
+    ) -> System<<R as ConsFlatten>::Output, <Q as ConsFlatten>::Output, F, I, D>
     where
         <R as ConsFlatten>::Output: for<'a> ResourceSet<'a> + Send + Sync,
         <Q as ConsFlatten>::Output: QuerySet,
@@ -417,6 +494,8 @@ where
         System {
             name: self.name,
             run_fn,
+            init_fn: self.init_fn,
+            dispose_fn: self.dispose_fn,
             _resources: PhantomData::<<R as ConsFlatten>::Output>,
             queries: self.queries.flatten(),
             archetypes: if self.access_all_archetypes {
