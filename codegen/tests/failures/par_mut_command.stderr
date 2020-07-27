@@ -1,0 +1,7 @@
+error: custom attribute panicked
+ --> $DIR/par_mut_command.rs:6:1
+  |
+6 | #[system(par_for_each)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: message: par_for_each systems cannot accept mutable command buffer references

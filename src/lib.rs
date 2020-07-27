@@ -208,5 +208,8 @@ pub use crate::{
     world::{Entity, EntityStore, Universe, World, WorldOptions},
 };
 
+#[cfg(feature = "codegen")]
+pub use legion_codegen::system;
+
 #[cfg(feature = "serialize")]
 pub use crate::serialize::Registry;
