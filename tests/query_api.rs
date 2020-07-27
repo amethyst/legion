@@ -1,6 +1,6 @@
 #![allow(clippy::map_clone)]
 
-use legion::prelude::*;
+use legion::*;
 use std::collections::HashMap;
 
 #[cfg(feature = "par-iter")]
@@ -28,7 +28,6 @@ fn query_read_entity_data() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -36,16 +35,16 @@ fn query_read_entity_data() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = Read::<Pos>::query();
+    let mut query = <(Entity, Read<Pos>)>::query();
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities_mut(&mut world) {
+    for (entity, pos) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -59,10 +58,10 @@ fn query_try_read_entity_data() {
 
     let universe = Universe::new();
     let mut world = universe.create_world();
-    world.insert((), Some((Pos(1., 2., 3.),)));
-    world.insert((), Some((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))));
+    world.push((Pos(1., 2., 3.),));
+    world.push((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)));
 
-    let query = TryRead::<Rot>::query();
+    let mut query = TryRead::<Rot>::query();
     let rots = query
         .iter(&world)
         .map(|x| x.map(|x| *x))
@@ -80,16 +79,16 @@ fn query_try_write_entity_data() {
 
     let universe = Universe::new();
     let mut world = universe.create_world();
-    world.insert((), Some((Pos(1., 2., 3.),)));
-    let entity = world.insert((), Some((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6))))[0];
+    world.push((Pos(1., 2., 3.),));
+    let entity = world.push((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)));
 
-    let query = TryWrite::<Rot>::query();
-    for mut x in query.iter_mut(&mut world).filter_map(|x| x) {
+    let mut query = TryWrite::<Rot>::query();
+    for x in query.iter_mut(&mut world).filter_map(|x| x) {
         *x = Rot(9.0, 9.0, 9.0);
     }
     assert_eq!(
-        world.get_component::<Rot>(entity).map(|x| *x),
-        Some(Rot(9.0, 9.0, 9.0))
+        world.entry(entity).unwrap().get_component::<Rot>(),
+        Ok(&Rot(9.0, 9.0, 9.0))
     );
 }
 
@@ -100,7 +99,6 @@ fn query_cached_read_entity_data() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -108,16 +106,16 @@ fn query_cached_read_entity_data() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = Read::<Pos>::query(); //.cached();
+    let mut query = <(Entity, Read<Pos>)>::query();
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities_mut(&mut world) {
+    for (entity, pos) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -133,7 +131,6 @@ fn query_read_entity_data_par() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -141,16 +138,16 @@ fn query_read_entity_data_par() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
     let count = AtomicUsize::new(0);
-    let query = Read::<Pos>::query();
-    query.par_for_each_chunk_mut(&mut world, |mut chunk| {
-        for (entity, pos) in chunk.iter_entities_mut() {
+    let mut query = Read::<Pos>::query();
+    query.par_for_each_chunk_mut(&mut world, |chunk| {
+        for (entity, pos) in chunk.into_iter_entities() {
             assert_eq!(expected.get(&entity).unwrap().0, *pos);
             count.fetch_add(1, Ordering::SeqCst);
         }
@@ -167,7 +164,6 @@ fn query_read_entity_data_par_foreach() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -175,14 +171,14 @@ fn query_read_entity_data_par_foreach() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
     let count = AtomicUsize::new(0);
-    let query = Read::<Pos>::query();
+    let mut query = Read::<Pos>::query();
     query.par_for_each_mut(&mut world, |_pos| {
         count.fetch_add(1, Ordering::SeqCst);
     });
@@ -197,7 +193,6 @@ fn query_read_entity_data_tuple() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -205,16 +200,16 @@ fn query_read_entity_data_tuple() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = <(Read<Pos>, Read<Rot>)>::query();
+    let mut query = <(Entity, Read<Pos>, Read<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, rot)) in query.iter_entities_mut(&mut world) {
+    for (entity, pos, rot) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
@@ -230,7 +225,6 @@ fn query_write_entity_data() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -238,16 +232,16 @@ fn query_write_entity_data() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = Write::<Pos>::query();
+    let mut query = <(Entity, Write<Pos>)>::query();
 
     let mut count = 0;
-    for (entity, mut pos) in query.iter_entities_mut(&mut world) {
+    for (entity, pos) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
 
@@ -264,7 +258,6 @@ fn query_write_entity_data_tuple() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -272,16 +265,16 @@ fn query_write_entity_data_tuple() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = <(Write<Pos>, Write<Rot>)>::query();
+    let mut query = <(Entity, Write<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (mut pos, mut rot)) in query.iter_entities_mut(&mut world) {
+    for (entity, pos, rot) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
@@ -300,7 +293,6 @@ fn query_mixed_entity_data_tuple() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -308,16 +300,16 @@ fn query_mixed_entity_data_tuple() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = <(Read<Pos>, Write<Rot>)>::query();
+    let mut query = <(Entity, Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, mut rot)) in query.iter_entities_mut(&mut world) {
+    for (entity, pos, rot) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
@@ -335,7 +327,6 @@ fn query_partial_match() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -343,47 +334,21 @@ fn query_partial_match() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = <(Read<Pos>, Write<Rot>)>::query();
+    let mut query = <(Entity, Read<Pos>, Write<Rot>)>::query();
 
     let mut count = 0;
-    for (entity, (pos, mut rot)) in query.iter_entities_mut(&mut world) {
+    for (entity, pos, rot) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         assert_eq!(expected.get(&entity).unwrap().1, *rot);
         count += 1;
 
         rot.0 = 0.0;
-    }
-
-    assert_eq!(components.len(), count);
-}
-
-#[test]
-fn query_read_shared_data() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
-
-    let shared = (Static, Model(5));
-    let components = vec![
-        (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
-        (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
-    ];
-
-    world.insert(shared, components.clone());
-
-    let query = Tagged::<Static>::query();
-
-    let mut count = 0;
-    for marker in query.iter(&world) {
-        assert_eq!(Static, *marker);
-        count += 1;
     }
 
     assert_eq!(components.len(), count);
@@ -396,7 +361,6 @@ fn query_on_changed_first() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -404,16 +368,17 @@ fn query_on_changed_first() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = Read::<Pos>::query().filter(changed::<Pos>() | changed::<Rot>());
+    let mut query = <(Entity, Read<Pos>, Read<Rot>)>::query()
+        .filter(maybe_changed::<Pos>() | maybe_changed::<Rot>());
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities_mut(&mut world) {
+    for (entity, pos, _) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -428,7 +393,6 @@ fn query_on_changed_no_changes() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -436,16 +400,16 @@ fn query_on_changed_no_changes() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = Read::<Pos>::query().filter(changed::<Pos>());
+    let mut query = <(Entity, Read<Pos>)>::query().filter(maybe_changed::<Pos>());
 
     let mut count = 0;
-    for (entity, pos) in query.iter_entities_mut(&mut world) {
+    for (entity, pos) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -453,7 +417,7 @@ fn query_on_changed_no_changes() {
     assert_eq!(components.len(), count);
 
     count = 0;
-    for (entity, pos) in query.iter_entities_mut(&mut world) {
+    for (entity, pos) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         count += 1;
     }
@@ -468,7 +432,6 @@ fn query_on_changed_self_changes() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let shared = (Static, Model(5));
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
         (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
@@ -476,16 +439,16 @@ fn query_on_changed_self_changes() {
 
     let mut expected = HashMap::<Entity, (Pos, Rot)>::new();
 
-    for (i, e) in world.insert(shared, components.clone()).iter().enumerate() {
+    for (i, e) in world.extend(components.clone()).iter().enumerate() {
         if let Some((pos, rot)) = components.get(i) {
             expected.insert(*e, (*pos, *rot));
         }
     }
 
-    let query = Write::<Pos>::query().filter(changed::<Pos>());
+    let mut query = <(Entity, Write<Pos>)>::query().filter(maybe_changed::<Pos>());
 
     let mut count = 0;
-    for (entity, mut pos) in query.iter_entities_mut(&mut world) {
+    for (entity, pos) in query.iter_mut(&mut world) {
         assert_eq!(expected.get(&entity).unwrap().0, *pos);
         *pos = Pos(1., 1., 1.);
         count += 1;
@@ -494,7 +457,7 @@ fn query_on_changed_self_changes() {
     assert_eq!(components.len(), count);
 
     count = 0;
-    for pos in query.iter_mut(&mut world) {
+    for (_, pos) in query.iter_mut(&mut world) {
         assert_eq!(Pos(1., 1., 1.), *pos);
         count += 1;
     }
@@ -516,117 +479,77 @@ fn query_try_with_changed_filter() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let sum_entity = world.insert((), Some((Sum(0.),)))[0];
-    let a_entity = world.insert((), Some((Sum(0.), A(1.))))[0];
-    let b_entity = world.insert((), Some((Sum(0.), B(2.))))[0];
-    let a_b_entity = world.insert((), Some((Sum(0.), A(1.), B(2.))))[0];
+    let sum_entity = world.push((Sum(0.),));
+    let a_entity = world.push((Sum(0.), A(1.)));
+    let b_entity = world.push((Sum(0.), B(2.)));
+    let a_b_entity = world.push((Sum(0.), A(1.), B(2.)));
 
-    let query =
-        <(Write<Sum>, TryRead<A>, TryRead<B>)>::query().filter(changed::<A>() | changed::<B>());
+    let mut query = <(Write<Sum>, TryRead<A>, TryRead<B>)>::query()
+        .filter((maybe_changed::<A>() | maybe_changed::<B>()) | !any());
 
     let mut count = 0;
-    for (mut sum, a, b) in query.iter_mut(&mut world) {
+    for (sum, a, b) in query.iter_mut(&mut world) {
         sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
         count += 1;
     }
     assert_eq!(3, count);
     assert_eq!(
-        world.get_component::<Sum>(sum_entity).map(|x| *x),
-        Some(Sum(0.))
+        world
+            .entry(sum_entity)
+            .unwrap()
+            .get_component::<Sum>()
+            .map(|x| *x),
+        Ok(Sum(0.))
     );
     assert_eq!(
-        world.get_component::<Sum>(a_entity).map(|x| *x),
-        Some(Sum(1.))
+        world
+            .entry(a_entity)
+            .unwrap()
+            .get_component::<Sum>()
+            .map(|x| *x),
+        Ok(Sum(1.))
     );
     assert_eq!(
-        world.get_component::<Sum>(b_entity).map(|x| *x),
-        Some(Sum(2.))
+        world
+            .entry(b_entity)
+            .unwrap()
+            .get_component::<Sum>()
+            .map(|x| *x),
+        Ok(Sum(2.))
     );
     assert_eq!(
-        world.get_component::<Sum>(a_b_entity).map(|x| *x),
-        Some(Sum(3.))
+        world
+            .entry(a_b_entity)
+            .unwrap()
+            .get_component::<Sum>()
+            .map(|x| *x),
+        Ok(Sum(3.))
     );
 
     count = 0;
-    for (mut sum, a, b) in query.iter_mut(&mut world) {
+    for (sum, a, b) in query.iter_mut(&mut world) {
         sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
         count += 1;
     }
     assert_eq!(0, count);
 
-    *world.get_component_mut::<B>(a_b_entity).unwrap() = B(3.0);
+    *world
+        .entry(a_b_entity)
+        .unwrap()
+        .get_component_mut::<B>()
+        .unwrap() = B(3.0);
     count = 0;
-    for (mut sum, a, b) in query.iter_mut(&mut world) {
+    for (sum, a, b) in query.iter_mut(&mut world) {
         sum.0 = a.map_or(0., |x| x.0) + b.map_or(0., |x| x.0);
         count += 1;
     }
     assert_eq!(1, count);
     assert_eq!(
-        world.get_component::<Sum>(a_b_entity).map(|x| *x),
-        Some(Sum(4.))
+        world
+            .entry(a_b_entity)
+            .unwrap()
+            .get_component::<Sum>()
+            .map(|x| *x),
+        Ok(Sum(4.))
     );
-}
-
-#[test]
-fn query_iter_chunks_tag() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
-
-    world.insert((Static, Model(0)), vec![()]);
-    world.insert((Static, Model(1)), vec![()]);
-    world.insert((Static, Model(2)), vec![()]);
-
-    let query = <(Tagged<Static>, Tagged<Model>)>::query();
-
-    for chunk in query.iter_chunks(&world) {
-        let model = chunk.tag::<Model>().cloned();
-        for entity in chunk.entities() {
-            assert_eq!(world.get_tag::<Model>(*entity), model.as_ref());
-        }
-    }
-}
-
-#[test]
-fn query_iter_tag() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
-
-    world.insert((Static, Model(0)), vec![(0u32,)]);
-    world.insert((Static, Model(1)), vec![(1u32,)]);
-    world.insert((Static, Model(2)), vec![(2u32,)]);
-
-    let query = <(Tagged<Static>, Tagged<Model>, Read<u32>)>::query();
-
-    for (s, m, c) in query.iter(&world) {
-        assert_eq!(&Static, s);
-        assert_eq!(&Model(*c), m);
-    }
-}
-
-#[test]
-fn query_get_all_components() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
-
-    world.insert(
-        (Static, Model(0)),
-        vec![(Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3))],
-    );
-    world.insert((Static, Model(1)), vec![(Pos(1., 2., 3.),)]);
-
-    let query_pos = Read::<Pos>::query();
-    let query_rot = Read::<Rot>::query();
-    assert_eq!(2, query_pos.components::<Pos, World>(&world).len());
-    assert_eq!(1, query_rot.components::<Rot, World>(&world).len());
-
-    let query_pos = Write::<Pos>::query();
-    let query_rot = Write::<Rot>::query();
-    assert_eq!(2, query_pos.components_mut::<Pos, World>(&mut world).len());
-    assert_eq!(1, query_rot.components_mut::<Rot, World>(&mut world).len());
 }

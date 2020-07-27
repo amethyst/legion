@@ -1,11 +1,27 @@
+#![deny(missing_docs)]
+
 //! Legion aims to be a feature rich high performance ECS library for Rust game projects with minimal boilerplate.
 //!
 //! # Getting Started
 //!
-//! ```rust
-//! use legion::prelude::*;
+//! ## Worlds
 //!
-//! // Define our entity data types
+//! [Worlds](world/struct.World.html) are collections of [entities](world/struct.Entity.html), where each entity
+//! can have an arbitrary collection of [components](storage/trait.Component.html) attached.
+//!
+//! ```
+//! use legion::*;
+//! let world = World::new();
+//! ```
+//!
+//! Entities can be inserted via either `push` (for a single entity) or `extend` (for a collection of entities with
+//! the same component types). The world will create a unique ID for each entity upon insertion that you can use
+//! to refer to that entity later.
+//!
+//! ```
+//! # use legion::*;
+//! # let mut world = World::new();
+//! // a component is any type that is 'static, sized, send and sync
 //! #[derive(Clone, Copy, Debug, PartialEq)]
 //! struct Position {
 //!     x: f32,
@@ -18,219 +34,179 @@
 //!     dy: f32,
 //! }
 //!
-//! #[derive(Clone, Copy, Debug, PartialEq)]
-//! struct Model(usize);
+//! // push a component tuple into the world to create an entity
+//! let entity: Entity = world.push((Position { x: 0.0, y: 0.0 }, Velocity { dx: 0.0, dy: 0.0 }));
 //!
-//! #[derive(Clone, Copy, Debug, PartialEq)]
-//! struct Static;
+//! // or extend via an IntoIterator of tuples to add many at once (this is faster)
+//! let entities: &[Entity] = world.extend(vec![
+//!     (Position { x: 0.0, y: 0.0 }, Velocity { dx: 0.0, dy: 0.0 }),
+//!     (Position { x: 1.0, y: 1.0 }, Velocity { dx: 0.0, dy: 0.0 }),
+//!     (Position { x: 2.0, y: 2.0 }, Velocity { dx: 0.0, dy: 0.0 }),
+//! ]);
+//! ```
 //!
-//! // Create a world to store our entities
-//! let universe = Universe::new();
-//! let mut world = universe.create_world();
+//! You can access entities via [entries](world/struct.Entry.html). Entries allow you to query an entity to find
+//! out what types of components are attached to it, to get component references, or to add and remove components.
 //!
-//! // Create entities with `Position` and `Velocity` data
-//! world.insert(
-//!     (),
-//!     (0..999).map(|_| (Position { x: 0.0, y: 0.0 }, Velocity { dx: 0.0, dy: 0.0 }))
-//! );
+//! ```
+//! # use legion::*;
+//! # let mut world = World::new();
+//! # let entity = world.push((false,));
+//! // entries return `None` if the entity does not exist
+//! if let Some(mut entry) = world.entry(entity) {
+//!     // access information about the entity's archetype
+//!     println!("{:?} has {:?}", entity, entry.archetype().layout().component_types());
 //!
-//! // Create entities with `Position` data and a tagged with `Model` data and as `Static`
-//! // Tags are shared across many entities, and enable further batch processing and filtering use cases
-//! world.insert(
-//!     (Model(5), Static),
-//!     (0..999).map(|_| (Position { x: 0.0, y: 0.0 },))
-//! );
+//!     // add an extra component
+//!     entry.add_component(12f32);
 //!
-//! // Create a query which finds all `Position` and `Velocity` components
-//! let mut query = <(Write<Position>, Read<Velocity>)>::query();
-//!
-//! // Iterate through all entities that match the query in the world
-//! for (mut pos, vel) in query.iter_mut(&mut world) {
-//!     pos.x += vel.dx;
-//!     pos.y += vel.dy;
+//!     // access the entity's components, returns `None` if the entity does not have the component
+//!     assert_eq!(entry.get_component::<f32>().unwrap(), &12f32);
 //! }
 //! ```
 //!
-//! ### Advanced Query Filters
+//! See the [world module](world/index.html) for more information.
 //!
-//! The query API can do much more than pull entity data out of the world.
+//! ## Queries
 //!
-//! Additional data type filters:
+//! Entries are not the most convenient or performant way to search or bulk-access a world. [Queries](query/index.html)
+//! allow for high performance and expressive iteration through the entities in a world.
 //!
-//! ```rust
-//! # use legion::prelude::*;
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Position {
-//! #     x: f32,
-//! #     y: f32,
-//! # }
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Velocity {
-//! #     dx: f32,
-//! #     dy: f32,
-//! # }
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Model(usize);
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Static;
-//! # let universe = Universe::new();
-//! # let mut world = universe.create_world();
-//! // It is possible to specify that entities must contain data beyond that being fetched
-//! let mut query = Read::<Position>::query()
-//!     .filter(component::<Velocity>());
-//! for position in query.iter(&mut world) {
-//!     // these entities also have `Velocity`
+//! ```
+//! # use legion::*;
+//! # let world = World::new();
+//! # #[derive(Debug)]
+//! # struct Position;
+//! // you define a query be declaring what components you want to find, and how you will access them
+//! let mut query = Read::<Position>::query();
+//!
+//! // you can then iterate through the components found in the world
+//! for position in query.iter(&world) {
+//!     println!("{:?}", position);
 //! }
 //! ```
 //!
-//! Filter boolean operations:
+//! You can search for entities which have all of a set of components.
 //!
-//! ```rust
-//! # use legion::prelude::*;
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Position {
-//! #     x: f32,
-//! #     y: f32,
-//! # }
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Velocity {
-//! #     dx: f32,
-//! #     dy: f32,
-//! # }
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Model(usize);
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Static;
-//! # let universe = Universe::new();
-//! # let mut world = universe.create_world();
-//! // Filters can be combined with boolean operators
-//! let mut query = Read::<Position>::query()
-//!     .filter(tag::<Static>() | !component::<Velocity>());
-//! for position in query.iter(&mut world) {
-//!     // these entities are also either marked as `Static`, or do *not* have a `Velocity`
+//! ```
+//! # use legion::*;
+//! # let mut world = World::new();
+//! # struct Position { x: f32, y: f32 }
+//! # struct Velocity { x: f32, y: f32 }
+//! // construct a query from a "view tuple"
+//! let mut query = <(Read<Velocity>, Write<Position>)>::query();
+//!
+//! // this time we have &Velocity and &mut Position
+//! for (velocity, position) in query.iter_mut(&mut world) {
+//!     position.x += velocity.x;
+//!     position.y += velocity.y;
 //! }
 //! ```
 //!
-//! Filter by tag data value:
+//! You can augment a basic query with additional filters. For example, you can choose to exclude
+//! entities which also have a certain component, or only include entities for which a certain
+//! component has changed since the last time the query ran (this filtering is conservative and course-grained)
 //!
-//! ```rust
-//! # use legion::prelude::*;
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Position {
-//! #     x: f32,
-//! #     y: f32,
-//! # }
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Velocity {
-//! #     dx: f32,
-//! #     dy: f32,
-//! # }
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Model(usize);
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Static;
-//! # let universe = Universe::new();
-//! # let mut world = universe.create_world();
-//! // Filters can filter by specific tag values
-//! let mut query = Read::<Position>::query()
-//!     .filter(tag_value(&Model(3)));
-//! for position in query.iter(&mut world) {
-//!     // these entities all have tag value `Model(3)`
+//! ```
+//! # use legion::*;
+//! # let mut world = World::new();
+//! # struct Position { x: f32, y: f32 }
+//! # struct Velocity { dx: f32, dy: f32 }
+//! # struct Ignore;
+//! // you can use boolean expressions when adding filters
+//! let mut query = <(Read<Velocity>, Write<Position>)>::query()
+//!     .filter(!component::<Ignore>() & maybe_changed::<Position>());
+//!
+//! for (velocity, position) in query.iter_mut(&mut world) {
+//!     position.x += velocity.dx;
+//!     position.y += velocity.dy;
 //! }
 //! ```
 //!
-//! Change detection:
+//! There is much more than can be done with queries. See the [query module](query/index.html) for
+//! more information.
 //!
-//! ```rust
-//! # use legion::prelude::*;
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Position {
-//! #     x: f32,
-//! #     y: f32,
-//! # }
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Velocity {
-//! #     dx: f32,
-//! #     dy: f32,
-//! # }
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Model(usize);
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Static;
-//! # let universe = Universe::new();
-//! # let mut world = universe.create_world();
-//! // Queries can perform coarse-grained change detection, rejecting entities who's data
-//! // has not changed since the last time the query was iterated.
-//! let mut query = <(Read<Position>, Tagged<Model>)>::query()
-//!     .filter(changed::<Position>());
-//! for (pos, model) in query.iter(&mut world) {
-//!     // entities who have changed position
-//! }
+//! ## Systems
+//!
+//! You may have noticed that when we wanted to write to a component, we needed to use `iter_mut` to iterate through our query.
+//! But perhaps your application wants to be able to process different components on different entities, perhaps even at the same
+//! time in parallel? While it is possible to do this manually (see [World](world/struct.World.html)::split), this is very difficult
+//! to do when the different pieces of the application don't know what components each other need, or might or might not even have
+//! conflicting access requirements.
+//!
+//! Systems and the [Schedule](systems/struct.Schedule.html) automates this process, and can
+//! even schedule work at a more granular level than you can otherwise do manually.
+//!
+//! A system is a unit of work. Each system is defined as a function which is provided access to queries and shared
+//! [resources](systems/struct.Resources.html). These systems can then be appended to a schedule, which is a linear
+//! sequence of systems, ordered by when side effects (such as writes to components) should be observed.
+//!
+//! The schedule will automatically parallelize the execution of all systems whilst maintaining the apparent order of execution from
+//! the perspective of each system.
+//!
+//! ```
+//! # use legion::*;
+//! # struct Position { x: f32, y: f32 }
+//! # struct Velocity { dx: f32, dy: f32 }
+//! # struct Time { elapsed_seconds: f32 }
+//! # let mut world = World::default();
+//! # let mut resources = Resources::default();
+//! # resources.insert(Time { elapsed_seconds: 0.0 });
+//! // start defining a new system
+//! let update_positions = SystemBuilder::new("update positions")
+//!     // give it a query - a system may have multiple queries
+//!     .with_query(<(Write<Position>, Read<Velocity>)>::query())
+//!     // give it read access to the time resource
+//!     .read_resource::<Time>()
+//!     // construct the system
+//!     .build(|command_buffer, world, time, query| {
+//!         for (position, velocity) in query.iter_mut(world) {
+//!             position.x += velocity.dx * time.elapsed_seconds;
+//!             position.y += velocity.dy * time.elapsed_seconds;
+//!         }
+//!     });
+//!
+//! // construct a schedule (you should do this on init)
+//! let mut schedule = Schedule::builder()
+//!     .add_system(update_positions)
+//!     .build();
+//!
+//! // run our schedule (you should do this each update)
+//! schedule.execute(&mut world, &mut resources);
 //! ```
 //!
-//! ### Content Streaming
-//!
-//! Entities can be loaded and initialized in a background `World` on separate threads and then
-//! when ready, merged into the main `World` near instantaneously.
-//!
-//! ```rust
-//! # use legion::prelude::*;
-//! let universe = Universe::new();
-//! let mut world_a = universe.create_world();
-//! let mut world_b = universe.create_world();
-//!
-//! // Move all entities from `world_b` into `world_a`
-//! // Entity IDs are guarenteed to be unique across worlds and will
-//! // remain unchanged across the merge.
-//! world_a.move_from(world_b);
-//! ```
-//!
-//! ### Chunk Iteration
-//!
-//! Entity data is allocated in blocks called "chunks", each approximately containing 64KiB of data.
-//! The query API exposes each chunk via 'iter_chunk'. As all entities in a chunk are guarenteed to contain the same set of entity
-//! data and shared data values, it is possible to do batch processing via the chunk API.
-//!
-//! ```rust
-//! # use legion::prelude::*;
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Transform;
-//! # #[derive(Clone, Copy, Debug, PartialEq)]
-//! # struct Model(usize);
-//! # let universe = Universe::new();
-//! # let mut world = universe.create_world();
-//! fn render_instanced(model: &Model, transforms: &[Transform]) {
-//!     // pass `transforms` pointer to graphics API to load into constant buffer
-//!     // issue instanced draw call with model data and transforms
-//! }
-//!
-//! let mut query = Read::<Transform>::query()
-//!     .filter(tag::<Model>());
-//!
-//! for chunk in query.iter_chunks_mut(&mut world) {
-//!     // get the chunk's model
-//!     let model: &Model = chunk.tag().unwrap();
-//!
-//!     // get a (runtime borrow checked) slice of transforms
-//!     let transforms = chunk.components::<Transform>().unwrap();
-//!
-//!     // give the model and transform slice to our renderer
-//!     render_instanced(model, &transforms);
-//! }
-//! ```
+//! See the [systems module](systems/index.html) for more information.
 //!
 //! # Feature Flags
 //!
-//!  * `par-iter`: Enables parallel APIs on queries (enabled by default).
-//!  * `par-schedule`: Configures system schedulers to try and run systems in parallel where possible (enabled by default).
-//!  * `log`: Configures `tracing` to redirect events to the `log` crate. This is a convenience feature for applications
-//!  that use `log` and do not wish to interact with `tracing`.
-#![allow(dead_code)]
+//! Legion provides a few feature flags:  
+//! * `par-iter` - Enables parallel iterators and parallel schedule execution via the rayon library. Enabled by default.
+//! * `extended-tuple-impls` - Extends the maximum size of view and component tuples from 8 to 24, at the cost of increased compile times. Off by default.
+//! * `serialize` - Enables the serde serialization module and associated functionality. Enabled by default.
+//! * `crossbeam-events` - Implements the `EventSender` trait for crossbeam `Sender` channels, allowing them to be used for event subscriptions. Enabled by default.
 
-pub use legion_core::*;
-pub use legion_systems as systems;
+// implementation modules
+mod internals;
 
-pub mod prelude {
-    pub use legion_core::prelude::*;
-    pub use legion_systems::prelude::*;
-}
+// public API organized into logical modules
+pub mod query;
+pub mod storage;
+pub mod systems;
+pub mod world;
+
+#[cfg(feature = "serialize")]
+pub mod serialize;
+
+// re-export most common types into the root
+pub use crate::{
+    query::{
+        any, component, maybe_changed, passthrough, Fetch, IntoQuery, Read, TryRead, TryWrite,
+        Write,
+    },
+    storage::{GroupSource, IntoSoa},
+    systems::{Resources, Schedule, SystemBuilder},
+    world::{Entity, EntityStore, Universe, World, WorldOptions},
+};
+
+#[cfg(feature = "serialize")]
+pub use crate::serialize::Registry;

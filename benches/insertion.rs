@@ -1,6 +1,6 @@
 use criterion::*;
 
-use legion::prelude::*;
+use legion::*;
 
 fn bench_insert_zero_baseline(c: &mut Criterion) {
     c.bench_function("insert_zero_baseline", |b| {
@@ -21,7 +21,7 @@ fn bench_insert_one_baseline(c: &mut Criterion) {
             let components: Vec<isize> = (0..10000).map(|i| i).collect();
             criterion::black_box(components);
 
-            world.insert((), vec![(1usize,)]);
+            world.extend(vec![(1usize,)]);
         });
     });
 }
@@ -34,7 +34,7 @@ fn bench_insert_unbatched(c: &mut Criterion) {
             let components: Vec<isize> = (0..10000).map(|i| i).collect();
 
             for component in components {
-                world.insert((), vec![(component,)]);
+                world.extend(vec![(component,)]);
             }
         });
     });
@@ -51,7 +51,7 @@ fn bench_insert_batched(c: &mut Criterion) {
                     let mut world = universe.create_world();
                     let components: Vec<(isize,)> = (0..*n).map(|i| (i,)).collect();
 
-                    world.insert((), components);
+                    world.extend(components);
                 });
             },
             (1..11).map(|i| i * 1000),
