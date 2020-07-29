@@ -21,7 +21,10 @@ use std::{any::TypeId, marker::PhantomData};
 /// Writes a single entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
 #[derivative(Default(bound = ""))]
-pub struct TryWrite<T>(PhantomData<T>);
+pub struct TryWrite<T>(PhantomData<*const T>);
+
+unsafe impl<T> Send for TryWrite<T> {}
+unsafe impl<T: Sync> Sync for TryWrite<T> {}
 
 impl<T: Component> DefaultFilter for TryWrite<T> {
     type Filter = EntityFilterTuple<TryComponentFilter<T>, Passthrough>;

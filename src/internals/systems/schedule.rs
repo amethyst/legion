@@ -6,10 +6,10 @@ use std::cell::UnsafeCell;
 use tracing::{span, trace, Level};
 
 #[cfg(feature = "par-schedule")]
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-#[cfg(feature = "par-schedule")]
-use fxhash::{FxHashMap, FxHashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 #[cfg(feature = "par-schedule")]
 use rayon::prelude::*;
@@ -19,7 +19,7 @@ use itertools::izip;
 
 use super::{
     command::CommandBuffer,
-    resources::{ResourceTypeId, Resources},
+    resources::{ResourceTypeId, Resources, UnsafeResources},
     system::SystemId,
 };
 use crate::internals::{
@@ -30,12 +30,10 @@ use crate::internals::{
 #[cfg(feature = "par-schedule")]
 use std::iter::repeat;
 
-/// Empty trait which defines a `System` as schedulable by the dispatcher - this requires that the
-/// type is both `Send` and `Sync`.
-///
-/// This is automatically implemented for all types that implement `Runnable` which meet the requirements.
-pub trait Schedulable: Runnable + Send + Sync {}
-impl<T> Schedulable for T where T: Runnable + Send + Sync {}
+/// A `Runnable` which is also `Send` and `Sync`.
+pub trait ParallelRunnable: Runnable + Send + Sync {}
+
+impl<T: Runnable + Send + Sync> ParallelRunnable for T {}
 
 /// Trait describing a schedulable type. This is implemented by `System`
 pub trait Runnable {
@@ -59,17 +57,19 @@ pub trait Runnable {
     ///
     /// # Safety
     ///
-    /// The shared references to world and resources may result in
-    /// unsound mutable aliasing if other code is accessing the same components or
-    /// resources as this system. Prefer to use `run` when possible.
-    unsafe fn run_unsafe(&mut self, world: &World, resources: &Resources);
+    /// The shared references to world and resources may result in unsound mutable aliasing if other code
+    /// is accessing the same components or resources as this system. Prefer to use `run` when possible.
+    ///
+    /// Additionally, systems which are !Sync should never be invoked on a different thread to that which
+    /// owns the resources collection passed into this function.
+    unsafe fn run_unsafe(&mut self, world: &World, resources: &UnsafeResources);
 
     /// Gets the system's command buffer.
     fn command_buffer_mut(&mut self, world: WorldId) -> Option<&mut CommandBuffer>;
 
     /// Runs the system.
     fn run(&mut self, world: &mut World, resources: &mut Resources) {
-        unsafe { self.run_unsafe(world, resources) };
+        unsafe { self.run_unsafe(world, resources.internal()) };
     }
 }
 
@@ -90,7 +90,7 @@ pub struct Executor {
     awaiting: Vec<AtomicUsize>,
 }
 
-struct SystemBox(UnsafeCell<Box<dyn Schedulable>>);
+struct SystemBox(UnsafeCell<Box<dyn ParallelRunnable>>);
 
 // NOT SAFE:
 // This type is only safe to use as Send and Sync within
@@ -100,10 +100,10 @@ unsafe impl Sync for SystemBox {}
 
 impl SystemBox {
     #[cfg(feature = "par-schedule")]
-    unsafe fn get(&self) -> &dyn Schedulable { std::ops::Deref::deref(&*self.0.get()) }
+    unsafe fn get(&self) -> &dyn ParallelRunnable { std::ops::Deref::deref(&*self.0.get()) }
 
     #[allow(clippy::mut_from_ref)]
-    unsafe fn get_mut(&self) -> &mut dyn Schedulable {
+    unsafe fn get_mut(&self) -> &mut dyn ParallelRunnable {
         std::ops::DerefMut::deref_mut(&mut *self.0.get())
     }
 }
@@ -114,7 +114,7 @@ impl Executor {
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
     #[cfg(not(feature = "par-schedule"))]
-    pub fn new(systems: Vec<Box<dyn Schedulable>>) -> Self {
+    pub fn new(systems: Vec<Box<dyn ParallelRunnable>>) -> Self {
         Self {
             systems: systems
                 .into_iter()
@@ -130,7 +130,7 @@ impl Executor {
     #[cfg(feature = "par-schedule")]
     #[allow(clippy::cognitive_complexity)]
     // TODO: we should break this up
-    pub fn new(systems: Vec<Box<dyn Schedulable>>) -> Self {
+    pub fn new(systems: Vec<Box<dyn ParallelRunnable>>) -> Self {
         if systems.len() > 1 {
             let mut static_dependency_counts = Vec::with_capacity(systems.len());
 
@@ -140,25 +140,13 @@ impl Executor {
                 repeat(Vec::with_capacity(64)).take(systems.len()).collect();
 
             let mut resource_last_mutated =
-                FxHashMap::<ResourceTypeId, usize>::with_capacity_and_hasher(
-                    64,
-                    Default::default(),
-                );
+                HashMap::<ResourceTypeId, usize>::with_capacity_and_hasher(64, Default::default());
             let mut resource_last_read =
-                FxHashMap::<ResourceTypeId, usize>::with_capacity_and_hasher(
-                    64,
-                    Default::default(),
-                );
+                HashMap::<ResourceTypeId, usize>::with_capacity_and_hasher(64, Default::default());
             let mut component_last_mutated =
-                FxHashMap::<ComponentTypeId, usize>::with_capacity_and_hasher(
-                    64,
-                    Default::default(),
-                );
+                HashMap::<ComponentTypeId, usize>::with_capacity_and_hasher(64, Default::default());
             let mut component_last_read =
-                FxHashMap::<ComponentTypeId, usize>::with_capacity_and_hasher(
-                    64,
-                    Default::default(),
-                );
+                HashMap::<ComponentTypeId, usize>::with_capacity_and_hasher(64, Default::default());
 
             for (i, system) in systems.iter().enumerate() {
                 let span = span!(
@@ -173,7 +161,7 @@ impl Executor {
                 let (write_res, write_comp) = system.writes();
 
                 // find resource access dependencies
-                let mut dependencies = HashSet::with_capacity_and_hasher(64, Default::default());
+                let mut dependencies = HashSet::with_capacity(64);
                 for res in read_res {
                     trace!(resource = ?res, "Read resource");
                     if let Some(n) = resource_last_mutated.get(res) {
@@ -211,7 +199,7 @@ impl Executor {
                 }
 
                 // find component access dependencies
-                let mut comp_dependencies = FxHashSet::default();
+                let mut comp_dependencies = HashSet::<usize>::default();
                 for comp in read_comp {
                     trace!(component = ?comp, "Read component");
                     if let Some(n) = component_last_mutated.get(comp) {
@@ -291,7 +279,7 @@ impl Executor {
     }
 
     /// Converts this executor into a vector of its component systems.
-    pub fn into_vec(self) -> Vec<Box<dyn Schedulable>> {
+    pub fn into_vec(self) -> Vec<Box<dyn ParallelRunnable>> {
         self.systems.into_iter().map(|s| s.0.into_inner()).collect()
     }
 
@@ -321,6 +309,7 @@ impl Executor {
     /// Call from within `rayon::ThreadPool::install()` to execute within a specific thread pool.
     #[cfg(feature = "par-schedule")]
     pub fn run_systems(&mut self, world: &mut World, resources: &mut Resources) {
+        let resources = resources.internal();
         rayon::join(
             || {},
             || {
@@ -330,7 +319,7 @@ impl Executor {
                         unsafe {
                             let system = self.systems[0].get_mut();
                             system.prepare(world);
-                            system.run(world, resources);
+                            system.run_unsafe(world, resources);
                         };
                     }
                     _ => {
@@ -414,7 +403,7 @@ impl Executor {
     ///
     /// Ensure the system indexed by `i` is only accessed once.
     #[cfg(feature = "par-schedule")]
-    unsafe fn run_recursive(&self, i: usize, world: &World, resources: &Resources) {
+    unsafe fn run_recursive(&self, i: usize, world: &World, resources: &UnsafeResources) {
         // safety: the caller ensures nothing else is accessing systems[i]
         self.systems[i].get_mut().run_unsafe(world, resources);
 
@@ -430,12 +419,12 @@ impl Executor {
 /// A factory for `Schedule`.
 pub struct Builder {
     steps: Vec<Step>,
-    accumulator: Vec<Box<dyn Schedulable>>,
+    accumulator: Vec<Box<dyn ParallelRunnable>>,
 }
 
 impl Builder {
     /// Adds a system to the schedule.
-    pub fn add_system<T: Schedulable + 'static>(mut self, system: T) -> Self {
+    pub fn add_system<T: ParallelRunnable + 'static>(mut self, system: T) -> Self {
         self.accumulator.push(Box::new(system));
         self
     }
@@ -685,5 +674,27 @@ mod tests {
 
         assert!(entity.is_some());
         assert!(world.entry(entity.unwrap()).is_some());
+    }
+
+    #[test]
+    fn thread_local_resource() {
+        let mut world = World::default();
+        let mut resources = Resources::default();
+
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        struct NotSync(*const u8);
+
+        resources.insert(NotSync(std::ptr::null()));
+
+        let system = SystemBuilder::new("one")
+            .read_resource::<NotSync>()
+            .build(move |_, _, _, _| {});
+
+        let mut schedule = Schedule::builder().add_thread_local(system).build();
+
+        // this should not compile
+        // let mut schedule = Schedule::builder().add_system(system).build();
+
+        schedule.execute(&mut world, &mut resources);
     }
 }

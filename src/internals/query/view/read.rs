@@ -21,8 +21,10 @@ use std::{any::TypeId, marker::PhantomData, slice::Iter};
 /// Reads a single entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
 #[derivative(Default(bound = ""))]
-pub struct Read<T>(PhantomData<T>);
+pub struct Read<T>(PhantomData<*const T>);
 
+unsafe impl<T> Send for Read<T> {}
+unsafe impl<T: Sync> Sync for Read<T> {}
 unsafe impl<T> ReadOnly for Read<T> {}
 
 impl<T: Component> DefaultFilter for Read<T> {

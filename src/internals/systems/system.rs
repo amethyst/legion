@@ -2,7 +2,7 @@
 
 use super::{
     command::CommandBuffer,
-    resources::{Resource, ResourceSet, ResourceTypeId, Resources},
+    resources::{Resource, ResourceSet, ResourceTypeId, UnsafeResources},
     schedule::Runnable,
 };
 use crate::internals::{
@@ -109,6 +109,10 @@ impl<T: Into<Cow<'static, str>>> From<T> for SystemId {
     }
 }
 
+struct ResourceMarker<T>(PhantomData<*const T>);
+unsafe impl<T: Send> Send for ResourceMarker<T> {}
+unsafe impl<T: Sync> Sync for ResourceMarker<T> {}
+
 /// The concrete type which contains the system closure provided by the user.  This struct should
 /// not be instantiated directly, and instead should be created using `SystemBuilder`.
 ///
@@ -121,7 +125,7 @@ impl<T: Into<Cow<'static, str>>> From<T> for SystemId {
 /// on each `run` call, wrapping the world and providing the set to the user in their closure.
 pub struct System<R, Q, F> {
     name: SystemId,
-    _resources: PhantomData<R>,
+    _resources: ResourceMarker<R>,
     queries: Q,
     run_fn: F,
     archetypes: ArchetypeAccess,
@@ -165,7 +169,7 @@ where
         self.command_buffer.get_mut(&world)
     }
 
-    unsafe fn run_unsafe(&mut self, world: &World, resources: &Resources) {
+    unsafe fn run_unsafe(&mut self, world: &World, resources: &UnsafeResources) {
         let span = span!(Level::INFO, "System", system = %self.name);
         let _guard = span.enter();
 
@@ -178,7 +182,7 @@ where
         // As the fetch struct is created on the stack here, and the resources it is holding onto is a parameter to this function,
         // we know for certain that the lifetime of the fetch struct (which constrains the lifetime of the resource the system sees)
         // must be shorter than the lifetime of the resource.
-        let resources_static = std::mem::transmute::<_, &'static Resources>(resources);
+        let resources_static = &*(resources as *const UnsafeResources);
         let mut resources = R::fetch_unchecked(resources_static);
 
         let queries = &mut self.queries;
@@ -405,7 +409,7 @@ where
         run_fn: F,
     ) -> System<<R as ConsFlatten>::Output, <Q as ConsFlatten>::Output, F>
     where
-        <R as ConsFlatten>::Output: for<'a> ResourceSet<'a> + Send + Sync,
+        <R as ConsFlatten>::Output: for<'a> ResourceSet<'a>,
         <Q as ConsFlatten>::Output: QuerySet,
         F: FnMut(
             &mut CommandBuffer,
@@ -417,7 +421,7 @@ where
         System {
             name: self.name,
             run_fn,
-            _resources: PhantomData::<<R as ConsFlatten>::Output>,
+            _resources: ResourceMarker(PhantomData),
             queries: self.queries.flatten(),
             archetypes: if self.access_all_archetypes {
                 ArchetypeAccess::All
