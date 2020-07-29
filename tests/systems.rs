@@ -1,6 +1,7 @@
 use legion::*;
 
 #[test]
+#[cfg(feature = "codegen")]
 fn basic_system() {
     #[system]
     fn hello_world() {
@@ -14,6 +15,7 @@ fn basic_system() {
 }
 
 #[test]
+#[cfg(feature = "codegen")]
 fn for_each_system() {
     #[system(for_each)]
     fn sum(component: &usize, #[resource] total: &mut usize) { *total += component; }
