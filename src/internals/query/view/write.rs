@@ -23,8 +23,8 @@ use std::{any::TypeId, marker::PhantomData, slice::Iter};
 #[derivative(Default(bound = ""))]
 pub struct Write<T>(PhantomData<*const T>);
 
-unsafe impl<T> Send for Write<T> {}
-unsafe impl<T: Sync> Sync for Write<T> {}
+unsafe impl<T: Send> Send for Write<T> {}
+unsafe impl<T> Sync for Write<T> {}
 
 impl<T: Component> DefaultFilter for Write<T> {
     type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough>;

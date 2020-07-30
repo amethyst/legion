@@ -23,8 +23,8 @@ use std::{any::TypeId, marker::PhantomData};
 #[derivative(Default(bound = ""))]
 pub struct TryWrite<T>(PhantomData<*const T>);
 
-unsafe impl<T> Send for TryWrite<T> {}
-unsafe impl<T: Sync> Sync for TryWrite<T> {}
+unsafe impl<T: Send> Send for TryWrite<T> {}
+unsafe impl<T> Sync for TryWrite<T> {}
 
 impl<T: Component> DefaultFilter for TryWrite<T> {
     type Filter = EntityFilterTuple<TryComponentFilter<T>, Passthrough>;

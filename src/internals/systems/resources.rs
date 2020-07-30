@@ -237,6 +237,9 @@ impl ResourceCell {
 
     fn into_inner(self) -> Box<dyn Resource> { self.data.into_inner() }
 
+    /// # Safety
+    /// Types which are !Sync should only be retrieved on the thread which owns the resource
+    /// collection.
     pub unsafe fn get<T: Resource>(&self) -> Option<Fetch<'_, T>> {
         loop {
             let read = self.borrow_state.load(std::sync::atomic::Ordering::SeqCst);
@@ -270,6 +273,9 @@ impl ResourceCell {
         }
     }
 
+    /// # Safety
+    /// Types which are !Send should only be retrieved on the thread which owns the resource
+    /// collection.
     pub unsafe fn get_mut<T: Resource>(&self) -> Option<FetchMut<'_, T>> {
         let borrowed =
             self.borrow_state
@@ -334,11 +340,7 @@ impl UnsafeResources {
         self.map.remove(type_id).map(|cell| cell.into_inner())
     }
 
-    /// # Safety
-    /// Resources which are `!Sync` must be retrieved or inserted only on the main thread.
-    unsafe fn get(&self, type_id: &ResourceTypeId) -> Option<&ResourceCell> {
-        self.map.get(type_id)
-    }
+    fn get(&self, type_id: &ResourceTypeId) -> Option<&ResourceCell> { self.map.get(type_id) }
 
     /// # Safety
     /// Resources which are `!Sync` must be retrieved or inserted only on the main thread.
@@ -520,9 +522,9 @@ impl<'a> SyncResources<'a> {
     }
 
     /// Retrieve a mutable reference to  `T` from the store if it exists. Otherwise, return `None`.
-    pub fn get_mut<T: Resource + Sync>(&self) -> Option<FetchMut<'_, T>> {
+    pub fn get_mut<T: Resource + Send>(&self) -> Option<FetchMut<'_, T>> {
         // safety:
-        // only resources which are Sync can be accessed, and so are safe to access from any thread
+        // only resources which are Send can be accessed, and so are safe to access from any thread
         let type_id = &ResourceTypeId::of::<T>();
         unsafe { self.internal.get(&type_id)?.get_mut::<T>() }
     }
