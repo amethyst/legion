@@ -110,7 +110,7 @@ impl<T: Into<Cow<'static, str>>> From<T> for SystemId {
 }
 
 /// The concrete type which contains the system closure provided by the user.  This struct should
-/// not be instantiated directly, and instead should be created using `SystemBuilder`.
+/// not be constructed directly, and instead should be created using `SystemBuilder`.
 ///
 /// Implements `Schedulable` which is consumable by the `StageExecutor`, executing the closure.
 ///
@@ -228,9 +228,8 @@ where
 // for this system. Access types are instead stored and abstracted in the top level vec here
 // so the underlying ResourceSet type functions from the queries don't need to allocate.
 // Otherwise, this leads to excessive alloaction for every call to reads/writes
-/// The core builder of `System` types, which are systems within Legion. Systems are implemented
-/// as singular closures for a given system - providing queries which should be cached for that
-/// system, as well as resource access and other metadata.
+
+/// A low level builder for constructing systems.
 /// ```rust
 /// # use legion::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
