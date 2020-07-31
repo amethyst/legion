@@ -1,0 +1,18 @@
+[package]
+name = "legion_codegen"
+version = "0.3.0"
+authors = ["Thomas Gillen <thomas.gillen@googlemail.com>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0"
+syn = "1.0"
+proc-macro2 = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+legion = { path = "..", version = "0.3" }
+trybuild = "1.0"

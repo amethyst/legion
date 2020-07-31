@@ -14,15 +14,17 @@ edition = "2018"
 travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
-default = ["par-iter", "serialize", "crossbeam-events"]
+default = ["par-iter", "serialize", "crossbeam-events", "codegen"]
 par-iter = ["rayon"]
 extended-tuple-impls = []
 serialize = ["serde", "erased-serde", "uuid/serde"]
 crossbeam-events = ["crossbeam-channel"]
+codegen = ["legion_codegen"]
 stdweb = ["uuid/stdweb"]
 wasm-bindgen = ["uuid/wasm-bindgen"]
 
 [dependencies]
+legion_codegen = { path = "codegen", version = "0.3", optional = true }
 smallvec = "1.4"
 itertools = "0.9"
 downcast-rs = "1.2"

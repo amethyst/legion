@@ -33,7 +33,7 @@ pub mod write;
 /// Declares the default filter type used by a view when it is converted into a query.
 pub trait DefaultFilter {
     /// The filter constructed.
-    type Filter: EntityFilter;
+    type Filter: EntityFilter + 'static;
 }
 
 /// A type which can pull entitiy data out of a world.

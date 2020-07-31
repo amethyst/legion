@@ -145,6 +145,7 @@
 //! the perspective of each system.
 //!
 //! ```
+//! # #[cfg(feature = "codegen")] {
 //! # use legion::*;
 //! # struct Position { x: f32, y: f32 }
 //! # struct Velocity { dx: f32, dy: f32 }
@@ -152,30 +153,25 @@
 //! # let mut world = World::default();
 //! # let mut resources = Resources::default();
 //! # resources.insert(Time { elapsed_seconds: 0.0 });
-//! // start defining a new system
-//! let update_positions = SystemBuilder::new("update positions")
-//!     // give it a query - a system may have multiple queries
-//!     .with_query(<(Write<Position>, Read<Velocity>)>::query())
-//!     // give it read access to the time resource
-//!     .read_resource::<Time>()
-//!     // construct the system
-//!     .build(|command_buffer, world, time, query| {
-//!         for (position, velocity) in query.iter_mut(world) {
-//!             position.x += velocity.dx * time.elapsed_seconds;
-//!             position.y += velocity.dy * time.elapsed_seconds;
-//!         }
-//!     });
+//! // a system fn which loops through Position and Velocity components, and reads
+//! // the Time shared resource.
+//! #[system(for_each)]
+//! fn update_positions(pos: &mut Position, vel: &Velocity, #[resource] time: &Time) {
+//!     pos.x += vel.dx * time.elapsed_seconds;
+//!     pos.y += vel.dy * time.elapsed_seconds;
+//! }
 //!
 //! // construct a schedule (you should do this on init)
 //! let mut schedule = Schedule::builder()
-//!     .add_system(update_positions)
+//!     .add_system(update_positions_system())
 //!     .build();
 //!
 //! // run our schedule (you should do this each update)
 //! schedule.execute(&mut world, &mut resources);
+//! # }
 //! ```
 //!
-//! See the [systems module](systems/index.html) for more information.
+//! See the [systems module](systems/index.html) and the [system proc macro](attr.system.html) for more information.
 //!
 //! # Feature Flags
 //!
@@ -184,6 +180,7 @@
 //! * `extended-tuple-impls` - Extends the maximum size of view and component tuples from 8 to 24, at the cost of increased compile times. Off by default.
 //! * `serialize` - Enables the serde serialization module and associated functionality. Enabled by default.
 //! * `crossbeam-events` - Implements the `EventSender` trait for crossbeam `Sender` channels, allowing them to be used for event subscriptions. Enabled by default.
+//! * `codegen` - Enables the `#[system]` procedural macro. Enabled by default.
 
 // implementation modules
 mod internals;
@@ -207,6 +204,9 @@ pub use crate::{
     systems::{Resources, Schedule, SystemBuilder},
     world::{Entity, EntityStore, Universe, World, WorldOptions},
 };
+
+#[cfg(feature = "codegen")]
+pub use legion_codegen::system;
 
 #[cfg(feature = "serialize")]
 pub use crate::serialize::Registry;
