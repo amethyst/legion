@@ -21,8 +21,10 @@ use std::{any::TypeId, marker::PhantomData};
 /// Reads a single entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
 #[derivative(Default(bound = ""))]
-pub struct TryRead<T>(PhantomData<T>);
+pub struct TryRead<T>(PhantomData<*const T>);
 
+unsafe impl<T> Send for TryRead<T> {}
+unsafe impl<T: Sync> Sync for TryRead<T> {}
 unsafe impl<T> ReadOnly for TryRead<T> {}
 
 impl<T: Component> DefaultFilter for TryRead<T> {

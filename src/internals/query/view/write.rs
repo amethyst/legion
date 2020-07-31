@@ -21,7 +21,10 @@ use std::{any::TypeId, marker::PhantomData, slice::Iter};
 /// Writes a single mutable entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
 #[derivative(Default(bound = ""))]
-pub struct Write<T>(PhantomData<T>);
+pub struct Write<T>(PhantomData<*const T>);
+
+unsafe impl<T: Send> Send for Write<T> {}
+unsafe impl<T> Sync for Write<T> {}
 
 impl<T: Component> DefaultFilter for Write<T> {
     type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough>;
