@@ -19,6 +19,8 @@ par-iter = ["rayon"]
 extended-tuple-impls = []
 serialize = ["serde", "erased-serde", "uuid/serde"]
 crossbeam-events = ["crossbeam-channel"]
+stdweb = ["uuid/stdweb"]
+wasm-bindgen = ["uuid/wasm-bindgen"]
 
 [dependencies]
 smallvec = "1.4"
