@@ -114,24 +114,19 @@ unsafe impl<T: Send> Send for ResourceMarker<T> {}
 unsafe impl<T: Sync> Sync for ResourceMarker<T> {}
 
 /// The concrete type which contains the system closure provided by the user.  This struct should
-/// not be instantiated directly, and instead should be created using `SystemBuilder`.
+/// not be constructed directly, and instead should be created using `SystemBuilder`.
 ///
 /// Implements `Schedulable` which is consumable by the `StageExecutor`, executing the closure.
 ///
-/// Also handles caching of archetype information in a `BitSet`, as well as maintaining the provided
+/// Also handles caching of archetype information, as well as maintaining the provided
 /// information about what queries this system will run and, as a result, its data access.
-///
-/// Queries are stored generically within this struct, and the `SystemQuery` types are generated
-/// on each `run` call, wrapping the world and providing the set to the user in their closure.
 pub struct System<R, Q, F> {
-    name: SystemId,
+    name: Option<SystemId>,
     _resources: ResourceMarker<R>,
     queries: Q,
     run_fn: F,
     archetypes: ArchetypeAccess,
     access: SystemAccess,
-
-    // We pre-allocate a command buffer for ourself. Writes are self-draining so we never have to rellocate.
     command_buffer: HashMap<WorldId, CommandBuffer>,
 }
 
@@ -141,7 +136,7 @@ where
     Q: QuerySet,
     F: SystemFn<R, Q>,
 {
-    fn name(&self) -> &SystemId { &self.name }
+    fn name(&self) -> Option<&SystemId> { self.name.as_ref() }
 
     fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) {
         (
@@ -170,7 +165,11 @@ where
     }
 
     unsafe fn run_unsafe(&mut self, world: &World, resources: &UnsafeResources) {
-        let span = span!(Level::INFO, "System", system = %self.name);
+        let span = if let Some(name) = &self.name {
+            span!(Level::INFO, "System", system = %name)
+        } else {
+            span!(Level::INFO, "System")
+        };
         let _guard = span.enter();
 
         debug!("Initializing");
@@ -233,9 +232,8 @@ where
 // for this system. Access types are instead stored and abstracted in the top level vec here
 // so the underlying ResourceSet type functions from the queries don't need to allocate.
 // Otherwise, this leads to excessive alloaction for every call to reads/writes
-/// The core builder of `System` types, which are systems within Legion. Systems are implemented
-/// as singular closures for a given system - providing queries which should be cached for that
-/// system, as well as resource access and other metadata.
+
+/// A low level builder for constructing systems.
 /// ```rust
 /// # use legion::*;
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
@@ -260,7 +258,7 @@ where
 ///            });
 /// ```
 pub struct SystemBuilder<Q = (), R = ()> {
-    name: SystemId,
+    name: Option<SystemId>,
     queries: Q,
     resources: R,
     resource_access: Permissions<ResourceTypeId>,
@@ -275,7 +273,16 @@ impl SystemBuilder<(), ()> {
     /// purposes and is not logically used anywhere.
     pub fn new<T: Into<SystemId>>(name: T) -> Self {
         Self {
-            name: name.into(),
+            name: Some(name.into()),
+            ..Self::default()
+        }
+    }
+}
+
+impl Default for SystemBuilder<(), ()> {
+    fn default() -> Self {
+        Self {
+            name: None,
             queries: (),
             resources: (),
             resource_access: Permissions::default(),
@@ -290,6 +297,14 @@ where
     Q: 'static + Send + ConsFlatten,
     R: 'static + Send + ConsFlatten,
 {
+    /// Provides a name to the system being built.
+    pub fn with_name(self, name: SystemId) -> Self {
+        Self {
+            name: Some(name),
+            ..self
+        }
+    }
+
     /// Defines a query to provide this system for its execution. Multiple queries can be provided,
     /// and queries are cached internally for efficiency for filtering and archetype ID handling.
     ///

@@ -113,30 +113,24 @@ You may have noticed that when we wanted to write to a component, we needed to u
 [Systems](https://docs.rs/legion/latest/legion/systems/system/index.html) and the [Schedule](https://docs.rs/legion/latest/legion/systems/schedule/struct.Schedule.html) automates this process, and can even schedule work at a more granular level than you can otherwise do manually. A system is a unit of work. Each system is defined as a function which is provided access to queries and shared [resources](https://docs.rs/legion/latest/legion/systems/resources/struct.Resources.l). These systems can then be appended to a schedule, which is a linear sequence of systems, ordered by when side effects (such as writes to components) should be observed. The schedule will automatically parallelize the execution of all systems whilst maintaining the apparent order of execution from the perspective of each system.
 
 ```rust
-// start defining a new system
-let update_positions = SystemBuilder::new("update positions")
-    // give it a query - a system may have multiple queries
-    .with_query(<(Write<Position>, Read<Velocity>)>::query())
-    // give it read access to the time resource
-    .read_resource::<Time>()
-    // construct the system
-    .build(|command_buffer, world, time, query| {
-        for (position, velocity) in query.iter_mut(world) {
-            position.x += velocity.dx * time.elapsed_seconds;
-            position.y += velocity.dy * time.elapsed_seconds;
-        }
-    });
+// a system fn which loops through Position and Velocity components, and reads the Time shared resource
+// the #[system] macro generates a fn called update_positions_system() which will construct our system
+#[system(for_each)]
+fn update_positions(pos: &mut Position, vel: &Velocity, #[resource] time: &Time) {
+    pos.x += vel.dx * time.elapsed_seconds;
+    pos.y += vel.dy * time.elapsed_seconds;
+}
 
 // construct a schedule (you should do this on init)
 let mut schedule = Schedule::builder()
-    .add_system(update_positions)
+    .add_system(update_positions_system())
     .build();
 
 // run our schedule (you should do this each update)
 schedule.execute(&mut world, &mut resources);
 ```
 
-See the [systems module](https://docs.rs/legion/latest/legion/systems/index.html) for more information.
+See the [systems module](https://docs.rs/legion/latest/legion/systems/index.html) and the [system proc macro](https://docs.rs/legion/latest/legion/attr.system.html) for more information.
 
 # Feature Flags
 

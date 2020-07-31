@@ -38,7 +38,7 @@ impl<T: Runnable + Send + Sync> ParallelRunnable for T {}
 /// Trait describing a schedulable type. This is implemented by `System`
 pub trait Runnable {
     /// Gets the name of the system.
-    fn name(&self) -> &SystemId;
+    fn name(&self) -> Option<&SystemId>;
 
     /// Gets the resources and component types read by the system.
     fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]);
