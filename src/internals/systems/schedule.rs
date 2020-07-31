@@ -149,12 +149,16 @@ impl Executor {
                 HashMap::<ComponentTypeId, usize>::with_capacity_and_hasher(64, Default::default());
 
             for (i, system) in systems.iter().enumerate() {
-                let span = span!(
-                    Level::TRACE,
-                    "Building system dependencies",
-                    system = %system.name(),
-                    index = i,
-                );
+                let span = if let Some(name) = system.name() {
+                    span!(
+                        Level::TRACE,
+                        "Building system dependencies",
+                        system = %name,
+                        index = i,
+                    )
+                } else {
+                    span!(Level::TRACE, "building system dependencies", index = i)
+                };
                 let _guard = span.enter();
 
                 let (read_res, read_comp) = system.reads();
