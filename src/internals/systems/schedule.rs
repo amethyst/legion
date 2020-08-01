@@ -433,6 +433,12 @@ impl Builder {
         self
     }
 
+    /// Adds a boxed system to the schedule.
+    pub fn add_system_box<T: Into<Box<dyn ParallelRunnable>>>(mut self, system: T) -> Self {
+        self.accumulator.push(system.into());
+        self
+    }
+
     /// Waits for executing systems to complete, and the flushes all outstanding system
     /// command buffers.
     pub fn flush(mut self) -> Self {
