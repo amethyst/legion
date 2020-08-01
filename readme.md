@@ -11,9 +11,9 @@
 
 Legion aims to be a feature rich high performance ECS library for Rust game projects with minimal boilerplate.
 
-# Getting Started
+## Getting Started
 
-## Worlds
+### Worlds
 
 [Worlds](https://docs.rs/legion/latest/legion/world/struct.World.html) are collections of [entities](https://docs.rs/legion/latest/legion/entity/struct.Entity.html), where each entity can have an arbitrary collection of [components](https://docs.rs/legion/latest/legion/storage/component/trait.Component.html) attached.
 
@@ -64,7 +64,7 @@ if let Some(mut entry) = world.entry(entity) {
 }
 ```
 
-## Queries
+### Queries
 
 Entries are not the most convenient or performant way to search or bulk-access a world. [Queries](https://docs.rs/legion/latest/legion/query/index.html) allow for high performance and expressive iteration through the entities in a world.
 
@@ -106,7 +106,7 @@ for (velocity, position) in query.iter_mut(&mut world) {
 
 There is much more than can be done with queries. See the [module documentation](https://docs.rs/legion/latest/legion/query/index.html) for more information.
 
-## Systems
+### Systems
 
 You may have noticed that when we wanted to write to a component, we needed to use `iter_mut` to iterate through our query. But perhaps your application wants to be able to process different components on different entities, perhaps even at the same time in parallel? While it is possible to do this manually (see [World](https://docs.rs/legion/latest/legion/world/struct.World.html)::split), this is very difficult to do when the different pieces of the application don't know what components each other need, or might or might not even have conflicting access requirements.
 
@@ -132,16 +132,19 @@ schedule.execute(&mut world, &mut resources);
 
 See the [systems module](https://docs.rs/legion/latest/legion/systems/index.html) and the [system proc macro](https://docs.rs/legion/latest/legion/attr.system.html) for more information.
 
-# Feature Flags
+## Feature Flags
 
 Legion provides a few feature flags:  
- * `par-iter` - Enables parallel iterators and parallel schedule execution via the rayon library. Enabled by default.
- * `extended-tuple-impls` - Extends the maximum size of view and component tuples from 8 to 24, at the cost of increased compile times. Off by default.
- * `serialize` - Enables the serde serialization module and associated functionality. Enabled by default.
- * `crossbeam-events` - Implements the `EventSender` trait for crossbeam `Sender` channels, allowing them to be used for event subscriptions. Enabled by default.
 
-# WASM
-Legion runs with parallelism on by default, which is not currently supported by Web Assembly as it runs single-threaded. Therefore, to build for WASM, ensure you set `default-features = false` in Cargo.toml:
+* `par-iter` - Enables parallel iterators and parallel schedule execution via the rayon library. Enabled by default.
+* `extended-tuple-impls` - Extends the maximum size of view and component tuples from 8 to 24, at the cost of increased compile times. Off by default.
+* `serialize` - Enables the serde serialization module and associated functionality. Enabled by default.
+* `crossbeam-events` - Implements the `EventSender` trait for crossbeam `Sender` channels, allowing them to be used for event subscriptions. Enabled by default.
+
+## WASM
+
+Legion runs with parallelism on by default, which is not currently supported by Web Assembly as it runs single-threaded. Therefore, to build for WASM, ensure you set `default-features = false` in Cargo.toml. Additionally, you must enable either the `stdweb` or `wasm-bindgen` features, which will be proxied through to the `uuid` crate. See the [uuid crate](https://github.com/uuid-rs/uuid#dependencies) for more information.
+
 ```toml
-legion = { version = "*", default-features = false }
+legion = { version = "*", default-features = false, features = ["stdweb"] }
 ```
