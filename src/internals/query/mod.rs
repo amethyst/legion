@@ -204,7 +204,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     // Entity Indexing
     // ----------------
 
-    /// Returns the componnts for a single entity.
+    /// Returns the components for a single entity.
     ///
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
@@ -254,7 +254,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         }
     }
 
-    /// Returns the componnts for a single entity.
+    /// Returns the components for a single entity.
     pub fn get_mut<'query, 'world, T>(
         &'query mut self,
         world: &'world mut T,
@@ -267,7 +267,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         unsafe { self.get_unchecked(world, entity) }
     }
 
-    /// Returns the componnts for a single entity.
+    /// Returns the components for a single entity.
     pub fn get<'query, 'world, T>(
         &'query mut self,
         world: &'world T,
