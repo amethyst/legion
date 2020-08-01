@@ -46,16 +46,24 @@ impl<'data, T: Component> View<'data> for TryWrite<T> {
     }
 
     #[inline]
-    fn reads_types() -> Self::Read { [ComponentTypeId::of::<T>()] }
+    fn reads_types() -> Self::Read {
+        [ComponentTypeId::of::<T>()]
+    }
 
     #[inline]
-    fn writes_types() -> Self::Write { [ComponentTypeId::of::<T>()] }
+    fn writes_types() -> Self::Write {
+        [ComponentTypeId::of::<T>()]
+    }
 
     #[inline]
-    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
+    fn reads<D: Component>() -> bool {
+        TypeId::of::<T>() == TypeId::of::<D>()
+    }
 
     #[inline]
-    fn writes<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
+    fn writes<D: Component>() -> bool {
+        TypeId::of::<T>() == TypeId::of::<D>()
+    }
 
     #[inline]
     fn requires_permissions() -> Permissions<ComponentTypeId> {
@@ -139,7 +147,9 @@ impl<'a, T: Component> IntoIterator for Slice<'a, T> {
     type Item = <Self as IntoIndexableIter>::Item;
     type IntoIter = <Self as IntoIndexableIter>::IntoIter;
 
-    fn into_iter(self) -> Self::IntoIter { self.into_indexable_iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_indexable_iter()
+    }
 }
 
 impl<'a, T: Component> Fetch for Slice<'a, T> {

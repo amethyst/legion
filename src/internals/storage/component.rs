@@ -26,7 +26,9 @@ impl ComponentTypeId {
     }
 
     /// Returns the internal TypeID of the component.
-    pub fn type_id(&self) -> TypeId { self.type_id }
+    pub fn type_id(&self) -> TypeId {
+        self.type_id
+    }
 
     pub(crate) fn of_id(type_id: TypeId) -> Self {
         Self {
@@ -38,19 +40,27 @@ impl ComponentTypeId {
 }
 
 impl std::hash::Hash for ComponentTypeId {
-    fn hash<H: Hasher>(&self, state: &mut H) { self.type_id.hash(state); }
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_id.hash(state);
+    }
 }
 
 impl PartialEq for ComponentTypeId {
-    fn eq(&self, other: &Self) -> bool { self.type_id.eq(&other.type_id) }
+    fn eq(&self, other: &Self) -> bool {
+        self.type_id.eq(&other.type_id)
+    }
 }
 
 impl Display for ComponentTypeId {
     #[cfg(debug_assertions)]
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.name) }
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
 
     #[cfg(not(debug_assertions))]
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "{:?}", self.type_id) }
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.type_id)
+    }
 }
 
 /// A marker trait for all types which can be attached to an entity.

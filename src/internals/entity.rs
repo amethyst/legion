@@ -95,11 +95,15 @@ pub struct Allocate {
 
 impl Allocate {
     /// Constructs a new enity ID allocator iterator.
-    pub fn new() -> Self { Self { base: 0, count: 0 } }
+    pub fn new() -> Self {
+        Self { base: 0, count: 0 }
+    }
 }
 
 impl Default for Allocate {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<'a> Iterator for Allocate {
@@ -128,10 +132,14 @@ impl EntityLocation {
     }
 
     /// Returns the entity's archetype index.
-    pub fn archetype(&self) -> ArchetypeIndex { self.0 }
+    pub fn archetype(&self) -> ArchetypeIndex {
+        self.0
+    }
 
     /// Returns the entity's component index within its archetype.
-    pub fn component(&self) -> ComponentIndex { self.1 }
+    pub fn component(&self) -> ComponentIndex {
+        self.1
+    }
 }
 
 /// A hasher optimized for entity IDs.
@@ -157,13 +165,19 @@ impl Debug for LocationMap {
 
 impl LocationMap {
     /// Returns the number of entities in the map.
-    pub fn len(&self) -> usize { self.len }
+    pub fn len(&self) -> usize {
+        self.len
+    }
 
     /// Returns `true` if the location map is empty.
-    pub fn is_empty(&self) -> bool { self.len() == 0 }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     /// Returns `true` if the location map contains the given entity.
-    pub fn contains(&self, entity: Entity) -> bool { self.get(entity).is_some() }
+    pub fn contains(&self, entity: Entity) -> bool {
+        self.get(entity).is_some()
+    }
 
     /// Inserts an collection of adjacent entities into the location map.
     pub fn insert(
@@ -253,7 +267,9 @@ pub struct Canon {
 
 impl Canon {
     /// Returns the [Entity](struct.Entity.html) ID associated with the given [EntityName](struct.EntityName.html).
-    pub fn get_id(&self, name: &EntityName) -> Option<Entity> { self.to_id.get(name).copied() }
+    pub fn get_id(&self, name: &EntityName) -> Option<Entity> {
+        self.to_id.get(name).copied()
+    }
 
     /// Returns the [EntityName](struct.EntityName.html) associated with the given [Entity](struct.Entity.html) ID.
     pub fn get_name(&self, entity: Entity) -> Option<EntityName> {

@@ -149,7 +149,9 @@ where
 }
 
 impl<T: TypeKey> Default for Registry<T> {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T> WorldSerializer for Registry<T>

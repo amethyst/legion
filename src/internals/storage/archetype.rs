@@ -31,7 +31,9 @@ pub struct ArchetypeIndex(pub u32);
 impl Index<ArchetypeIndex> for [Archetype] {
     type Output = Archetype;
 
-    fn index(&self, index: ArchetypeIndex) -> &Self::Output { &self[index.0 as usize] }
+    fn index(&self, index: ArchetypeIndex) -> &Self::Output {
+        &self[index.0 as usize]
+    }
 }
 
 impl IndexMut<ArchetypeIndex> for [Archetype] {
@@ -43,7 +45,9 @@ impl IndexMut<ArchetypeIndex> for [Archetype] {
 impl Index<ArchetypeIndex> for Vec<Archetype> {
     type Output = Archetype;
 
-    fn index(&self, index: ArchetypeIndex) -> &Self::Output { &self[index.0 as usize] }
+    fn index(&self, index: ArchetypeIndex) -> &Self::Output {
+        &self[index.0 as usize]
+    }
 }
 
 impl IndexMut<ArchetypeIndex> for Vec<Archetype> {
@@ -77,14 +81,20 @@ impl Archetype {
     }
 
     /// Returns the index of the archetype.
-    pub fn index(&self) -> ArchetypeIndex { self.index }
+    pub fn index(&self) -> ArchetypeIndex {
+        self.index
+    }
 
     /// Returns the layout of the archetype, describing which components are attached
     /// to all entities contained within the archetype.
-    pub fn layout(&self) -> &Arc<EntityLayout> { &self.layout }
+    pub fn layout(&self) -> &Arc<EntityLayout> {
+        &self.layout
+    }
 
     /// Returns a slice of entity IDs for all entities which belong to the archetype.
-    pub fn entities(&self) -> &[Entity] { &self.entities }
+    pub fn entities(&self) -> &[Entity] {
+        &self.entities
+    }
 
     pub(crate) fn push(&mut self, entity: Entity) {
         self.entities.push(entity);
@@ -145,7 +155,9 @@ pub struct EntityLayout {
 
 impl EntityLayout {
     /// Constructs a new entity layout.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Adds a new component to the layout.
     pub fn register_component<T: Component>(&mut self) {
@@ -178,7 +190,9 @@ impl EntityLayout {
     }
 
     /// Returns a slice of component type IDs for the components inside the layout.
-    pub fn component_types(&self) -> &[ComponentTypeId] { &self.components }
+    pub fn component_types(&self) -> &[ComponentTypeId] {
+        &self.components
+    }
 
     /// Returns a slice of storage constructors for each component type in the layout.
     #[doc(hidden)]

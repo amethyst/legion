@@ -69,16 +69,24 @@ impl<'a> QueryResult<'a> {
     }
 
     /// The sub-range of archetypes which should be accessed.
-    pub fn range(&self) -> &Range<usize> { &self.range }
+    pub fn range(&self) -> &Range<usize> {
+        &self.range
+    }
 
     /// Returns `true` if components can be assumed to be stored in the same order as given.
-    pub fn is_ordered(&self) -> bool { self.is_ordered }
+    pub fn is_ordered(&self) -> bool {
+        self.is_ordered
+    }
 
     /// The number of archetypes that matches the filter.
-    pub fn len(&self) -> usize { self.range.len() }
+    pub fn len(&self) -> usize {
+        self.range.len()
+    }
 
     /// Returns `true` if no archetypes matched the filter.
-    pub fn is_empty(&self) -> bool { self.index().is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.index().is_empty()
+    }
 
     pub(crate) fn split_at(self, index: usize) -> (Self, Self) {
         (
@@ -723,15 +731,21 @@ pub struct ChunkView<'a, F: Fetch> {
 }
 
 impl<'a, F: Fetch> ChunkView<'a, F> {
-    fn new(archetype: &'a Archetype, fetch: F) -> Self { Self { archetype, fetch } }
+    fn new(archetype: &'a Archetype, fetch: F) -> Self {
+        Self { archetype, fetch }
+    }
 
     /// Returns the archetype that all entities in the chunk belong to.
-    pub fn archetype(&self) -> &Archetype { &self.archetype }
+    pub fn archetype(&self) -> &Archetype {
+        &self.archetype
+    }
 
     /// Returns a slice of components.
     ///
     /// May return `None` if the chunk's view does not declare access to the component type.
-    pub fn component_slice<T: Component>(&self) -> Option<&[T]> { self.fetch.find::<T>() }
+    pub fn component_slice<T: Component>(&self) -> Option<&[T]> {
+        self.fetch.find::<T>()
+    }
 
     /// Returns a mutable slice of components.
     ///
@@ -756,7 +770,9 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
     ///     let slices: (&[Entity], &[A], &mut [B], Option<&[C]>, Option<&mut [D]>) = chunk.into_components();       
     /// }
     /// ```
-    pub fn into_components(self) -> F::Data { self.fetch.into_components() }
+    pub fn into_components(self) -> F::Data {
+        self.fetch.into_components()
+    }
 
     /// Converts the chunk into a tuple of it's inner slices.
     ///
@@ -796,7 +812,9 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
 impl<'a, F: Fetch> IntoIterator for ChunkView<'a, F> {
     type IntoIter = <F as IntoIndexableIter>::IntoIter;
     type Item = <F as IntoIndexableIter>::Item;
-    fn into_iter(self) -> Self::IntoIter { self.fetch.into_indexable_iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.fetch.into_indexable_iter()
+    }
 }
 
 #[cfg(feature = "par-iter")]
@@ -841,7 +859,9 @@ where
         None
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) { (0, Some(self.max_count)) }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.max_count))
+    }
 }
 
 // impl<'world, 'query, I, F> Iterator for ChunkIter<'world, 'query, I, Passthrough, F>
@@ -909,7 +929,9 @@ pub mod par_iter {
             None
         }
 
-        fn size_hint(&self) -> (usize, Option<usize>) { (0, Some(self.max_count)) }
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            (0, Some(self.max_count))
+        }
     }
 
     /// A parallel entity chunk iterator.

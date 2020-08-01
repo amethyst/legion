@@ -39,7 +39,9 @@ impl<'a> ArchetypeWriter<'a> {
     }
 
     /// Returns the archetype being written to.
-    pub fn archetype(&self) -> &Archetype { &self.archetype }
+    pub fn archetype(&self) -> &Archetype {
+        &self.archetype
+    }
 
     fn mark_claimed(&mut self, type_id: ComponentTypeId) {
         let component_index = self
@@ -87,7 +89,9 @@ impl<'a> ArchetypeWriter<'a> {
     }
 
     /// Pushes an entity ID into the archetype.
-    pub fn push(&mut self, entity: Entity) { self.archetype.push(entity); }
+    pub fn push(&mut self, entity: Entity) {
+        self.archetype.push(entity);
+    }
 
     /// Returns a slice of entities inserted by this writer, and the component index of the first inserted entity.
     pub fn inserted(&self) -> (ComponentIndex, &[Entity]) {
@@ -261,7 +265,9 @@ where
 {
     type Source = Aos<I::Item, I::IntoIter>;
 
-    fn into(self) -> Self::Source { <Self::Source>::new(self.into_iter()) }
+    fn into(self) -> Self::Source {
+        <Self::Source>::new(self.into_iter())
+    }
 }
 
 /// A layout filter used to select the appropriate archetype for interting
@@ -269,7 +275,9 @@ where
 pub struct ComponentSourceFilter<T>(PhantomData<T>);
 
 impl<T> Default for ComponentSourceFilter<T> {
-    fn default() -> Self { ComponentSourceFilter(PhantomData) }
+    fn default() -> Self {
+        ComponentSourceFilter(PhantomData)
+    }
 }
 
 impl LayoutFilter for ComponentSourceFilter<()> {
@@ -284,7 +292,9 @@ where
     Aos<(), Iter>: ComponentSource,
 {
     type Source = Self;
-    fn into(self) -> Self::Source { self }
+    fn into(self) -> Self::Source {
+        self
+    }
 }
 
 impl<Iter> ArchetypeSource for Aos<(), Iter>
@@ -293,9 +303,13 @@ where
 {
     type Filter = ComponentSourceFilter<()>;
 
-    fn filter(&self) -> Self::Filter { ComponentSourceFilter(PhantomData) }
+    fn filter(&self) -> Self::Filter {
+        ComponentSourceFilter(PhantomData)
+    }
 
-    fn layout(&mut self) -> EntityLayout { EntityLayout::default() }
+    fn layout(&mut self) -> EntityLayout {
+        EntityLayout::default()
+    }
 }
 
 impl<Iter> ComponentSource for Aos<(), Iter>
@@ -318,7 +332,9 @@ impl<Iter> KnownLength for Aos<(), Iter>
 where
     Iter: ExactSizeIterator,
 {
-    fn len(&self) -> usize { self.iter.len() }
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
 }
 
 macro_rules! component_source {

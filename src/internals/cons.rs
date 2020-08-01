@@ -36,12 +36,16 @@ pub trait ConsPrepend<T> {
 
 impl<T> ConsPrepend<T> for () {
     type Output = (T, Self);
-    fn prepend(self, t: T) -> Self::Output { (t, self) }
+    fn prepend(self, t: T) -> Self::Output {
+        (t, self)
+    }
 }
 
 impl<T, A, B> ConsPrepend<T> for (A, B) {
     type Output = (T, Self);
-    fn prepend(self, t: T) -> Self::Output { (t, self) }
+    fn prepend(self, t: T) -> Self::Output {
+        (t, self)
+    }
 }
 
 /// Prepend a new type into a cons list
@@ -54,7 +58,9 @@ pub trait ConsAppend<T> {
 
 impl<T> ConsAppend<T> for () {
     type Output = (T, Self);
-    fn append(self, t: T) -> Self::Output { (t, ()) }
+    fn append(self, t: T) -> Self::Output {
+        (t, ())
+    }
 }
 
 impl<T, A, B: ConsAppend<T>> ConsAppend<T> for (A, B) {
@@ -75,7 +81,9 @@ pub trait ConsFlatten {
 
 impl ConsFlatten for () {
     type Output = ();
-    fn flatten(self) -> Self::Output { self }
+    fn flatten(self) -> Self::Output {
+        self
+    }
 }
 
 macro_rules! cons {

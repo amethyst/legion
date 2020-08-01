@@ -18,7 +18,9 @@ fn basic_system() {
 #[cfg(feature = "codegen")]
 fn for_each_system() {
     #[system(for_each)]
-    fn sum(component: &usize, #[resource] total: &mut usize) { *total += component; }
+    fn sum(component: &usize, #[resource] total: &mut usize) {
+        *total += component;
+    }
 
     let mut world = World::default();
     world.extend(vec![(1usize, true), (2usize, false), (3usize, true)]);

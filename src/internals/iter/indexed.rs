@@ -12,26 +12,38 @@ unsafe impl<'a, T> TrustedRandomAccess for &'a [T] {
     type Item = &'a T;
 
     #[inline]
-    fn len(&self) -> usize { <[T]>::len(self) }
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
 
     #[inline]
-    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item { &*self.as_ptr().add(i) }
+    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item {
+        &*self.as_ptr().add(i)
+    }
 
     #[inline]
-    fn split_at(self, index: usize) -> (Self, Self) { <[T]>::split_at(self, index) }
+    fn split_at(self, index: usize) -> (Self, Self) {
+        <[T]>::split_at(self, index)
+    }
 }
 
 unsafe impl<'a, T> TrustedRandomAccess for &'a mut [T] {
     type Item = &'a mut T;
 
     #[inline]
-    fn len(&self) -> usize { <[T]>::len(self) }
+    fn len(&self) -> usize {
+        <[T]>::len(self)
+    }
 
     #[inline]
-    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item { &mut *self.as_mut_ptr().add(i) }
+    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item {
+        &mut *self.as_mut_ptr().add(i)
+    }
 
     #[inline]
-    fn split_at(self, index: usize) -> (Self, Self) { <[T]>::split_at_mut(self, index) }
+    fn split_at(self, index: usize) -> (Self, Self) {
+        <[T]>::split_at_mut(self, index)
+    }
 }
 
 /// An iterator over an indexable slice.
@@ -76,7 +88,9 @@ impl<T: TrustedRandomAccess> Iterator for IndexedIter<T> {
     }
 
     #[inline]
-    fn count(self) -> usize { <Self as ExactSizeIterator>::len(&self) }
+    fn count(self) -> usize {
+        <Self as ExactSizeIterator>::len(&self)
+    }
 
     #[inline]
     fn nth(&mut self, n: usize) -> Option<Self::Item> {
@@ -126,17 +140,23 @@ impl<T: TrustedRandomAccess> DoubleEndedIterator for IndexedIter<T> {
 
 impl<T: TrustedRandomAccess> ExactSizeIterator for IndexedIter<T> {
     #[inline]
-    fn len(&self) -> usize { self.len - self.index }
+    fn len(&self) -> usize {
+        self.len - self.index
+    }
 }
 
 unsafe impl<T: TrustedRandomAccess> TrustedRandomAccess for IndexedIter<T> {
     type Item = <Self as Iterator>::Item;
 
     #[inline]
-    fn len(&self) -> usize { <Self as ExactSizeIterator>::len(self) }
+    fn len(&self) -> usize {
+        <Self as ExactSizeIterator>::len(self)
+    }
 
     #[inline]
-    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item { self.inner.get_unchecked(i) }
+    unsafe fn get_unchecked(&mut self, i: usize) -> Self::Item {
+        self.inner.get_unchecked(i)
+    }
 
     fn split_at(self, index: usize) -> (Self, Self) {
         let (_, remaining) = self.inner.split_at(self.index);
@@ -232,7 +252,9 @@ pub mod par_iter {
         type Item = <IndexedIter<T> as Iterator>::Item;
         type IntoIter = IndexedIter<T>;
 
-        fn into_iter(self) -> Self::IntoIter { self.iter }
+        fn into_iter(self) -> Self::IntoIter {
+            self.iter
+        }
 
         fn split_at(self, index: usize) -> (Self, Self) {
             let (left, right) = TrustedRandomAccess::split_at(self.iter, index);
@@ -288,9 +310,13 @@ pub mod par_iter {
         T: TrustedRandomAccess + Send + Sync,
         <T as TrustedRandomAccess>::Item: Send,
     {
-        fn len(&self) -> usize { ExactSizeIterator::len(&self.iter) }
+        fn len(&self) -> usize {
+            ExactSizeIterator::len(&self.iter)
+        }
 
-        fn drive<C: Consumer<Self::Item>>(self, consumer: C) -> C::Result { bridge(self, consumer) }
+        fn drive<C: Consumer<Self::Item>>(self, consumer: C) -> C::Result {
+            bridge(self, consumer)
+        }
 
         fn with_producer<CB: ProducerCallback<Self::Item>>(self, callback: CB) -> CB::Output {
             callback.callback(self)

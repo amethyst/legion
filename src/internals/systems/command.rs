@@ -68,7 +68,9 @@ impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> IntoCompone
 {
     type Source = Self;
 
-    fn into(self) -> Self::Source { self }
+    fn into(self) -> Self::Source {
+        self
+    }
 }
 
 impl<I: Iterator<Item = Entity>, C: ComponentSource> PreallocComponentSource<Fuse<I>, C> {
@@ -84,8 +86,12 @@ impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ArchetypeSo
     for PreallocComponentSource<I, C>
 {
     type Filter = C::Filter;
-    fn filter(&self) -> Self::Filter { self.components.filter() }
-    fn layout(&mut self) -> EntityLayout { self.components.layout() }
+    fn filter(&self) -> Self::Filter {
+        self.components.filter()
+    }
+    fn layout(&mut self) -> EntityLayout {
+        self.components.layout()
+    }
 }
 
 impl<I: Iterator<Item = Entity> + FusedIterator, C: ComponentSource> ComponentSource
@@ -114,7 +120,9 @@ impl<'a, T, A: Iterator<Item = T> + FusedIterator, B: Iterator<Item = T>> Iterat
 {
     type Item = T;
 
-    fn next(&mut self) -> Option<T> { self.a.next().or_else(|| self.b.next()) }
+    fn next(&mut self) -> Option<T> {
+        self.a.next().or_else(|| self.b.next())
+    }
 }
 
 #[derive(Derivative)]
@@ -139,7 +147,9 @@ where
 struct DeleteEntityCommand(Entity);
 
 impl WorldWritable for DeleteEntityCommand {
-    fn write(self: Arc<Self>, world: &mut World, _: &CommandBuffer) { world.remove(self.0); }
+    fn write(self: Arc<Self>, world: &mut World, _: &CommandBuffer) {
+        world.remove(self.0);
+    }
 }
 
 #[derive(Derivative)]
@@ -233,7 +243,9 @@ impl CommandBuffer {
     }
 
     /// Gets the ID of the world this command buffer belongs to.
-    pub fn world(&self) -> WorldId { self.world_id }
+    pub fn world(&self) -> WorldId {
+        self.world_id
+    }
 
     /// Flushes this command buffer, draining all stored commands and writing them to the world.
     ///
@@ -314,7 +326,9 @@ impl CommandBuffer {
     }
 
     /// Queues the deletion of an entity in the command buffer.
-    pub fn remove(&mut self, entity: Entity) { self.insert_writer(DeleteEntityCommand(entity)); }
+    pub fn remove(&mut self, entity: Entity) {
+        self.insert_writer(DeleteEntityCommand(entity));
+    }
 
     /// Queues the addition of a component from an entity in the command buffer.
     pub fn add_component<C: Component>(&mut self, entity: Entity, component: C) {
@@ -331,11 +345,15 @@ impl CommandBuffer {
 
     /// Returns the current number of commands already queued in this `CommandBuffer` instance.
     #[inline]
-    pub fn len(&self) -> usize { self.commands.len() }
+    pub fn len(&self) -> usize {
+        self.commands.len()
+    }
 
     /// Returns true if this `CommandBuffer` is currently empty and contains no writers.
     #[inline]
-    pub fn is_empty(&self) -> bool { self.len() == 0 }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 #[cfg(test)]

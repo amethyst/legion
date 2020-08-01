@@ -22,7 +22,9 @@ impl<T: PartialEq> Permissions<T> {
         }
     }
 
-    fn find(&self, item: &T) -> Option<usize> { self.items.iter().position(|x| x == item) }
+    fn find(&self, item: &T) -> Option<usize> {
+        self.items.iter().position(|x| x == item)
+    }
 
     /// Adds a resource to the permissions set as both readable and writable.
     pub fn push(&mut self, item: T) {
@@ -176,19 +178,29 @@ impl<T: PartialEq> Permissions<T> {
     }
 
     /// Gets a slice of resources which are afforded read access.
-    pub fn reads(&self) -> &[T] { &self.items[..self.write] }
+    pub fn reads(&self) -> &[T] {
+        &self.items[..self.write]
+    }
 
     /// Gets a slice of resources which are afforded write access.
-    pub fn writes(&self) -> &[T] { &self.items[self.shared..] }
+    pub fn writes(&self) -> &[T] {
+        &self.items[self.shared..]
+    }
 
     /// Gets a slice of resources which are afforded read access but not write access.
-    pub fn read_only(&self) -> &[T] { &self.items[..self.shared] }
+    pub fn read_only(&self) -> &[T] {
+        &self.items[..self.shared]
+    }
 
     /// Gets a slice of resources which are afforded write access but not read access.
-    pub fn write_only(&self) -> &[T] { &self.items[self.write..] }
+    pub fn write_only(&self) -> &[T] {
+        &self.items[self.write..]
+    }
 
     /// Gets a slice of resources which are afforded both read and write access.
-    pub fn readwrite(&self) -> &[T] { &self.items[self.shared..self.write] }
+    pub fn readwrite(&self) -> &[T] {
+        &self.items[self.shared..self.write]
+    }
 
     /// Returns `true` if all of the permissions in the given set are contained in this set.
     pub fn is_superset(&self, other: &Self) -> bool {
@@ -248,7 +260,9 @@ impl<T: PartialEq> Permissions<T> {
 }
 
 impl<T: PartialEq> Default for Permissions<T> {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T: PartialEq + Debug> Debug for Permissions<T> {

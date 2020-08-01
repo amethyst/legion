@@ -260,7 +260,9 @@ impl<'a> EntityStore for SubWorld<'a> {
         }
     }
 
-    fn id(&self) -> WorldId { self.world.id() }
+    fn id(&self) -> WorldId {
+        self.world.id()
+    }
 }
 
 impl<'a> From<&'a mut World> for SubWorld<'a> {

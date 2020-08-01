@@ -59,10 +59,14 @@ impl<'a, T> Iterator for SliceVecIter<'a, T> {
     }
 
     #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) { (self.counts.len(), Some(self.counts.len())) }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.counts.len(), Some(self.counts.len()))
+    }
 
     #[inline]
-    fn count(self) -> usize { self.len() }
+    fn count(self) -> usize {
+        self.len()
+    }
 }
 
 impl<'a, T> ExactSizeIterator for SliceVecIter<'a, T> {}
@@ -73,7 +77,9 @@ mod test {
     use super::*;
 
     #[test]
-    fn create() { let _ = SliceVec::<usize>::default(); }
+    fn create() {
+        let _ = SliceVec::<usize>::default();
+    }
 
     #[test]
     fn push() {
