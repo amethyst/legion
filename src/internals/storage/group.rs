@@ -13,7 +13,9 @@ pub struct GroupDef {
 
 impl GroupDef {
     /// Constructs a new component group.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Constructs a new component group from a vector of component type IDs.
     pub fn from_vec(components: Vec<ComponentTypeId>) -> Self {
@@ -37,7 +39,9 @@ impl GroupDef {
 }
 
 impl From<Vec<ComponentTypeId>> for GroupDef {
-    fn from(components: Vec<ComponentTypeId>) -> Self { Self::from_vec(components) }
+    fn from(components: Vec<ComponentTypeId>) -> Self {
+        Self::from_vec(components)
+    }
 }
 
 /// The index of a the last component which defines a subset of a component group.
@@ -133,7 +137,9 @@ impl Index<SubGroup> for Group {
 }
 
 impl From<GroupDef> for Group {
-    fn from(def: GroupDef) -> Self { Self::new(def.components) }
+    fn from(def: GroupDef) -> Self {
+        Self::new(def.components)
+    }
 }
 
 /// A type which defines a component group.

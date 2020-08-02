@@ -136,7 +136,9 @@ where
     Q: QuerySet,
     F: SystemFn<R, Q>,
 {
-    fn name(&self) -> Option<&SystemId> { self.name.as_ref() }
+    fn name(&self) -> Option<&SystemId> {
+        self.name.as_ref()
+    }
 
     fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) {
         (
@@ -158,7 +160,9 @@ where
         }
     }
 
-    fn accesses_archetypes(&self) -> &ArchetypeAccess { &self.archetypes }
+    fn accesses_archetypes(&self) -> &ArchetypeAccess {
+        &self.archetypes
+    }
 
     fn command_buffer_mut(&mut self, world: WorldId) -> Option<&mut CommandBuffer> {
         self.command_buffer.get_mut(&world)

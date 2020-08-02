@@ -5,7 +5,9 @@ use std::hash::Hasher;
 pub struct ComponentTypeIdHasher(u64);
 
 impl Hasher for ComponentTypeIdHasher {
-    fn finish(&self) -> u64 { self.0 }
+    fn finish(&self) -> u64 {
+        self.0
+    }
 
     fn write(&mut self, bytes: &[u8]) {
         use core::convert::TryInto;
@@ -18,7 +20,9 @@ impl Hasher for ComponentTypeIdHasher {
 pub struct U64Hasher(u64);
 
 impl Hasher for U64Hasher {
-    fn finish(&self) -> u64 { self.0 }
+    fn finish(&self) -> u64 {
+        self.0
+    }
 
     fn write(&mut self, bytes: &[u8]) {
         use core::convert::TryInto;

@@ -43,11 +43,15 @@ pub struct UniverseId(u64);
 static UNIVERSE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl UniverseId {
-    fn next() -> Self { UniverseId(UNIVERSE_ID_COUNTER.fetch_add(1, Ordering::Relaxed)) }
+    fn next() -> Self {
+        UniverseId(UNIVERSE_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
 }
 
 impl Default for UniverseId {
-    fn default() -> Self { Self::next() }
+    fn default() -> Self {
+        Self::next()
+    }
 }
 
 /// A Universe defines a namespace where canonical entity names will always resolve to the same
@@ -60,10 +64,14 @@ pub struct Universe {
 
 impl Universe {
     /// Creates a new universe across the entire entity address space.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Creates a new [World](struct.World.html) in this universe with default options.
-    pub fn create_world(&self) -> World { self.create_world_with_options(WorldOptions::default()) }
+    pub fn create_world(&self) -> World {
+        self.create_world_with_options(WorldOptions::default())
+    }
 
     /// Creates a new [World](struct.World.html) in this universe.
     pub fn create_world_with_options(&self, options: WorldOptions) -> World {
@@ -75,10 +83,14 @@ impl Universe {
     }
 
     /// Returns an RAII object which can deref into the universe's canon.
-    pub fn canon(&self) -> RwLockReadGuard<'_, Canon> { self.canon.read_recursive() }
+    pub fn canon(&self) -> RwLockReadGuard<'_, Canon> {
+        self.canon.read_recursive()
+    }
 
     /// Returns an RAII object which can deref mut into the universe's canon.
-    pub fn canon_mut(&self) -> RwLockWriteGuard<'_, Canon> { self.canon.write() }
+    pub fn canon_mut(&self) -> RwLockWriteGuard<'_, Canon> {
+        self.canon.write()
+    }
 }
 
 /// Error type representing a failure to aquire a storage accessor.
@@ -112,11 +124,15 @@ impl WorldId {
     fn next(universe: UniverseId) -> Self {
         WorldId(universe, WORLD_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
     }
-    fn universe(&self) -> UniverseId { self.0 }
+    fn universe(&self) -> UniverseId {
+        self.0
+    }
 }
 
 impl Default for WorldId {
-    fn default() -> Self { Self::next(UniverseId::default()) }
+    fn default() -> Self {
+        Self::next(UniverseId::default())
+    }
 }
 
 /// Describes configuration options for the creation of a new [world](struct.World.html).
@@ -148,12 +164,16 @@ pub struct World {
 }
 
 impl Default for World {
-    fn default() -> Self { Self::with_options(WorldOptions::default()) }
+    fn default() -> Self {
+        Self::with_options(WorldOptions::default())
+    }
 }
 
 impl World {
     /// Creates a new world in its own [universe](struct.Universe.html) with default [options](struct.WorldOptions.html).
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Creates a new world in its own [universe](struct.Universe.html).
     pub fn with_options(options: WorldOptions) -> Self {
@@ -190,16 +210,24 @@ impl World {
     }
 
     /// Returns the world's unique ID.
-    pub fn id(&self) -> WorldId { self.id }
+    pub fn id(&self) -> WorldId {
+        self.id
+    }
 
     /// Returns the number of entities in the world.
-    pub fn len(&self) -> usize { self.entities.len() }
+    pub fn len(&self) -> usize {
+        self.entities.len()
+    }
 
     /// Returns `true` if the world contains no entities.
-    pub fn is_empty(&self) -> bool { self.len() == 0 }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     /// Returns `true` if the world contains an entity with the given ID.
-    pub fn contains(&self, entity: Entity) -> bool { self.entities.contains(entity) }
+    pub fn contains(&self, entity: Entity) -> bool {
+        self.entities.contains(entity)
+    }
 
     /// Appends a named entity to the word, replacing any existing entity with the given canonical name.
     /// Returns the ID of the entity.
@@ -375,19 +403,33 @@ impl World {
     /// Packs the world's internal component storage to optimise iteration performance for
     /// [queries](../query/index.html) which match a [group](../storage/struct.Group.html)
     /// defined when this world was created.
-    pub fn pack(&mut self, options: PackOptions) { self.components.pack(&options); }
+    pub fn pack(&mut self, options: PackOptions) {
+        self.components.pack(&options);
+    }
 
-    pub(crate) fn universe(&self) -> &Universe { &self.universe }
+    pub(crate) fn universe(&self) -> &Universe {
+        &self.universe
+    }
 
-    pub(crate) fn components(&self) -> &Components { &self.components }
+    pub(crate) fn components(&self) -> &Components {
+        &self.components
+    }
 
-    pub(crate) fn components_mut(&mut self) -> &mut Components { &mut self.components }
+    pub(crate) fn components_mut(&mut self) -> &mut Components {
+        &mut self.components
+    }
 
-    pub(crate) fn archetypes(&self) -> &[Archetype] { &self.archetypes }
+    pub(crate) fn archetypes(&self) -> &[Archetype] {
+        &self.archetypes
+    }
 
-    pub(crate) fn archetypes_mut(&mut self) -> &mut [Archetype] { &mut self.archetypes }
+    pub(crate) fn archetypes_mut(&mut self) -> &mut [Archetype] {
+        &mut self.archetypes
+    }
 
-    pub(crate) fn entities_mut(&mut self) -> &mut LocationMap { &mut self.entities }
+    pub(crate) fn entities_mut(&mut self) -> &mut LocationMap {
+        &mut self.entities
+    }
 
     pub(crate) unsafe fn transfer_archetype(
         &mut self,
@@ -899,7 +941,9 @@ impl EntityStore for World {
         ))
     }
 
-    fn id(&self) -> WorldId { self.id }
+    fn id(&self) -> WorldId {
+        self.id
+    }
 }
 
 /// Provides access to the archetypes and entity components contained within a world.
@@ -945,7 +989,9 @@ impl<'a> StorageAccessor<'a> {
     }
 
     /// Returns the world ID.
-    pub fn id(&self) -> WorldId { self.id }
+    pub fn id(&self) -> WorldId {
+        self.id
+    }
 
     /// Returns `true` if the given archetype is accessable from this storage accessor.
     pub fn can_access_archetype(&self, ArchetypeIndex(archetype): ArchetypeIndex) -> bool {
@@ -956,16 +1002,24 @@ impl<'a> StorageAccessor<'a> {
     }
 
     /// Returns the archetype layout index.
-    pub fn layout_index(&self) -> &'a SearchIndex { self.index }
+    pub fn layout_index(&self) -> &'a SearchIndex {
+        self.index
+    }
 
     /// Returns the component storage.
-    pub fn components(&self) -> &'a Components { self.components }
+    pub fn components(&self) -> &'a Components {
+        self.components
+    }
 
     /// Returns the archetypes.
-    pub fn archetypes(&self) -> &'a [Archetype] { self.archetypes }
+    pub fn archetypes(&self) -> &'a [Archetype] {
+        self.archetypes
+    }
 
     /// Returns group definitions.
-    pub fn groups(&self) -> &'a [Group] { self.groups }
+    pub fn groups(&self) -> &'a [Group] {
+        self.groups
+    }
 
     /// Returns the group the given component belongs to.
     pub fn group(&self, type_id: ComponentTypeId) -> Option<(usize, &'a Group)> {
@@ -979,10 +1033,14 @@ impl<'a> StorageAccessor<'a> {
 pub trait Merger {
     /// Indicates if the merger prefers to merge into a new empty archetype.
     #[inline]
-    fn prefers_new_archetype() -> bool { false }
+    fn prefers_new_archetype() -> bool {
+        false
+    }
 
     /// Indicates how the merger wishes entity IDs to be adjusted while cloning a world.
-    fn entity_map(&mut self) -> EntityRewrite { EntityRewrite::default() }
+    fn entity_map(&mut self) -> EntityRewrite {
+        EntityRewrite::default()
+    }
 
     /// Returns the ID to use in the destination world when cloning the given entity.
     #[inline]
@@ -998,7 +1056,9 @@ pub trait Merger {
 
     /// Calculates the destination entity layout for the given source layout.
     #[inline]
-    fn convert_layout(&mut self, source_layout: EntityLayout) -> EntityLayout { source_layout }
+    fn convert_layout(&mut self, source_layout: EntityLayout) -> EntityLayout {
+        source_layout
+    }
 
     /// Merges an archetype from the source world into the destination world.
     fn merge_archetype(
@@ -1021,7 +1081,9 @@ pub enum EntityRewrite {
 }
 
 impl Default for EntityRewrite {
-    fn default() -> Self { Self::Auto(None) }
+    fn default() -> Self {
+        Self::Auto(None)
+    }
 }
 
 /// A [merger](trait.Merger.html) which clones entities from the source world into the destination,
@@ -1048,7 +1110,9 @@ pub struct Duplicate {
 
 impl Duplicate {
     /// Creates a new duplicate merger.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Allows the merger to copy the given component into the destination world.
     pub fn register_copy<T: Component + Copy>(&mut self) {
@@ -1180,7 +1244,9 @@ mod test {
     struct Rot(f32, f32, f32);
 
     #[test]
-    fn create() { let _ = World::default(); }
+    fn create() {
+        let _ = World::default();
+    }
 
     #[test]
     fn create_in_universe() {

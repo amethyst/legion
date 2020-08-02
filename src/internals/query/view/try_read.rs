@@ -47,16 +47,24 @@ impl<'data, T: Component> View<'data> for TryRead<T> {
     }
 
     #[inline]
-    fn reads_types() -> Self::Read { [ComponentTypeId::of::<T>()] }
+    fn reads_types() -> Self::Read {
+        [ComponentTypeId::of::<T>()]
+    }
 
     #[inline]
-    fn writes_types() -> Self::Write { [] }
+    fn writes_types() -> Self::Write {
+        []
+    }
 
     #[inline]
-    fn reads<D: Component>() -> bool { TypeId::of::<T>() == TypeId::of::<D>() }
+    fn reads<D: Component>() -> bool {
+        TypeId::of::<T>() == TypeId::of::<D>()
+    }
 
     #[inline]
-    fn writes<D: Component>() -> bool { false }
+    fn writes<D: Component>() -> bool {
+        false
+    }
 
     #[inline]
     fn requires_permissions() -> Permissions<ComponentTypeId> {
@@ -137,7 +145,9 @@ impl<'a, T: Component> IntoIterator for Slice<'a, T> {
     type Item = <Self as IntoIndexableIter>::Item;
     type IntoIter = <Self as IntoIndexableIter>::IntoIter;
 
-    fn into_iter(self) -> Self::IntoIter { self.into_indexable_iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_indexable_iter()
+    }
 }
 
 unsafe impl<'a, T: Component> ReadOnlyFetch for Slice<'a, T> {
@@ -176,7 +186,9 @@ impl<'a, T: Component> Fetch for Slice<'a, T> {
     }
 
     #[inline]
-    fn find_mut<C: 'static>(&mut self) -> Option<&mut [C]> { None }
+    fn find_mut<C: 'static>(&mut self) -> Option<&mut [C]> {
+        None
+    }
 
     #[inline]
     fn version<C: Component>(&self) -> Option<u64> {

@@ -59,7 +59,9 @@ impl Subscriber {
             .is_pass()
     }
 
-    pub(crate) fn send(&self, message: Event) -> bool { self.sender.send(message) }
+    pub(crate) fn send(&self, message: Event) -> bool {
+        self.sender.send(message)
+    }
 }
 
 #[derive(Clone, Default)]
@@ -68,7 +70,9 @@ pub(crate) struct Subscribers {
 }
 
 impl Subscribers {
-    pub fn push(&mut self, subscriber: Subscriber) { self.subscribers.push(subscriber); }
+    pub fn push(&mut self, subscriber: Subscriber) {
+        self.subscribers.push(subscriber);
+    }
 
     pub fn send(&mut self, message: Event) {
         for i in (0..self.subscribers.len()).rev() {

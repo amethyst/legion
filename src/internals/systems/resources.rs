@@ -39,19 +39,27 @@ impl ResourceTypeId {
 }
 
 impl std::hash::Hash for ResourceTypeId {
-    fn hash<H: Hasher>(&self, state: &mut H) { self.type_id.hash(state); }
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.type_id.hash(state);
+    }
 }
 
 impl PartialEq for ResourceTypeId {
-    fn eq(&self, other: &Self) -> bool { self.type_id.eq(&other.type_id) }
+    fn eq(&self, other: &Self) -> bool {
+        self.type_id.eq(&other.type_id)
+    }
 }
 
 impl Display for ResourceTypeId {
     #[cfg(debug_assertions)]
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.name) }
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
 
     #[cfg(not(debug_assertions))]
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "{:?}", self.type_id) }
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.type_id)
+    }
 }
 
 /// Blanket trait for resource types.
@@ -175,7 +183,9 @@ impl<'a, T: Resource> Deref for Fetch<'a, T> {
     type Target = T;
 
     #[inline]
-    fn deref(&self) -> &Self::Target { self.inner }
+    fn deref(&self) -> &Self::Target {
+        self.inner
+    }
 }
 
 impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for Fetch<'a, T> {
@@ -201,12 +211,16 @@ impl<'a, T: 'a + Resource> Deref for FetchMut<'a, T> {
     type Target = T;
 
     #[inline]
-    fn deref(&self) -> &Self::Target { &*self.inner }
+    fn deref(&self) -> &Self::Target {
+        &*self.inner
+    }
 }
 
 impl<'a, T: 'a + Resource> DerefMut for FetchMut<'a, T> {
     #[inline]
-    fn deref_mut(&mut self) -> &mut T { &mut *self.inner }
+    fn deref_mut(&mut self) -> &mut T {
+        &mut *self.inner
+    }
 }
 
 impl<'a, T: 'a + Resource + std::fmt::Debug> std::fmt::Debug for FetchMut<'a, T> {
@@ -235,7 +249,9 @@ impl ResourceCell {
         }
     }
 
-    fn into_inner(self) -> Box<dyn Resource> { self.data.into_inner() }
+    fn into_inner(self) -> Box<dyn Resource> {
+        self.data.into_inner()
+    }
 
     /// # Safety
     /// Types which are !Sync should only be retrieved on the thread which owns the resource
@@ -317,7 +333,9 @@ unsafe impl Send for UnsafeResources {}
 unsafe impl Sync for UnsafeResources {}
 
 impl UnsafeResources {
-    fn contains(&self, type_id: &ResourceTypeId) -> bool { self.map.contains_key(type_id) }
+    fn contains(&self, type_id: &ResourceTypeId) -> bool {
+        self.map.contains_key(type_id)
+    }
 
     /// # Safety
     /// Resources which are `!Sync` or `!Send` must be retrieved or inserted only on the main thread.
@@ -340,7 +358,9 @@ impl UnsafeResources {
         self.map.remove(type_id).map(|cell| cell.into_inner())
     }
 
-    fn get(&self, type_id: &ResourceTypeId) -> Option<&ResourceCell> { self.map.get(type_id) }
+    fn get(&self, type_id: &ResourceTypeId) -> Option<&ResourceCell> {
+        self.map.get(type_id)
+    }
 
     /// # Safety
     /// Resources which are `!Sync` must be retrieved or inserted only on the main thread.
@@ -361,7 +381,9 @@ pub struct Resources {
 }
 
 impl Resources {
-    pub(crate) fn internal(&self) -> &UnsafeResources { &self.internal }
+    pub(crate) fn internal(&self) -> &UnsafeResources {
+        &self.internal
+    }
 
     /// Creates an accessor to resources which are Send and Sync, which itself can be sent
     /// between threads.

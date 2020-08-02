@@ -34,10 +34,14 @@ pub mod filter_fns {
     }
 
     /// Constructs a filter which passes all entities.
-    pub fn any() -> EntityFilterTuple<Any, Any> { Default::default() }
+    pub fn any() -> EntityFilterTuple<Any, Any> {
+        Default::default()
+    }
 
     /// Constructs a filter which performs a no-op and defers to any filters it is combined with.
-    pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough> { Default::default() }
+    pub fn passthrough() -> EntityFilterTuple<Passthrough, Passthrough> {
+        Default::default()
+    }
 }
 
 /// Indicates if an an archetype should be accepted or rejected.
@@ -85,12 +89,16 @@ impl FilterResult {
 
 impl std::ops::BitOr<FilterResult> for FilterResult {
     type Output = FilterResult;
-    fn bitor(self, other: FilterResult) -> Self::Output { self.coalesce_or(other) }
+    fn bitor(self, other: FilterResult) -> Self::Output {
+        self.coalesce_or(other)
+    }
 }
 
 impl std::ops::BitAnd<FilterResult> for FilterResult {
     type Output = FilterResult;
-    fn bitand(self, other: FilterResult) -> Self::Output { self.coalesce_and(other) }
+    fn bitand(self, other: FilterResult) -> Self::Output {
+        self.coalesce_and(other)
+    }
 }
 
 /// A filter which selects based upon which component types are attached to an entity.
@@ -157,8 +165,12 @@ impl<T: EntityFilter> DynamicFilter for T {
 }
 
 impl<T: EntityFilter> GroupMatcher for T {
-    fn can_match_group() -> bool { T::Layout::can_match_group() }
-    fn group_components() -> Vec<ComponentTypeId> { T::Layout::group_components() }
+    fn can_match_group() -> bool {
+        T::Layout::can_match_group()
+    }
+    fn group_components() -> Vec<ComponentTypeId> {
+        T::Layout::group_components()
+    }
 }
 
 #[doc(hidden)]
@@ -174,7 +186,9 @@ impl<L: LayoutFilter + GroupMatcher + Default, F: DynamicFilter> EntityFilter
     type Layout = L;
     type Dynamic = F;
 
-    fn layout_filter(&self) -> &Self::Layout { &self.layout_filter }
+    fn layout_filter(&self) -> &Self::Layout {
+        &self.layout_filter
+    }
 
     fn filters(&mut self) -> (&Self::Layout, &mut Self::Dynamic) {
         (&self.layout_filter, &mut self.dynamic_filter)

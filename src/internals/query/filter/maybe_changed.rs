@@ -70,7 +70,9 @@ impl<T: Component> std::ops::Not for ComponentChangedFilter<T> {
     type Output = Not<Self>;
 
     #[inline]
-    fn not(self) -> Self::Output { Not { filter: self } }
+    fn not(self) -> Self::Output {
+        Not { filter: self }
+    }
 }
 
 impl<'a, T: Component, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for ComponentChangedFilter<T> {
@@ -88,7 +90,9 @@ impl<'a, T: Component> std::ops::BitAnd<Passthrough> for ComponentChangedFilter<
     type Output = Self;
 
     #[inline]
-    fn bitand(self, _: Passthrough) -> Self::Output { self }
+    fn bitand(self, _: Passthrough) -> Self::Output {
+        self
+    }
 }
 
 impl<'a, T: Component, Rhs: ActiveFilter> std::ops::BitOr<Rhs> for ComponentChangedFilter<T> {
@@ -106,5 +110,7 @@ impl<'a, T: Component> std::ops::BitOr<Passthrough> for ComponentChangedFilter<T
     type Output = Self;
 
     #[inline]
-    fn bitor(self, _: Passthrough) -> Self::Output { self }
+    fn bitor(self, _: Passthrough) -> Self::Output {
+        self
+    }
 }

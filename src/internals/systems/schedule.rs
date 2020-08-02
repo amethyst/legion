@@ -100,7 +100,9 @@ unsafe impl Sync for SystemBox {}
 
 impl SystemBox {
     #[cfg(feature = "par-schedule")]
-    unsafe fn get(&self) -> &dyn ParallelRunnable { std::ops::Deref::deref(&*self.0.get()) }
+    unsafe fn get(&self) -> &dyn ParallelRunnable {
+        std::ops::Deref::deref(&*self.0.get())
+    }
 
     #[allow(clippy::mut_from_ref)]
     unsafe fn get_mut(&self) -> &mut dyn ParallelRunnable {
@@ -428,7 +430,7 @@ pub struct Builder {
 
 impl Builder {
     /// Adds a system to the schedule.
-    pub fn add_system<T: ParallelRunnable + 'static>(mut self, system: T) -> Self {
+    pub fn add_system<T: ParallelRunnable + 'static>(&mut self, system: T) -> &mut Self {
         self.accumulator.push(Box::new(system));
         self
     }
@@ -441,7 +443,7 @@ impl Builder {
 
     /// Waits for executing systems to complete, and the flushes all outstanding system
     /// command buffers.
-    pub fn flush(mut self) -> Self {
+    pub fn flush(&mut self) -> &mut Self {
         self.finalize_executor();
         self.steps.push(Step::FlushCmdBuffers);
         self
@@ -458,9 +460,9 @@ impl Builder {
 
     /// Adds a thread local function to the schedule. This function will be executed on the main thread.
     pub fn add_thread_local_fn<F: FnMut(&mut World, &mut Resources) + 'static>(
-        mut self,
+        &mut self,
         f: F,
-    ) -> Self {
+    ) -> &mut Self {
         self.finalize_executor();
         self.steps.push(Step::ThreadLocalFn(
             Box::new(f) as Box<dyn FnMut(&mut World, &mut Resources)>
@@ -469,7 +471,7 @@ impl Builder {
     }
 
     /// Adds a thread local system to the schedule. This system will be executed on the main thread.
-    pub fn add_thread_local<S: Runnable + 'static>(mut self, system: S) -> Self {
+    pub fn add_thread_local<S: Runnable + 'static>(&mut self, system: S) -> &mut Self {
         self.finalize_executor();
         let system = Box::new(system) as Box<dyn Runnable>;
         self.steps.push(Step::ThreadLocalSystem(system));
@@ -477,7 +479,12 @@ impl Builder {
     }
 
     /// Finalizes the builder into a `Schedule`.
-    pub fn build(self) -> Schedule { self.into() }
+    pub fn build(&mut self) -> Schedule {
+        self.flush();
+        let mut steps = Vec::new();
+        std::mem::swap(&mut self.steps, &mut steps);
+        Schedule { steps }
+    }
 }
 
 impl Default for Builder {
@@ -527,7 +534,9 @@ pub struct Schedule {
 
 impl Schedule {
     /// Creates a new schedule builder.
-    pub fn builder() -> Builder { Builder::default() }
+    pub fn builder() -> Builder {
+        Builder::default()
+    }
 
     /// Executes all of the steps in the schedule.
     pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
@@ -562,19 +571,21 @@ impl Schedule {
     }
 
     /// Converts the schedule into a vector of steps.
-    pub fn into_vec(self) -> Vec<Step> { self.steps }
+    pub fn into_vec(self) -> Vec<Step> {
+        self.steps
+    }
 }
 
 impl From<Builder> for Schedule {
-    fn from(builder: Builder) -> Self {
-        Self {
-            steps: builder.flush().steps,
-        }
+    fn from(mut builder: Builder) -> Self {
+        builder.build()
     }
 }
 
 impl From<Vec<Step>> for Schedule {
-    fn from(steps: Vec<Step>) -> Self { Self { steps } }
+    fn from(steps: Vec<Step>) -> Self {
+        Self { steps }
+    }
 }
 
 #[cfg(test)]

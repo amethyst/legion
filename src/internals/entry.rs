@@ -61,10 +61,14 @@ impl<'a> EntryRef<'a> {
     }
 
     /// Returns the entity's archetype.
-    pub fn archetype(&self) -> &Archetype { &self.archetypes[self.location.archetype()] }
+    pub fn archetype(&self) -> &Archetype {
+        &self.archetypes[self.location.archetype()]
+    }
 
     /// Returns the entity's location.
-    pub fn location(&self) -> EntityLocation { self.location }
+    pub fn location(&self) -> EntityLocation {
+        self.location
+    }
 
     /// Returns a reference to one of the entity's components.
     pub fn into_component<T: Component>(self) -> Result<&'a T, ComponentError> {
@@ -189,10 +193,14 @@ impl<'a> EntryMut<'a> {
     }
 
     /// Returns the entity's archetype.
-    pub fn archetype(&self) -> &Archetype { &self.archetypes[self.location.archetype()] }
+    pub fn archetype(&self) -> &Archetype {
+        &self.archetypes[self.location.archetype()]
+    }
 
     /// Returns the entity's location.
-    pub fn location(&self) -> EntityLocation { self.location }
+    pub fn location(&self) -> EntityLocation {
+        self.location
+    }
 
     /// Returns a reference to one of the entity's components.
     pub fn into_component<T: Component>(self) -> Result<&'a T, ComponentError> {
@@ -324,10 +332,14 @@ impl<'a> Entry<'a> {
     }
 
     /// Returns the entity's archetype.
-    pub fn archetype(&self) -> &Archetype { &self.world.archetypes()[self.location.archetype()] }
+    pub fn archetype(&self) -> &Archetype {
+        &self.world.archetypes()[self.location.archetype()]
+    }
 
     /// Returns the entity's location.
-    pub fn location(&self) -> EntityLocation { self.location }
+    pub fn location(&self) -> EntityLocation {
+        self.location
+    }
 
     /// Returns a reference to one of the entity's components.
     pub fn into_component<T: Component>(self) -> Result<&'a T, ComponentError> {
@@ -499,7 +511,9 @@ impl<'a> LayoutFilter for DynamicArchetype<'a> {
 
 impl<'a> ArchetypeSource for DynamicArchetype<'a> {
     type Filter = Self;
-    fn filter(&self) -> Self::Filter { self.clone() }
+    fn filter(&self) -> Self::Filter {
+        self.clone()
+    }
     fn layout(&mut self) -> EntityLayout {
         let mut layout = EntityLayout::new();
         for (type_id, constructor) in self

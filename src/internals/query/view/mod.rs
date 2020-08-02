@@ -39,7 +39,7 @@ pub trait DefaultFilter {
 /// A type which can pull entitiy data out of a world.
 pub trait View<'data>: DefaultFilter + Sized {
     /// The type of component references returned.
-    type Element: Send + Sync;
+    type Element: Send + Sync + 'data;
     /// The fetch type yielded for each archetype.
     type Fetch: Fetch + IntoIndexableIter<Item = Self::Element> + 'data;
     /// The iterator type which pulls entity data out of a world.

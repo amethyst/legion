@@ -13,8 +13,12 @@ pub struct Not<F> {
 impl<F> ActiveFilter for Not<F> {}
 
 impl<F> GroupMatcher for Not<F> {
-    fn can_match_group() -> bool { false }
-    fn group_components() -> Vec<ComponentTypeId> { vec![] }
+    fn can_match_group() -> bool {
+        false
+    }
+    fn group_components() -> Vec<ComponentTypeId> {
+        vec![]
+    }
 }
 
 impl<F: LayoutFilter> LayoutFilter for Not<F> {
@@ -27,7 +31,9 @@ impl<F: LayoutFilter> LayoutFilter for Not<F> {
 }
 
 impl<F: DynamicFilter> DynamicFilter for Not<F> {
-    fn prepare(&mut self, world: WorldId) { self.filter.prepare(world); }
+    fn prepare(&mut self, world: WorldId) {
+        self.filter.prepare(world);
+    }
 
     fn matches_archetype<T: Fetch>(&mut self, fetch: &T) -> FilterResult {
         match self.filter.matches_archetype(fetch) {
@@ -52,7 +58,9 @@ impl<'a, F> std::ops::BitAnd<Passthrough> for Not<F> {
     type Output = Self;
 
     #[inline]
-    fn bitand(self, _: Passthrough) -> Self::Output { self }
+    fn bitand(self, _: Passthrough) -> Self::Output {
+        self
+    }
 }
 
 impl<'a, F, Rhs: ActiveFilter> std::ops::BitOr<Rhs> for Not<F> {
@@ -70,5 +78,7 @@ impl<'a, F> std::ops::BitOr<Passthrough> for Not<F> {
     type Output = Self;
 
     #[inline]
-    fn bitor(self, _: Passthrough) -> Self::Output { self }
+    fn bitor(self, _: Passthrough) -> Self::Output {
+        self
+    }
 }

@@ -473,7 +473,9 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
             / self.entity_len as f32
     }
 
-    fn element_vtable(&self) -> ComponentMeta { ComponentMeta::of::<T>() }
+    fn element_vtable(&self) -> ComponentMeta {
+        ComponentMeta::of::<T>()
+    }
 
     fn get_raw(&self, ArchetypeIndex(archetype): ArchetypeIndex) -> Option<(*const u8, usize)> {
         let slice_index = *self.index.get(archetype as usize)?;
@@ -505,7 +507,9 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
         *self.versions[slice_index].get() = next_component_version();
     }
 
-    fn increment_epoch(&mut self) { self.epoch += 1; }
+    fn increment_epoch(&mut self) {
+        self.epoch += 1;
+    }
 
     fn ensure_capacity(&mut self, ArchetypeIndex(archetype): ArchetypeIndex, capacity: usize) {
         let slice_index = self.index[archetype as usize];
@@ -570,7 +574,9 @@ impl<'a, T: Component> ComponentStorage<'a, T> for PackedStorage<T> {
         }
     }
 
-    fn len(&self) -> usize { self.allocations.len() }
+    fn len(&self) -> usize {
+        self.allocations.len()
+    }
 }
 
 #[doc(hidden)]
@@ -615,10 +621,14 @@ mod test {
     use super::*;
 
     #[test]
-    fn create_storage() { let _ = PackedStorage::<usize>::default(); }
+    fn create_storage() {
+        let _ = PackedStorage::<usize>::default();
+    }
 
     #[test]
-    fn create_zst_storage() { let _ = PackedStorage::<()>::default(); }
+    fn create_zst_storage() {
+        let _ = PackedStorage::<()>::default();
+    }
 
     #[test]
     fn insert_archetype() {

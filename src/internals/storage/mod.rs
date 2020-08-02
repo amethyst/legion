@@ -39,10 +39,14 @@ impl ComponentMeta {
     }
 
     /// Returns the size of the component.
-    pub fn size(&self) -> usize { self.size }
+    pub fn size(&self) -> usize {
+        self.size
+    }
 
     /// Returns the alignment of the component.
-    pub fn align(&self) -> usize { self.align }
+    pub fn align(&self) -> usize {
+        self.align
+    }
 
     /// Drops the component.
     ///
@@ -69,7 +73,9 @@ pub type Epoch = u64;
 pub type Version = u64;
 
 static COMPONENT_VERSION: AtomicU64 = AtomicU64::new(0);
-pub(crate) fn next_component_version() -> u64 { COMPONENT_VERSION.fetch_add(1, Ordering::SeqCst) }
+pub(crate) fn next_component_version() -> u64 {
+    COMPONENT_VERSION.fetch_add(1, Ordering::SeqCst)
+}
 
 /// A storage location for component data slices. Each component storage may hold once slice for
 /// each archetype inserted into the storage. The type of component stored is not known statically.
@@ -157,22 +163,30 @@ impl<'a, T: Component> ComponentSlice<'a, T> {
     }
 
     /// Converts this slice into its inner value.
-    pub fn into_slice(self) -> &'a [T] { self.components }
+    pub fn into_slice(self) -> &'a [T] {
+        self.components
+    }
 }
 
 impl<'a, T: Component> Into<&'a [T]> for ComponentSlice<'a, T> {
-    fn into(self) -> &'a [T] { self.components }
+    fn into(self) -> &'a [T] {
+        self.components
+    }
 }
 
 impl<'a, T: Component> Deref for ComponentSlice<'a, T> {
     type Target = [T];
 
-    fn deref(&self) -> &Self::Target { &self.components }
+    fn deref(&self) -> &Self::Target {
+        &self.components
+    }
 }
 
 impl<'a, T: Component> Index<ComponentIndex> for ComponentSlice<'a, T> {
     type Output = T;
-    fn index(&self, index: ComponentIndex) -> &Self::Output { &self.components[index.0] }
+    fn index(&self, index: ComponentIndex) -> &Self::Output {
+        &self.components[index.0]
+    }
 }
 
 /// An accessor for a mutable slice reference of components for a single archetype.
@@ -201,12 +215,16 @@ impl<'a, T: Component> ComponentSliceMut<'a, T> {
 impl<'a, T: Component> Deref for ComponentSliceMut<'a, T> {
     type Target = [T];
 
-    fn deref(&self) -> &Self::Target { &self.components }
+    fn deref(&self) -> &Self::Target {
+        &self.components
+    }
 }
 
 impl<'a, T: Component> Index<ComponentIndex> for ComponentSliceMut<'a, T> {
     type Output = T;
-    fn index(&self, index: ComponentIndex) -> &Self::Output { &self.components[index.0] }
+    fn index(&self, index: ComponentIndex) -> &Self::Output {
+        &self.components[index.0]
+    }
 }
 
 impl<'a, T: Component> IndexMut<ComponentIndex> for ComponentSliceMut<'a, T> {
@@ -228,7 +246,9 @@ pub trait ComponentStorage<'a, T: Component>: UnknownComponentStorage + Default 
     fn len(&self) -> usize;
 
     /// Returns `true` if the storage contains no archetypes.
-    fn is_empty(&self) -> bool { self.len() == 0 }
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 
     /// Copies new components into the specified archetype slice.
     ///
@@ -309,7 +329,9 @@ impl Components {
     }
 
     /// Returns a writer for writing to multiple component storages.
-    pub fn get_multi_mut(&mut self) -> MultiMut { MultiMut::new(self) }
+    pub fn get_multi_mut(&mut self) -> MultiMut {
+        MultiMut::new(self)
+    }
 
     /// Repacks all component storages.
     pub fn pack(&mut self, options: &PackOptions) {

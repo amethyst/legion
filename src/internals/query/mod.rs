@@ -69,16 +69,24 @@ impl<'a> QueryResult<'a> {
     }
 
     /// The sub-range of archetypes which should be accessed.
-    pub fn range(&self) -> &Range<usize> { &self.range }
+    pub fn range(&self) -> &Range<usize> {
+        &self.range
+    }
 
     /// Returns `true` if components can be assumed to be stored in the same order as given.
-    pub fn is_ordered(&self) -> bool { self.is_ordered }
+    pub fn is_ordered(&self) -> bool {
+        self.is_ordered
+    }
 
     /// The number of archetypes that matches the filter.
-    pub fn len(&self) -> usize { self.range.len() }
+    pub fn len(&self) -> usize {
+        self.range.len()
+    }
 
     /// Returns `true` if no archetypes matched the filter.
-    pub fn is_empty(&self) -> bool { self.index().is_empty() }
+    pub fn is_empty(&self) -> bool {
+        self.index().is_empty()
+    }
 
     pub(crate) fn split_at(self, index: usize) -> (Self, Self) {
         (
@@ -198,6 +206,87 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         let accessor = world.get_component_storage::<V>().unwrap();
         let (_, result) = self.evaluate_query(&accessor);
         result.index()
+    }
+
+    // ----------------
+    // Entity Indexing
+    // ----------------
+
+    /// Returns the components for a single entity.
+    ///
+    /// # Safety
+    /// This function allows mutable access via a shared world reference. The caller is responsible for
+    /// ensuring that no component accesses may create mutable aliases.
+    pub unsafe fn get_unchecked<'query, 'world, T>(
+        &'query mut self,
+        world: &'world T,
+        entity: Entity,
+    ) -> Option<<V as View<'world>>::Element>
+    where
+        T: EntityStore,
+    {
+        let location = world.entry_ref(entity)?.location();
+        let accessor = world.get_component_storage::<V>().unwrap();
+        let (_, result) = self.evaluate_query(&accessor);
+
+        if !result.index().contains(&location.archetype()) {
+            return None;
+        }
+
+        // safety:
+        // This is much like the similar usage of transmute inside iter_chunks_unchecked, see
+        // there for more details. In this case, the situation is simpler; we know the return
+        // value of this function references only data from the world and View::fetch can't
+        // put the reference away somewhere invalid (because the param is still bound to 'world not
+        // 'static), so the arch_slice on the stack won't stil be in use after it falls out of scope.
+
+        let arch_slice = [location.archetype()];
+        let arch_slice_ref: &[ArchetypeIndex] = &arch_slice;
+        let arch_slice_ref = std::mem::transmute(arch_slice_ref);
+        let result = QueryResult::unordered(arch_slice_ref);
+        let mut fetch =
+            <V as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result)
+                .next()?;
+
+        let filter = self.filter.get_mut();
+        filter.prepare(world.id());
+
+        if filter.matches_archetype(&fetch).is_pass() {
+            fetch.accepted();
+            let view = ChunkView::new(&accessor.archetypes()[location.archetype()], fetch);
+            let mut iter = view.into_iter();
+            use crate::internals::iter::indexed::TrustedRandomAccess;
+            Some(iter.get_unchecked(location.component().0))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the components for a single entity.
+    pub fn get_mut<'query, 'world, T>(
+        &'query mut self,
+        world: &'world mut T,
+        entity: Entity,
+    ) -> Option<<V as View<'world>>::Element>
+    where
+        T: EntityStore,
+    {
+        // safety: we have exclusive access to world
+        unsafe { self.get_unchecked(world, entity) }
+    }
+
+    /// Returns the components for a single entity.
+    pub fn get<'query, 'world, T>(
+        &'query mut self,
+        world: &'world T,
+        entity: Entity,
+    ) -> Option<<V as View<'world>>::Element>
+    where
+        T: EntityStore,
+        <V as View<'world>>::Fetch: ReadOnlyFetch,
+    {
+        // safety: the view is readonly - it cannot create mutable aliases
+        unsafe { self.get_unchecked(world, entity) }
     }
 
     // ----------------
@@ -642,15 +731,21 @@ pub struct ChunkView<'a, F: Fetch> {
 }
 
 impl<'a, F: Fetch> ChunkView<'a, F> {
-    fn new(archetype: &'a Archetype, fetch: F) -> Self { Self { archetype, fetch } }
+    fn new(archetype: &'a Archetype, fetch: F) -> Self {
+        Self { archetype, fetch }
+    }
 
     /// Returns the archetype that all entities in the chunk belong to.
-    pub fn archetype(&self) -> &Archetype { &self.archetype }
+    pub fn archetype(&self) -> &Archetype {
+        &self.archetype
+    }
 
     /// Returns a slice of components.
     ///
     /// May return `None` if the chunk's view does not declare access to the component type.
-    pub fn component_slice<T: Component>(&self) -> Option<&[T]> { self.fetch.find::<T>() }
+    pub fn component_slice<T: Component>(&self) -> Option<&[T]> {
+        self.fetch.find::<T>()
+    }
 
     /// Returns a mutable slice of components.
     ///
@@ -675,7 +770,9 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
     ///     let slices: (&[Entity], &[A], &mut [B], Option<&[C]>, Option<&mut [D]>) = chunk.into_components();       
     /// }
     /// ```
-    pub fn into_components(self) -> F::Data { self.fetch.into_components() }
+    pub fn into_components(self) -> F::Data {
+        self.fetch.into_components()
+    }
 
     /// Converts the chunk into a tuple of it's inner slices.
     ///
@@ -715,7 +812,9 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
 impl<'a, F: Fetch> IntoIterator for ChunkView<'a, F> {
     type IntoIter = <F as IntoIndexableIter>::IntoIter;
     type Item = <F as IntoIndexableIter>::Item;
-    fn into_iter(self) -> Self::IntoIter { self.fetch.into_indexable_iter() }
+    fn into_iter(self) -> Self::IntoIter {
+        self.fetch.into_indexable_iter()
+    }
 }
 
 #[cfg(feature = "par-iter")]
@@ -760,7 +859,9 @@ where
         None
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) { (0, Some(self.max_count)) }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.max_count))
+    }
 }
 
 // impl<'world, 'query, I, F> Iterator for ChunkIter<'world, 'query, I, Passthrough, F>
@@ -828,7 +929,9 @@ pub mod par_iter {
             None
         }
 
-        fn size_hint(&self) -> (usize, Option<usize>) { (0, Some(self.max_count)) }
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            (0, Some(self.max_count))
+        }
     }
 
     /// A parallel entity chunk iterator.
@@ -956,6 +1059,7 @@ mod test {
     fn query() {
         let mut world = World::default();
         world.extend(vec![(1usize, true), (2usize, true), (3usize, false)]);
+        let entity = world.push((10usize, 5f32, false));
 
         let mut query = <(Read<usize>, Write<bool>)>::query();
         for (x, y) in query.iter_mut(&mut world) {
@@ -976,6 +1080,9 @@ mod test {
                 println!("{:?}, {:?}", x, y);
             })
         }
+
+        let single = query.get_mut(&mut world, entity);
+        assert_eq!(single, Some((&10usize, &mut false)));
     }
 
     #[test]
