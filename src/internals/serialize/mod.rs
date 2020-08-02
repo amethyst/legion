@@ -32,6 +32,12 @@ impl<T> TypeKey for T where
 {
 }
 
+/// A [TypeKey](trait.TypeKey.html) which can construct itself for a given type T.
+pub trait AutoTypeKey<T: Component>: TypeKey {
+    /// Constructs the type key for component type `T`.
+    fn new() -> Self;
+}
+
 type SerializeFn = fn(*const u8, &mut dyn FnMut(&dyn erased_serde::Serialize));
 type DeserializeSingleFn = fn(
     &mut dyn UnknownComponentStorage,
@@ -41,12 +47,22 @@ type DeserializeSingleFn = fn(
 type DeserializeSingleBoxedFn =
     fn(&mut dyn erased_serde::Deserializer) -> Result<Box<[u8]>, erased_serde::Error>;
 
+#[derive(Copy, Clone)]
+// An error type describing what to do when a component type is unrecognized.
+pub enum UnknownType {
+    /// Ignore the component.
+    Ignore,
+    /// Abort (de)serialization wwith an error.
+    Error,
+}
+
 /// A world (de)serializer which describes how to (de)serialize the component types in a world.
-pub struct Registry<T = SerializableTypeId>
+pub struct Registry<T>
 where
     T: TypeKey,
 {
     _phantom: PhantomData<T>,
+    missing: UnknownType,
     serialize_fns: HashMap<
         ComponentTypeId,
         (
@@ -66,10 +82,16 @@ where
     /// Constructs a new registry.
     pub fn new() -> Self {
         Self {
+            missing: UnknownType::Error,
             serialize_fns: HashMap::new(),
             constructors: HashMap::new(),
             _phantom: PhantomData,
         }
+    }
+
+    /// Sets the behavior to use when a component type is unknown.
+    pub fn on_unknown(&mut self, unknown: UnknownType) {
+        self.missing = unknown;
     }
 
     /// Registers a component type and its key with the registry.
@@ -126,9 +148,9 @@ where
     >(
         &mut self,
     ) where
-        T: From<ComponentTypeId>,
+        T: AutoTypeKey<C>,
     {
-        self.register::<C>(ComponentTypeId::of::<C>().into())
+        self.register::<C>(<T as AutoTypeKey<C>>::new())
     }
 
     /// Constructs a serde::DeserializeSeed which will deserialize into an exist world.
@@ -184,10 +206,16 @@ where
         }
     }
 
-    fn map_id(&self, type_id: ComponentTypeId) -> Option<Self::TypeId> {
-        self.serialize_fns
+    fn map_id(&self, type_id: ComponentTypeId) -> Result<Self::TypeId, UnknownType> {
+        if let Some(type_id) = self
+            .serialize_fns
             .get(&type_id)
             .map(|(type_id, _, _, _)| type_id.clone())
+        {
+            Ok(type_id)
+        } else {
+            Err(self.missing)
+        }
     }
 }
 
@@ -197,8 +225,12 @@ where
 {
     type TypeId = T;
 
-    fn unmap_id(&self, type_id: &Self::TypeId) -> Option<ComponentTypeId> {
-        self.constructors.get(type_id).map(|(id, _)| *id)
+    fn unmap_id(&self, type_id: &Self::TypeId) -> Result<ComponentTypeId, UnknownType> {
+        if let Some(type_id) = self.constructors.get(type_id).map(|(id, _)| *id) {
+            Ok(type_id)
+        } else {
+            Err(self.missing)
+        }
     }
 
     fn register_component(&self, type_id: Self::TypeId, layout: &mut EntityLayout) {
@@ -272,28 +304,6 @@ impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for UniverseDeserialize
         let mut world = self.1.create_world();
         WorldDeserializerWrapper(self.0, &mut world).deserialize(deserializer)?;
         Ok(world)
-    }
-}
-
-/// A default serializable type ID. This ID is not stable between compiles,
-/// so serialized words serialized by a different binary may not deserialize
-/// correctly.
-#[derive(
-    Copy, Clone, PartialOrd, Ord, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
-)]
-pub struct SerializableTypeId(u64);
-
-impl From<ComponentTypeId> for SerializableTypeId {
-    fn from(type_id: ComponentTypeId) -> Self {
-        let id = unsafe { std::mem::transmute(type_id.type_id) };
-        Self(id)
-    }
-}
-
-impl Into<ComponentTypeId> for SerializableTypeId {
-    fn into(self) -> ComponentTypeId {
-        let id = unsafe { std::mem::transmute(self.0) };
-        ComponentTypeId::of_id(id)
     }
 }
 

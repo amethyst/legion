@@ -36,5 +36,8 @@
 pub use crate::internals::serialize::{
     de::WorldDeserializer,
     ser::{SerializableWorld, WorldSerializer},
-    Registry, SerializableTypeId, TypeKey, UniverseDeserializerWrapper, WorldDeserializerWrapper,
+    AutoTypeKey, Registry, TypeKey, UniverseDeserializerWrapper, WorldDeserializerWrapper,
 };
+
+#[cfg(feature = "type-uuid")]
+pub use crate::internals::serialize::SerializableTypeUuid;

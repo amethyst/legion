@@ -1,7 +1,7 @@
 pub mod ser {
     use crate::internals::{
         query::filter::LayoutFilter,
-        serialize::ser::WorldSerializer,
+        serialize::{ser::WorldSerializer, UnknownType},
         storage::{
             archetype::{Archetype, ArchetypeIndex},
             component::ComponentTypeId,
@@ -37,16 +37,27 @@ pub mod ser {
                 .map(|(i, arch)| (ArchetypeIndex(i as u32), arch))
                 .collect::<Vec<_>>();
 
-            let type_mappings = archetypes
+            let component_types = archetypes
                 .iter()
                 .flat_map(|(_, arch)| arch.layout().component_types())
-                .unique()
-                .filter_map(|id| {
-                    self.world_serializer
-                        .map_id(*id)
-                        .map(|mapped| (*id, mapped))
-                })
-                .collect::<HashMap<ComponentTypeId, W::TypeId>>();
+                .unique();
+            let mut type_mappings = HashMap::new();
+            for id in component_types {
+                match self.world_serializer.map_id(*id) {
+                    Ok(type_id) => {
+                        type_mappings.insert(*id, type_id);
+                    }
+                    Err(error) => match error {
+                        UnknownType::Ignore => {}
+                        UnknownType::Error => {
+                            return Err(serde::ser::Error::custom(format!(
+                                "unknown component type {:?}",
+                                *id
+                            )));
+                        }
+                    },
+                }
+            }
 
             let mut map = serializer.serialize_map(Some(
                 archetypes
@@ -144,7 +155,7 @@ pub mod ser {
 pub mod de {
     use crate::internals::{
         entity::Entity,
-        serialize::de::WorldDeserializer,
+        serialize::{de::WorldDeserializer, UnknownType},
         storage::{archetype::EntityLayout, component::ComponentTypeId, ComponentIndex},
         world::World,
     };
@@ -235,18 +246,26 @@ pub mod de {
                     let mut components = HashMap::new();
 
                     while let Some(mapped_type_id) = map.next_key::<D::TypeId>()? {
-                        if let Some(type_id) = self.world_deserializer.unmap_id(&mapped_type_id) {
-                            self.world_deserializer
-                                .register_component(mapped_type_id, &mut layout);
-                            components.insert(
-                                type_id,
-                                map.next_value_seed(ComponentDeserializer {
+                        match self.world_deserializer.unmap_id(&mapped_type_id) {
+                            Ok(type_id) => {
+                                self.world_deserializer
+                                    .register_component(mapped_type_id, &mut layout);
+                                components.insert(
                                     type_id,
-                                    world_deserializer: self.world_deserializer,
-                                })?,
-                            );
-                        } else {
-                            map.next_value::<IgnoredAny>()?;
+                                    map.next_value_seed(ComponentDeserializer {
+                                        type_id,
+                                        world_deserializer: self.world_deserializer,
+                                    })?,
+                                );
+                            }
+                            Err(missing) => match missing {
+                                UnknownType::Ignore => {
+                                    map.next_value::<IgnoredAny>()?;
+                                }
+                                UnknownType::Error => {
+                                    return Err(serde::de::Error::custom("unknown component type"));
+                                }
+                            },
                         }
                     }
 

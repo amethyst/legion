@@ -1,7 +1,8 @@
 //! World deserialization types.
 
 use super::{
-    entities::de::EntitiesLayoutDeserializer, packed::de::PackedLayoutDeserializer, WorldField,
+    entities::de::EntitiesLayoutDeserializer, packed::de::PackedLayoutDeserializer, UnknownType,
+    WorldField,
 };
 use crate::internals::{
     storage::{
@@ -22,7 +23,7 @@ pub trait WorldDeserializer {
     type TypeId: for<'de> Deserialize<'de>;
 
     /// Converts the serialized type ID into a runtime component type ID.
-    fn unmap_id(&self, type_id: &Self::TypeId) -> Option<ComponentTypeId>;
+    fn unmap_id(&self, type_id: &Self::TypeId) -> Result<ComponentTypeId, UnknownType>;
 
     /// Adds the specified component to the given entity layout.
     fn register_component(&self, type_id: Self::TypeId, layout: &mut EntityLayout);

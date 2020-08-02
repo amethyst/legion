@@ -1,7 +1,8 @@
 //! World serialization types.
 
 use super::{
-    entities::ser::EntitiesLayoutSerializer, packed::ser::PackedLayoutSerializer, WorldField,
+    entities::ser::EntitiesLayoutSerializer, packed::ser::PackedLayoutSerializer, UnknownType,
+    WorldField,
 };
 use crate::internals::{
     query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World,
@@ -14,7 +15,7 @@ pub trait WorldSerializer {
     type TypeId: Serialize + Ord;
 
     /// Converts a runtime component type ID into the serialized type ID.
-    fn map_id(&self, type_id: ComponentTypeId) -> Option<Self::TypeId>;
+    fn map_id(&self, type_id: ComponentTypeId) -> Result<Self::TypeId, UnknownType>;
 
     /// Serializes a single component.
     ///
