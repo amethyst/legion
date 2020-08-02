@@ -57,6 +57,13 @@ pub enum UnknownType {
 }
 
 /// A world (de)serializer which describes how to (de)serialize the component types in a world.
+///
+/// The type parameter `T` represents the key used in the serialized output to identify each
+/// component type. The type keys used must uniquely identify each component type, and be stable
+/// between recompiles.
+///
+/// See the [legion_typeuuid crate](https://github.com/TomGillen/legion_typeuuid) for an example
+/// of a type key which is stable between compiles.
 pub struct Registry<T>
 where
     T: TypeKey,
