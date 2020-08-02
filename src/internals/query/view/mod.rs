@@ -26,6 +26,26 @@ pub mod try_read;
 pub mod try_write;
 pub mod write;
 
+pub trait IntoView {
+    type View: for<'a> View<'a> + 'static;
+}
+
+impl<'a, T: Component> IntoView for &'a T {
+    type View = read::Read<T>;
+}
+
+impl<'a, T: Component> IntoView for &'a mut T {
+    type View = write::Write<T>;
+}
+
+impl<'a, T: Component> IntoView for Option<&'a T> {
+    type View = try_read::TryRead<T>;
+}
+
+impl<'a, T: Component> IntoView for Option<&'a mut T> {
+    type View = try_write::TryWrite<T>;
+}
+
 // View and Fetch types are separate traits so that View implementations can be
 // zero sized types and therefore not need the user to provide a lifetime when they
 // declare queries.
@@ -167,6 +187,10 @@ macro_rules! impl_view_tuple {
                 And<($( <$ty::Filter as EntityFilter>::Layout, )*)>,
                 And<($( <$ty::Filter as EntityFilter>::Dynamic, )*)>
             >;
+        }
+
+        impl<$( $ty: IntoView ),*> IntoView for ($( $ty, )*) {
+            type View = ($( $ty::View, )*);
         }
 
         impl<'a, $( $ty: View<'a> + 'a ),*> View<'a> for ($( $ty, )*) {

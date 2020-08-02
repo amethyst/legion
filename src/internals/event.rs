@@ -28,11 +28,10 @@ pub trait EventSender: Send + Sync {
 #[cfg(feature = "crossbeam-events")]
 impl EventSender for crossbeam_channel::Sender<Event> {
     fn send(&self, event: Event) -> bool {
-        if let Err(crossbeam_channel::TrySendError::Disconnected(_)) = self.try_send(event) {
-            false
-        } else {
-            true
-        }
+        !matches!(
+            self.try_send(event),
+            Err(crossbeam_channel::TrySendError::Disconnected(_))
+        )
     }
 }
 

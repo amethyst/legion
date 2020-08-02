@@ -70,7 +70,7 @@ Entries are not the most convenient or performant way to search or bulk-access a
 
 ```rust
 // you define a query be declaring what components you want to find, and how you will access them
-let mut query = Read::<Position>::query();
+let mut query = <&Position>::query();
 
 // you can then iterate through the components found in the world
 for position in query.iter(&world) {
@@ -82,7 +82,7 @@ You can search for entities which have all of a set of components.
 
 ```rust
 // construct a query from a "view tuple"
-let mut query = <(Read<Velocity>, Write<Position>)>::query();
+let mut query = <(&Velocity, &mut Position)>::query();
 
 // this time we have &Velocity and &mut Position
 for (velocity, position) in query.iter_mut(&mut world) {
@@ -95,7 +95,7 @@ You can augment a basic query with additional filters. For example, you can choo
 
 ```rust
 // you can use boolean expressions when adding filters
-let mut query = <(Read<Velocity>, Write<Position>)>::query()
+let mut query = <(&Velocity, &mut Position)>::query()
     .filter(!component::<Ignore>() & maybe_changed::<Position>());
 
 for (velocity, position) in query.iter_mut(&mut world) {

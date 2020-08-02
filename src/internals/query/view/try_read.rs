@@ -1,6 +1,6 @@
 #![doc(hidden)]
 
-use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnly, ReadOnlyFetch, View};
 use crate::internals::{
     iter::indexed::{IndexedIter, TrustedRandomAccess},
     permissions::Permissions,
@@ -29,6 +29,10 @@ unsafe impl<T> ReadOnly for TryRead<T> {}
 
 impl<T: Component> DefaultFilter for TryRead<T> {
     type Filter = EntityFilterTuple<TryComponentFilter<T>, Passthrough>;
+}
+
+impl<T: Component> IntoView for TryRead<T> {
+    type View = Self;
 }
 
 impl<'data, T: Component> View<'data> for TryRead<T> {

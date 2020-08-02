@@ -1,6 +1,6 @@
 #![doc(hidden)]
 
-use super::{DefaultFilter, Fetch, IntoIndexableIter, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, View};
 use crate::internals::{
     iter::indexed::{IndexedIter, TrustedRandomAccess},
     permissions::Permissions,
@@ -28,6 +28,10 @@ unsafe impl<T> Sync for TryWrite<T> {}
 
 impl<T: Component> DefaultFilter for TryWrite<T> {
     type Filter = EntityFilterTuple<TryComponentFilter<T>, Passthrough>;
+}
+
+impl<T: Component> IntoView for TryWrite<T> {
+    type View = Self;
 }
 
 impl<'data, T: Component> View<'data> for TryWrite<T> {

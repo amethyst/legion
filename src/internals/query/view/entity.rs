@@ -1,6 +1,6 @@
 #![doc(hidden)]
 
-use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnly, ReadOnlyFetch, View};
 use crate::internals::{
     entity::Entity,
     iter::indexed::IndexedIter,
@@ -21,6 +21,10 @@ unsafe impl ReadOnly for Entity {}
 
 impl DefaultFilter for Entity {
     type Filter = EntityFilterTuple<Any, Passthrough>;
+}
+
+impl IntoView for Entity {
+    type View = Self;
 }
 
 impl<'data> View<'data> for Entity {

@@ -10,24 +10,24 @@ use crate::internals::{
 use filter::{DynamicFilter, EntityFilter, GroupMatcher};
 use parking_lot::Mutex;
 use std::{collections::HashMap, marker::PhantomData, ops::Range, slice::Iter};
-use view::{Fetch, IntoIndexableIter, ReadOnlyFetch, View};
+use view::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnlyFetch, View};
 
 pub mod filter;
 pub mod view;
 
 /// A type (typically a view) which can construct a query.
-pub trait IntoQuery: for<'a> View<'a> {
+pub trait IntoQuery: IntoView {
     /// Constructs a query.
-    fn query() -> Query<Self, Self::Filter>;
+    fn query() -> Query<Self::View, <Self::View as DefaultFilter>::Filter>;
 }
 
-impl<T: for<'a> View<'a>> IntoQuery for T {
-    fn query() -> Query<Self, Self::Filter> {
-        Self::validate();
+impl<T: IntoView> IntoQuery for T {
+    fn query() -> Query<Self::View, <Self::View as DefaultFilter>::Filter> {
+        Self::View::validate();
 
         Query {
             _view: PhantomData,
-            filter: Mutex::new(<Self::Filter as Default>::default()),
+            filter: Mutex::new(<<Self::View as DefaultFilter>::Filter as Default>::default()),
             layout_matches: HashMap::new(),
         }
     }

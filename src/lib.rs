@@ -94,7 +94,7 @@
 //! # struct Position { x: f32, y: f32 }
 //! # struct Velocity { x: f32, y: f32 }
 //! // construct a query from a "view tuple"
-//! let mut query = <(Read<Velocity>, Write<Position>)>::query();
+//! let mut query = <(&Velocity, &mut Position)>::query();
 //!
 //! // this time we have &Velocity and &mut Position
 //! for (velocity, position) in query.iter_mut(&mut world) {
@@ -114,7 +114,7 @@
 //! # struct Velocity { dx: f32, dy: f32 }
 //! # struct Ignore;
 //! // you can use boolean expressions when adding filters
-//! let mut query = <(Read<Velocity>, Write<Position>)>::query()
+//! let mut query = <(&Velocity, &mut Position)>::query()
 //!     .filter(!component::<Ignore>() & maybe_changed::<Position>());
 //!
 //! for (velocity, position) in query.iter_mut(&mut world) {

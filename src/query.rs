@@ -16,10 +16,10 @@
 //! # struct Position;
 //! # struct Orientation;
 //! // a view can be a single view type
-//! let mut query = Read::<Position>::query();
+//! let mut query = <&Position>::query();
 //!
 //! // or a tuple of views
-//! let mut query = <(Read<Position>, Write<Orientation>)>::query();
+//! let mut query = <(&Position, &mut Orientation)>::query();
 //! ```
 //!
 //! You can attach additional filters to a query to further refine which entities you want to access.
@@ -32,7 +32,7 @@
 //! # struct Static;
 //!
 //! // filters can be combined with boolean operators
-//! let mut query = <(Read<Position>, Write<Orientation>)>::query()
+//! let mut query = <(&Position, &mut Orientation)>::query()
 //!     .filter(!component::<Static>() | !component::<Model>());
 //! ```
 //!
@@ -47,7 +47,7 @@
 //! # struct Position;
 //! # struct Orientation;
 //! # let mut world = World::default();
-//! let mut query = <(Read<Position>, Write<Orientation>)>::query();
+//! let mut query = <(&Position, &mut Orientation)>::query();
 //! for mut chunk in query.iter_chunks_mut(&mut world) {
 //!     // we can access information about the archetype (shape/component layout) of the entities
 //!     println!(
@@ -72,7 +72,7 @@
 //! # struct Position;
 //! # struct Orientation;
 //! # let mut world = World::default();
-//! let mut query = <(Read<Position>, Write<Orientation>)>::query();
+//! let mut query = <(&Position, &mut Orientation)>::query();
 //! for (position, orientation) in query.iter_mut(&mut world) {
 //!     // position is a `&Position`
 //!     // orientation is a `&mut Orientation`
