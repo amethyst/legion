@@ -407,7 +407,8 @@ impl World {
         self.components.pack(&options);
     }
 
-    pub(crate) fn universe(&self) -> &Universe {
+    /// Returns the world's universe.
+    pub fn universe(&self) -> &Universe {
         &self.universe
     }
 
