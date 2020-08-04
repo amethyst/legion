@@ -100,5 +100,5 @@ pub use crate::internals::query::{
     ChunkIter, ChunkView, IntoQuery, Query,
 };
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 pub use crate::internals::query::par_iter::{Iter, ParChunkIter};

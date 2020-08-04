@@ -224,7 +224,7 @@ macro_rules! impl_zip_slices {
 
 zip_slices!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 pub mod par_iter {
     use super::{IndexedIter, TrustedRandomAccess};
     use rayon::iter::plumbing::{

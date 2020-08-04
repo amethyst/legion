@@ -123,7 +123,7 @@
 //! }
 //! ```
 //!
-//! There is much more than can be done with queries. See the [query module](query/index.html) for
+//! There is much more than can be done with queries. See [query](query/struct.Query.html) for
 //! more information.
 //!
 //! ## Systems
@@ -176,7 +176,7 @@
 //! # Feature Flags
 //!
 //! Legion provides a few feature flags:  
-//! * `par-iter` - Enables parallel iterators and parallel schedule execution via the rayon library. Enabled by default.
+//! * `parallel` - Enables parallel iterators and parallel schedule execution via the rayon library. Enabled by default.
 //! * `extended-tuple-impls` - Extends the maximum size of view and component tuples from 8 to 24, at the cost of increased compile times. Off by default.
 //! * `serialize` - Enables the serde serialization module and associated functionality. Enabled by default.
 //! * `crossbeam-events` - Implements the `EventSender` trait for crossbeam `Sender` channels, allowing them to be used for event subscriptions. Enabled by default.

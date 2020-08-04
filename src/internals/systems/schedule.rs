@@ -2,19 +2,19 @@
 
 use std::cell::UnsafeCell;
 
-#[cfg(feature = "par-schedule")]
+#[cfg(feature = "parallel")]
 use tracing::{span, trace, Level};
 
-#[cfg(feature = "par-schedule")]
+#[cfg(feature = "parallel")]
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-#[cfg(feature = "par-schedule")]
+#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-#[cfg(feature = "par-schedule")]
+#[cfg(feature = "parallel")]
 use itertools::izip;
 
 use super::{
@@ -27,7 +27,7 @@ use crate::internals::{
     subworld::ArchetypeAccess,
     world::{World, WorldId},
 };
-#[cfg(feature = "par-schedule")]
+#[cfg(feature = "parallel")]
 use std::iter::repeat;
 
 /// A `Runnable` which is also `Send` and `Sync`.
@@ -75,18 +75,18 @@ pub trait Runnable {
 
 /// Executes a sequence of systems, potentially in parallel, and then commits their command buffers.
 ///
-/// Systems are provided in execution order. When the `par-schedule` feature is enabled, the `Executor`
+/// Systems are provided in execution order. When the `parallel` feature is enabled, the `Executor`
 /// may run some systems in parallel. The order in which side-effects (e.g. writes to resources
 /// or entities) are observed is maintained.
 pub struct Executor {
     systems: Vec<SystemBox>,
-    #[cfg(feature = "par-schedule")]
+    #[cfg(feature = "parallel")]
     static_dependants: Vec<Vec<usize>>,
-    #[cfg(feature = "par-schedule")]
+    #[cfg(feature = "parallel")]
     dynamic_dependants: Vec<Vec<usize>>,
-    #[cfg(feature = "par-schedule")]
+    #[cfg(feature = "parallel")]
     static_dependency_counts: Vec<AtomicUsize>,
-    #[cfg(feature = "par-schedule")]
+    #[cfg(feature = "parallel")]
     awaiting: Vec<AtomicUsize>,
 }
 
@@ -99,7 +99,7 @@ unsafe impl Send for SystemBox {}
 unsafe impl Sync for SystemBox {}
 
 impl SystemBox {
-    #[cfg(feature = "par-schedule")]
+    #[cfg(feature = "parallel")]
     unsafe fn get(&self) -> &dyn ParallelRunnable {
         std::ops::Deref::deref(&*self.0.get())
     }
@@ -115,7 +115,7 @@ impl Executor {
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
-    #[cfg(not(feature = "par-schedule"))]
+    #[cfg(not(feature = "parallel"))]
     pub fn new(systems: Vec<Box<dyn ParallelRunnable>>) -> Self {
         Self {
             systems: systems
@@ -129,7 +129,7 @@ impl Executor {
     ///
     /// Systems are provided in the order in which side-effects (e.g. writes to resources or entities)
     /// are to be observed.
-    #[cfg(feature = "par-schedule")]
+    #[cfg(feature = "parallel")]
     #[allow(clippy::cognitive_complexity)]
     // TODO: we should break this up
     pub fn new(systems: Vec<Box<dyn ParallelRunnable>>) -> Self {
@@ -290,20 +290,30 @@ impl Executor {
     }
 
     /// Executes all systems and then flushes their command buffers.
+    #[cfg(not(feature = "parallel"))]
     pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
+        let resources = resources.internal();
         self.run_systems(world, resources);
+        self.flush_command_buffers(world);
+    }
+
+    /// Executes all systems and then flushes their command buffers.
+    #[cfg(feature = "parallel")]
+    pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
+        let resources = resources.internal();
+        rayon::join(|| self.run_systems(world, resources), || {});
         self.flush_command_buffers(world);
     }
 
     /// Executes all systems sequentially.
     ///
-    /// Only enabled with par-schedule is disabled
-    #[cfg(not(feature = "par-schedule"))]
-    pub fn run_systems(&mut self, world: &mut World, resources: &mut Resources) {
+    /// Only enabled with parallel is disabled
+    #[cfg(not(feature = "parallel"))]
+    pub fn run_systems(&mut self, world: &mut World, resources: &UnsafeResources) {
         self.systems.iter_mut().for_each(|system| {
             let system = unsafe { system.get_mut() };
             system.prepare(world);
-            system.run(world, resources);
+            unsafe { system.run_unsafe(world, resources) };
         });
     }
 
@@ -313,83 +323,77 @@ impl Executor {
     /// accesses is maintained.
     ///
     /// Call from within `rayon::ThreadPool::install()` to execute within a specific thread pool.
-    #[cfg(feature = "par-schedule")]
-    pub fn run_systems(&mut self, world: &mut World, resources: &mut Resources) {
-        let resources = resources.internal();
-        rayon::join(
-            || {},
-            || {
-                match self.systems.len() {
-                    1 => {
-                        // safety: we have exlusive access to all systems, world and resources here
-                        unsafe {
-                            let system = self.systems[0].get_mut();
-                            system.prepare(world);
-                            system.run_unsafe(world, resources);
-                        };
-                    }
-                    _ => {
-                        let systems = &mut self.systems;
-                        let static_dependency_counts = &self.static_dependency_counts;
-                        let awaiting = &mut self.awaiting;
+    #[cfg(feature = "parallel")]
+    pub fn run_systems(&mut self, world: &mut World, resources: &UnsafeResources) {
+        match self.systems.len() {
+            1 => {
+                // safety: we have exlusive access to all systems, world and resources here
+                unsafe {
+                    let system = self.systems[0].get_mut();
+                    system.prepare(world);
+                    system.run_unsafe(world, resources);
+                };
+            }
+            _ => {
+                let systems = &mut self.systems;
+                let static_dependency_counts = &self.static_dependency_counts;
+                let awaiting = &mut self.awaiting;
 
-                        // prepare all systems - archetype filters are pre-executed here
-                        systems
-                            .par_iter_mut()
-                            .for_each(|sys| unsafe { sys.get_mut() }.prepare(world));
+                // prepare all systems - archetype filters are pre-executed here
+                systems
+                    .par_iter_mut()
+                    .for_each(|sys| unsafe { sys.get_mut() }.prepare(world));
 
-                        // determine dynamic dependencies
-                        izip!(
-                            systems.iter(),
-                            self.static_dependants.iter_mut(),
-                            self.dynamic_dependants.iter_mut()
-                        )
-                        .par_bridge()
-                        .for_each(|(sys, static_dep, dyn_dep)| {
-                            // safety: systems is held exclusively, and we are only reading each system
-                            let archetypes = unsafe { sys.get() }.accesses_archetypes();
-                            for i in (0..dyn_dep.len()).rev() {
-                                let dep = dyn_dep[i];
-                                let other = unsafe { systems[dep].get() };
+                // determine dynamic dependencies
+                izip!(
+                    systems.iter(),
+                    self.static_dependants.iter_mut(),
+                    self.dynamic_dependants.iter_mut()
+                )
+                .par_bridge()
+                .for_each(|(sys, static_dep, dyn_dep)| {
+                    // safety: systems is held exclusively, and we are only reading each system
+                    let archetypes = unsafe { sys.get() }.accesses_archetypes();
+                    for i in (0..dyn_dep.len()).rev() {
+                        let dep = dyn_dep[i];
+                        let other = unsafe { systems[dep].get() };
 
-                                // if the archetype sets intersect,
-                                // then we can move the dynamic dependant into the static dependants set
-                                if !other.accesses_archetypes().is_disjoint(archetypes) {
-                                    static_dep.push(dep);
-                                    dyn_dep.swap_remove(i);
-                                    static_dependency_counts[dep].fetch_add(1, Ordering::Relaxed);
-                                }
-                            }
-                        });
-
-                        // initialize dependency tracking
-                        for (i, count) in static_dependency_counts.iter().enumerate() {
-                            awaiting[i].store(count.load(Ordering::Relaxed), Ordering::Relaxed);
+                        // if the archetype sets intersect,
+                        // then we can move the dynamic dependant into the static dependants set
+                        if !other.accesses_archetypes().is_disjoint(archetypes) {
+                            static_dep.push(dep);
+                            dyn_dep.swap_remove(i);
+                            static_dependency_counts[dep].fetch_add(1, Ordering::Relaxed);
                         }
-
-                        let awaiting = &self.awaiting;
-
-                        trace!(?awaiting, "Initialized await counts");
-
-                        // execute all systems with no outstanding dependencies
-                        (0..systems.len())
-                            .into_par_iter()
-                            .filter(|i| static_dependency_counts[*i].load(Ordering::SeqCst) == 0)
-                            .for_each(|i| {
-                                // safety: we are at the root of the execution tree, so we know each
-                                // index is exclusive here
-                                unsafe { self.run_recursive(i, world, resources) };
-                            });
-
-                        debug_assert!(
-                            awaiting.iter().all(|x| x.load(Ordering::SeqCst) == 0),
-                            "not all systems run: {:?}",
-                            awaiting
-                        );
                     }
+                });
+
+                // initialize dependency tracking
+                for (i, count) in static_dependency_counts.iter().enumerate() {
+                    awaiting[i].store(count.load(Ordering::Relaxed), Ordering::Relaxed);
                 }
-            },
-        );
+
+                let awaiting = &self.awaiting;
+
+                trace!(?awaiting, "Initialized await counts");
+
+                // execute all systems with no outstanding dependencies
+                (0..systems.len())
+                    .into_par_iter()
+                    .filter(|i| static_dependency_counts[*i].load(Ordering::SeqCst) == 0)
+                    .for_each(|i| {
+                        // safety: we are at the root of the execution tree, so we know each
+                        // index is exclusive here
+                        unsafe { self.run_recursive(i, world, resources) };
+                    });
+
+                debug_assert!(
+                    awaiting.iter().all(|x| x.load(Ordering::SeqCst) == 0),
+                    "not all systems run: {:?}",
+                    awaiting
+                );
+            }
+        }
     }
 
     /// Flushes the recorded command buffers for all systems.
@@ -408,7 +412,7 @@ impl Executor {
     /// # Safety
     ///
     /// Ensure the system indexed by `i` is only accessed once.
-    #[cfg(feature = "par-schedule")]
+    #[cfg(feature = "parallel")]
     unsafe fn run_recursive(&self, i: usize, world: &World, resources: &UnsafeResources) {
         // safety: the caller ensures nothing else is accessing systems[i]
         self.systems[i].get_mut().run_unsafe(world, resources);
@@ -533,7 +537,43 @@ impl Schedule {
     }
 
     /// Executes all of the steps in the schedule.
+    #[cfg(not(feature = "parallel"))]
     pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
+        self.execute_internal(world, resources, |world, resources, executor| {
+            executor.run_systems(world, resources.internal())
+        });
+    }
+
+    /// Executes all of the steps in the schedule.
+    #[cfg(feature = "parallel")]
+    pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
+        self.execute_internal(world, resources, |world, resources, executor| {
+            let resources = resources.internal();
+            rayon::join(|| executor.run_systems(world, resources), || {});
+        });
+    }
+
+    /// Executes all of the steps in the schedule, with parallelized systems running in
+    /// the given thread pool.
+    #[cfg(feature = "parallel")]
+    pub fn execute_in_thread_pool(
+        &mut self,
+        world: &mut World,
+        resources: &mut Resources,
+        pool: &rayon::ThreadPool,
+    ) {
+        self.execute_internal(world, resources, |world, resources, executor| {
+            let resources = resources.internal();
+            pool.install(|| executor.run_systems(world, resources));
+        });
+    }
+
+    fn execute_internal<F: FnMut(&mut World, &mut Resources, &mut Executor)>(
+        &mut self,
+        world: &mut World,
+        resources: &mut Resources,
+        mut run_executor: F,
+    ) {
         enum ToFlush<'a> {
             Executor(&'a mut Executor),
             System(&'a mut CommandBuffer),
@@ -543,7 +583,7 @@ impl Schedule {
         for step in &mut self.steps {
             match step {
                 Step::Systems(executor) => {
-                    executor.run_systems(world, resources);
+                    run_executor(world, resources, executor);
                     waiting_flush.push(ToFlush::Executor(executor));
                 }
                 Step::FlushCmdBuffers => {

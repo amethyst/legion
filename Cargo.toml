@@ -14,9 +14,8 @@ edition = "2018"
 travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
-default = ["par-iter", "par-schedule", "serialize", "crossbeam-events", "codegen"]
-par-schedule = ["rayon"]
-par-iter = ["rayon"]
+default = ["parallel", "serialize", "crossbeam-events", "codegen"]
+parallel = ["rayon"]
 extended-tuple-impls = []
 serialize = ["serde", "erased-serde", "uuid/serde"]
 crossbeam-events = ["crossbeam-channel"]

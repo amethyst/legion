@@ -3,7 +3,7 @@
 use legion::*;
 use std::collections::HashMap;
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -124,7 +124,7 @@ fn query_cached_read_entity_data() {
 }
 
 #[test]
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 fn query_read_entity_data_par() {
     let _ = tracing_subscriber::fmt::try_init();
 
@@ -157,7 +157,7 @@ fn query_read_entity_data_par() {
 }
 
 #[test]
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 fn query_read_entity_data_par_foreach() {
     let _ = tracing_subscriber::fmt::try_init();
 

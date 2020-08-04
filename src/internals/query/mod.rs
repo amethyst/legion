@@ -364,7 +364,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.    
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     pub unsafe fn par_iter_chunks_unchecked<'a, T: EntityStore>(
         &'a mut self,
         world: &'a T,
@@ -389,7 +389,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// Returns a parallel iterator which will yield all entity chunks which match the query.
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter_chunks_mut<'a, T: EntityStore>(
         &'a mut self,
@@ -419,7 +419,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.
     /// Only usable with queries who's views are read-only.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter_chunks<'a, T: EntityStore>(
         &'a mut self,
@@ -456,7 +456,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub unsafe fn par_iter_unchecked<'a, T: EntityStore>(
         &'a mut self,
@@ -479,7 +479,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     }
 
     /// Returns a parallel iterator which will yield all components which match the query.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter_mut<'a, T: EntityStore>(
         &'a mut self,
@@ -508,7 +508,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// Returns a parallel iterator which will yield all components which match the query.
     ///
     /// Only usable with queries who's views are read-only.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter<'a, T: EntityStore>(
         &'a mut self,
@@ -552,7 +552,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub unsafe fn par_for_each_chunk_unchecked<'a, T: EntityStore, Body>(
         &'a mut self,
@@ -582,7 +582,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     /// Iterates in parallel through all entity chunks which match the query.  
     /// Each chunk contains slices of components for entities which all have the same component layout.  
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each_chunk_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
     where
@@ -613,7 +613,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.  
     /// Only usable with queries who's views are read-only.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each_chunk<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
     where
@@ -654,7 +654,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub unsafe fn par_for_each_unchecked<'a, T: EntityStore, Body>(
         &'a mut self,
@@ -681,7 +681,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     }
 
     /// Iterates in parallel through all components which match the query.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
     where
@@ -710,7 +710,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// Iterates in parallel through all components which match the query.
     ///
     /// Only usable with queries who's views are read-only.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
     where
@@ -817,7 +817,7 @@ impl<'a, F: Fetch> IntoIterator for ChunkView<'a, F> {
     }
 }
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 impl<'a, F: Fetch> rayon::iter::IntoParallelIterator for ChunkView<'a, F> {
     type Iter = crate::internals::iter::indexed::par_iter::Par<<F as IntoIndexableIter>::IntoIter>;
     type Item = <<F as IntoIndexableIter>::IntoIter as crate::internals::iter::indexed::TrustedRandomAccess>::Item;
@@ -889,7 +889,7 @@ where
 // {
 // }
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 pub mod par_iter {
     use super::*;
     use rayon::iter::plumbing::{bridge_unindexed, Folder, UnindexedConsumer, UnindexedProducer};
@@ -1070,7 +1070,7 @@ mod test {
             println!("{:?}, {:?}", x, y);
         }
 
-        #[cfg(feature = "par-iter")]
+        #[cfg(feature = "parallel")]
         {
             query.par_for_each_mut(&mut world, |(x, y)| println!("{:?}, {:?}", x, y));
             use rayon::iter::ParallelIterator;
