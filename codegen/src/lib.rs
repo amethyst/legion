@@ -15,7 +15,7 @@ use syn::{
 ///
 /// # Examples
 ///
-/// By default, the system function is called once when the system runs.
+/// By default, the wrapped function is called once each time the system runs.
 ///
 /// ```
 /// # use legion_codegen::system;
