@@ -1,8 +1,7 @@
 //! Contains types related to the [World](struct.World.html) entity collection.
 
 use super::entity::{
-    Allocate, Canon, Entity, EntityHasher, EntityLocation, EntityName, LocationMap,
-    ID_CLONE_MAPPINGS,
+    Allocate, Entity, EntityHasher, EntityLocation, LocationMap, ID_CLONE_MAPPINGS,
 };
 use super::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
 use super::{
@@ -24,14 +23,10 @@ use super::{
 };
 use bit_set::BitSet;
 use itertools::Itertools;
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{
     collections::HashMap,
     ops::Range,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
-    },
+    sync::atomic::{AtomicU64, Ordering},
 };
 use thiserror::Error;
 
@@ -59,7 +54,6 @@ impl Default for UniverseId {
 #[derive(Debug, Clone, Default)]
 pub struct Universe {
     id: UniverseId,
-    canon: Arc<RwLock<Canon>>,
 }
 
 impl Universe {
@@ -80,16 +74,6 @@ impl Universe {
             universe: self.clone(),
             ..World::with_options(options)
         }
-    }
-
-    /// Returns an RAII object which can deref into the universe's canon.
-    pub fn canon(&self) -> RwLockReadGuard<'_, Canon> {
-        self.canon.read_recursive()
-    }
-
-    /// Returns an RAII object which can deref mut into the universe's canon.
-    pub fn canon_mut(&self) -> RwLockWriteGuard<'_, Canon> {
-        self.canon.write()
     }
 }
 
@@ -229,13 +213,11 @@ impl World {
         self.entities.contains(entity)
     }
 
-    /// Appends a named entity to the word, replacing any existing entity with the given canonical name.
-    /// Returns the ID of the entity.
-    pub fn push_named<T>(&mut self, name: &EntityName, components: T) -> Entity
+    /// Appends a named entity to the word, replacing any existing entity with the given ID.
+    pub fn push_with_id<T>(&mut self, entity_id: Entity, components: T)
     where
         Option<T>: IntoComponentSource,
     {
-        let entity_id = self.universe.canon_mut().canonize_name(name);
         self.remove(entity_id);
 
         let mut components = <Option<T> as IntoComponentSource>::into(Some(components));
@@ -248,8 +230,6 @@ impl World {
 
         let (base, entities) = writer.inserted();
         self.entities.insert(entities, arch_index, base);
-
-        entity_id
     }
 
     /// Appends a new entity to the world. Returns the ID of the new entity.
@@ -685,8 +665,6 @@ impl World {
             return Err(MergeError::DifferentUniverses);
         }
 
-        let universe = self.universe.clone();
-        let mut canon = universe.canon_mut();
         let mut allocator = Allocate::new();
         let mut reallocated = HashMap::default();
 
@@ -698,7 +676,7 @@ impl World {
         }) {
             // find conflicts, and remove the existing entity, to be replaced with that defined in the source
             for src_entity in src_arch.entities() {
-                let dst_entity = merger.assign_id(*src_entity, &mut allocator, &mut *canon);
+                let dst_entity = merger.assign_id(*src_entity, &mut allocator);
                 self.remove(dst_entity);
                 reallocated.insert(*src_entity, dst_entity);
             }
@@ -788,12 +766,9 @@ impl World {
             return Err(MergeError::DifferentUniverses);
         }
 
-        let mut allocator = Allocate::new();
-        let universe = self.universe.clone();
-        let mut canon = universe.canon_mut();
-
         // determine the destination ID
-        let dst_entity = merger.assign_id(entity, &mut allocator, &mut *canon);
+        let mut allocator = Allocate::new();
+        let dst_entity = merger.assign_id(entity, &mut allocator);
 
         // find conflicts, and remove the existing entity, to be replaced with that defined in the source
         self.remove(dst_entity);
@@ -1046,12 +1021,7 @@ pub trait Merger {
     /// Returns the ID to use in the destination world when cloning the given entity.
     #[inline]
     #[allow(unused_variables)]
-    fn assign_id(
-        &mut self,
-        existing: Entity,
-        allocator: &mut Allocate,
-        canon: &mut Canon,
-    ) -> Entity {
+    fn assign_id(&mut self, existing: Entity, allocator: &mut Allocate) -> Entity {
         allocator.next().unwrap()
     }
 

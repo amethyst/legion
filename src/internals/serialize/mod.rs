@@ -10,12 +10,14 @@ use crate::internals::{
     world::World,
 };
 use de::{WorldDeserializer, WorldVisitor};
+use id::Canon;
 use ser::WorldSerializer;
 use serde::{de::DeserializeSeed, Serializer};
 use std::{collections::HashMap, hash::Hash, marker::PhantomData};
 
 pub mod de;
 mod entities;
+pub mod id;
 mod packed;
 pub mod ser;
 
@@ -30,6 +32,10 @@ pub trait TypeKey:
 impl<T> TypeKey for T where
     T: serde::Serialize + for<'de> serde::Deserialize<'de> + Ord + Clone + Hash
 {
+}
+
+pub trait CanonSource {
+    fn canon(&self) -> Option<&parking_lot::Mutex<Canon>>;
 }
 
 /// A [TypeKey](trait.TypeKey.html) which can construct itself for a given type T.
@@ -80,6 +86,7 @@ where
         ),
     >,
     constructors: HashMap<T, (ComponentTypeId, fn(&mut EntityLayout))>,
+    canon: parking_lot::Mutex<Canon>,
 }
 
 impl<T> Registry<T>
@@ -92,6 +99,7 @@ where
             missing: UnknownType::Error,
             serialize_fns: HashMap::new(),
             constructors: HashMap::new(),
+            canon: parking_lot::Mutex::new(Canon::default()),
             _phantom: PhantomData,
         }
     }
@@ -180,6 +188,12 @@ where
 impl<T: TypeKey> Default for Registry<T> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<T: TypeKey> CanonSource for Registry<T> {
+    fn canon(&self) -> Option<&parking_lot::Mutex<Canon>> {
+        Some(&self.canon)
     }
 }
 

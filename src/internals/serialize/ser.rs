@@ -1,8 +1,8 @@
 //! World serialization types.
 
 use super::{
-    entities::ser::EntitiesLayoutSerializer, packed::ser::PackedLayoutSerializer, UnknownType,
-    WorldField,
+    entities::ser::EntitiesLayoutSerializer, packed::ser::PackedLayoutSerializer, CanonSource,
+    UnknownType, WorldField,
 };
 use crate::internals::{
     query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World,
@@ -10,8 +10,8 @@ use crate::internals::{
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 /// Describes a type which knows how to deserialize the components in a world.
-pub trait WorldSerializer {
-    /// The stable type ID used to identify each component type.
+pub trait WorldSerializer: CanonSource {
+    /// The stable type ID used to identify each component type in the serialized data.
     type TypeId: Serialize + Ord;
 
     /// Converts a runtime component type ID into the serialized type ID.
@@ -70,9 +70,7 @@ where
     let human_readable = serializer.is_human_readable();
     let mut root = serializer.serialize_map(Some(1))?;
 
-    crate::internals::entity::serde::UNIVERSE.with(|cell| {
-        *cell.borrow_mut() = Some(world.universe().clone());
-
+    let mut run = || {
         if human_readable {
             // serialize per-entity representation
             root.serialize_entry(
@@ -82,7 +80,7 @@ where
                     world,
                     filter,
                 },
-            )?;
+            )
         } else {
             // serialize machine-optimised representation
             root.serialize_entry(
@@ -92,10 +90,16 @@ where
                     world,
                     filter,
                 },
-            )?;
+            )
         }
+    };
 
-        *cell.borrow_mut() = None;
-        root.end()
-    })
+    if let Some(canon) = world_serializer.canon() {
+        let mut canon = canon.lock();
+        canon.run_as_context(run)?;
+    } else {
+        (run)()?;
+    }
+
+    root.end()
 }

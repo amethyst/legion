@@ -1,8 +1,8 @@
 //! World deserialization types.
 
 use super::{
-    entities::de::EntitiesLayoutDeserializer, packed::de::PackedLayoutDeserializer, UnknownType,
-    WorldField,
+    entities::de::EntitiesLayoutDeserializer, packed::de::PackedLayoutDeserializer, CanonSource,
+    UnknownType, WorldField,
 };
 use crate::internals::{
     storage::{
@@ -18,8 +18,8 @@ use serde::{
 };
 
 /// Describes a type which knows how to deserialize the components in a world.
-pub trait WorldDeserializer {
-    /// The stable type ID used to identify each component type.
+pub trait WorldDeserializer: CanonSource {
+    /// The stable type ID used to identify each component type in the serialized data.
     type TypeId: for<'de> Deserialize<'de>;
 
     /// Converts the serialized type ID into a runtime component type ID.
@@ -57,32 +57,39 @@ impl<'a, 'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<'a, W> {
         formatter.write_str("map")
     }
 
-    fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error>
+    fn visit_map<V>(self, map: V) -> Result<Self::Value, V::Error>
     where
         V: MapAccess<'de>,
     {
-        crate::internals::entity::serde::UNIVERSE.with(|cell| {
-            *cell.borrow_mut() = Some(self.world.universe().clone());
-
+        fn run<'a, 'de, W: WorldDeserializer, V: MapAccess<'de>>(
+            world_deserializer: &'a W,
+            world: &'a mut World,
+            mut map: V,
+        ) -> Result<(), V::Error> {
             while let Some(key) = map.next_key()? {
                 match key {
                     WorldField::Packed => {
                         map.next_value_seed(PackedLayoutDeserializer {
-                            world_deserializer: self.world_deserializer,
-                            world: self.world,
+                            world_deserializer,
+                            world,
                         })?;
                     }
                     WorldField::Entities => {
                         map.next_value_seed(EntitiesLayoutDeserializer {
-                            world_deserializer: self.world_deserializer,
-                            world: self.world,
+                            world_deserializer,
+                            world,
                         })?;
                     }
                 }
             }
-
-            *cell.borrow_mut() = None;
             Ok(())
-        })
+        }
+
+        if let Some(canon) = self.world_deserializer.canon() {
+            let mut canon = canon.lock();
+            canon.run_as_context(move || run(self.world_deserializer, self.world, map))
+        } else {
+            run(self.world_deserializer, self.world, map)
+        }
     }
 }
