@@ -19,7 +19,7 @@ Legion aims to be a feature rich high performance ECS library for Rust game proj
 
 ```rust
 use legion::*;
-let world = World::new();
+let world = World::default();
 ```
 
 Entities can be inserted via either `push` (for a single entity) or `extend` (for a collection of entities with the same component types). The world will create a unique ID for each entity upon insertion that you can use to refer to that entity later.
