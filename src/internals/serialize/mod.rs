@@ -176,7 +176,7 @@ where
     }
 
     /// Constructs a serde::DeserializeSeed which will deserialize into a new world.
-    pub fn as_deserialize<'a>(&'a self) -> DeserializeNewWorld<'a, Self> {
+    pub fn as_deserialize(&self) -> DeserializeNewWorld<'_, Self> {
         DeserializeNewWorld(&self)
     }
 }
