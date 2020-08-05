@@ -29,6 +29,7 @@ impl<T: IntoView> IntoQuery for T {
             _view: PhantomData,
             filter: Mutex::new(<<Self::View as DefaultFilter>::Filter as Default>::default()),
             layout_matches: HashMap::new(),
+            is_view_filter: true,
         }
     }
 }
@@ -121,6 +122,7 @@ pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
     _view: PhantomData<V>,
     filter: Mutex<F>,
     layout_matches: HashMap<WorldId, Cache>,
+    is_view_filter: bool,
 }
 
 impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
@@ -134,6 +136,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
             _view: self._view,
             filter: Mutex::new(self.filter.into_inner() & filter),
             layout_matches: HashMap::default(),
+            is_view_filter: false,
         }
     }
 
@@ -214,6 +217,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     /// Returns the components for a single entity.
     ///
+    /// This function will not evaluate the query's dynamic filters. This means, for example, that
+    /// calling `get` on all entities in an archetype will not prevent `maybe_changed` from returning
+    /// those entities the next time the query is iterated.
+    ///
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.
@@ -227,11 +234,6 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     {
         let location = world.entry_ref(entity)?.location();
         let accessor = world.get_component_storage::<V>().unwrap();
-        let (_, result) = self.evaluate_query(&accessor);
-
-        if !result.index().contains(&location.archetype()) {
-            return None;
-        }
 
         // safety:
         // This is much like the similar usage of transmute inside iter_chunks_unchecked, see
@@ -248,18 +250,22 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
             <V as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result)
                 .next()?;
 
-        let filter = self.filter.get_mut();
-        filter.prepare(world.id());
-
-        if filter.matches_archetype(&fetch).is_pass() {
-            fetch.accepted();
-            let view = ChunkView::new(&accessor.archetypes()[location.archetype()], fetch);
-            let mut iter = view.into_iter();
-            use crate::internals::iter::indexed::TrustedRandomAccess;
-            Some(iter.get_unchecked(location.component().0))
-        } else {
-            None
+        // if our filter has conditions beyond that of the view, then we need to evaluate the query
+        if !self.is_view_filter {
+            let (_, result) = self.evaluate_query(&accessor);
+            if !result.index().contains(&location.archetype()) {
+                return None;
+            }
         }
+
+        // accept the fetch to trigger version increments
+        fetch.accepted();
+
+        // construct a chunk view for the archetype, then index the entity we want
+        let view = ChunkView::new(&accessor.archetypes()[location.archetype()], fetch);
+        let mut iter = view.into_iter();
+        use crate::internals::iter::indexed::TrustedRandomAccess;
+        Some(iter.get_unchecked(location.component().0))
     }
 
     /// Returns the components for a single entity.

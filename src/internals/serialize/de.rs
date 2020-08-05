@@ -28,7 +28,7 @@ pub trait WorldDeserializer: CanonSource {
     /// Adds the specified component to the given entity layout.
     fn register_component(&self, type_id: Self::TypeId, layout: &mut EntityLayout);
 
-    /// Deserializes a component and inserts it into the given storage.
+    /// Deserializes a single component and inserts it into the given storage.
     fn deserialize_insert_component<'de, D: Deserializer<'de>>(
         &self,
         type_id: ComponentTypeId,
