@@ -36,7 +36,7 @@ pub use crate::internals::serialize::{
     de::WorldDeserializer,
     id::{Canon, EntityName},
     ser::{SerializableWorld, WorldSerializer},
-    AutoTypeKey, DeserializeIntoWorld, DeserializeNewWorld, Registry, TypeKey,
+    AutoTypeKey, CanonSource, DeserializeIntoWorld, DeserializeNewWorld, Registry, TypeKey,
 };
 
 #[cfg(feature = "type-uuid")]

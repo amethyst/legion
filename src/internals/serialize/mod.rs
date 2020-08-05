@@ -33,7 +33,9 @@ impl<T> TypeKey for T where
 {
 }
 
+/// Provides the Entity to UUID mapping context for (de)serializing entity IDs.
 pub trait CanonSource {
+    /// Returns the Entity/UUID mapping context.
     fn canon(&self) -> Option<&parking_lot::Mutex<Canon>>;
 }
 
