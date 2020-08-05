@@ -25,8 +25,7 @@ struct Static;
 fn query_read_entity_data() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -56,8 +55,7 @@ fn query_read_entity_data() {
 fn query_try_read_entity_data() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
     world.push((Pos(1., 2., 3.),));
     world.push((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)));
 
@@ -77,8 +75,7 @@ fn query_try_read_entity_data() {
 fn query_try_write_entity_data() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
     world.push((Pos(1., 2., 3.),));
     let entity = world.push((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)));
 
@@ -96,8 +93,7 @@ fn query_try_write_entity_data() {
 fn query_cached_read_entity_data() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -128,8 +124,7 @@ fn query_cached_read_entity_data() {
 fn query_read_entity_data_par() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -161,8 +156,7 @@ fn query_read_entity_data_par() {
 fn query_read_entity_data_par_foreach() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -190,8 +184,7 @@ fn query_read_entity_data_par_foreach() {
 fn query_read_entity_data_tuple() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -222,8 +215,7 @@ fn query_read_entity_data_tuple() {
 fn query_write_entity_data() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -255,8 +247,7 @@ fn query_write_entity_data() {
 fn query_write_entity_data_tuple() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -290,8 +281,7 @@ fn query_write_entity_data_tuple() {
 fn query_mixed_entity_data_tuple() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -324,8 +314,7 @@ fn query_mixed_entity_data_tuple() {
 fn query_partial_match() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -358,8 +347,7 @@ fn query_partial_match() {
 fn query_on_changed_first() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -390,8 +378,7 @@ fn query_on_changed_first() {
 fn query_on_changed_no_changes() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -429,8 +416,7 @@ fn query_on_changed_no_changes() {
 fn query_on_changed_self_changes() {
     let _ = tracing_subscriber::fmt::try_init();
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -476,8 +462,7 @@ fn query_try_with_changed_filter() {
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct B(f32);
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let sum_entity = world.push((Sum(0.),));
     let a_entity = world.push((Sum(0.), A(1.)));

@@ -1,6 +1,5 @@
 //! Contains types required to serialize and deserialize a world via the serde library.
 
-use super::world::Universe;
 use crate::internals::{
     storage::{
         archetype::{ArchetypeIndex, EntityLayout},
@@ -168,20 +167,17 @@ where
         self.register::<C>(<T as AutoTypeKey<C>>::new())
     }
 
-    /// Constructs a serde::DeserializeSeed which will deserialize into an exist world.
+    /// Constructs a serde::DeserializeSeed which will deserialize into an existing world.
     pub fn as_deserialize_into_world<'a>(
         &'a self,
         world: &'a mut World,
-    ) -> WorldDeserializerWrapper<'a, Self> {
-        WorldDeserializerWrapper(&self, world)
+    ) -> DeserializeIntoWorld<'a, Self> {
+        DeserializeIntoWorld(&self, world)
     }
 
-    /// Constructs a serde::DeserializeSeed which will deserialize into a new world in the given universe.
-    pub fn as_deserialize<'a>(
-        &'a self,
-        universe: &'a Universe,
-    ) -> UniverseDeserializerWrapper<'a, Self> {
-        UniverseDeserializerWrapper(&self, universe)
+    /// Constructs a serde::DeserializeSeed which will deserialize into a new world.
+    pub fn as_deserialize<'a>(&'a self) -> DeserializeNewWorld<'a, Self> {
+        DeserializeNewWorld(&self)
     }
 }
 
@@ -295,9 +291,9 @@ where
 
 /// Wraps a [WorldDeserializer](de/trait.WorldDeserializer.html) and a world and implements
 /// `serde::DeserializeSeed` for deserializing into the world.
-pub struct WorldDeserializerWrapper<'a, T: WorldDeserializer>(pub &'a T, pub &'a mut World);
+pub struct DeserializeIntoWorld<'a, T: WorldDeserializer>(pub &'a T, pub &'a mut World);
 
-impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for WorldDeserializerWrapper<'a, W> {
+impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for DeserializeIntoWorld<'a, W> {
     type Value = ();
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -313,17 +309,17 @@ impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for WorldDeserializerWr
 
 /// Wraps a [WorldDeserializer](de/trait.WorldDeserializer.html) and a universe and implements
 /// `serde::DeserializeSeed` for deserializing into a new world.
-pub struct UniverseDeserializerWrapper<'a, T: WorldDeserializer>(pub &'a T, pub &'a Universe);
+pub struct DeserializeNewWorld<'a, T: WorldDeserializer>(pub &'a T);
 
-impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for UniverseDeserializerWrapper<'a, W> {
+impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for DeserializeNewWorld<'a, W> {
     type Value = World;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let mut world = self.1.create_world();
-        WorldDeserializerWrapper(self.0, &mut world).deserialize(deserializer)?;
+        let mut world = World::default();
+        DeserializeIntoWorld(self.0, &mut world).deserialize(deserializer)?;
         Ok(world)
     }
 }
@@ -341,13 +337,12 @@ mod test {
     use crate::internals::{
         entity::Entity,
         query::filter::filter_fns::any,
-        world::{EntityStore, Universe, World},
+        world::{EntityStore, World},
     };
 
     #[test]
     fn serialize_json() {
-        let universe = Universe::new();
-        let mut world = universe.create_world();
+        let mut world = World::default();
 
         let entity = world.extend(vec![
             (1usize, false, 1isize),
@@ -376,10 +371,7 @@ mod test {
         println!("{:#}", json);
 
         use serde::de::DeserializeSeed;
-        let world: World = registry
-            .as_deserialize(&universe)
-            .deserialize(json)
-            .unwrap();
+        let world: World = registry.as_deserialize().deserialize(json).unwrap();
         let entry = world.entry_ref(entity).unwrap();
         assert_eq!(entry.get_component::<usize>().unwrap(), &1usize);
         assert_eq!(entry.get_component::<bool>().unwrap(), &false);
@@ -399,8 +391,7 @@ mod test {
 
     #[test]
     fn serialize_bincode() {
-        let universe = Universe::new();
-        let mut world = universe.create_world();
+        let mut world = World::default();
 
         let entity = world.extend(vec![
             (1usize, false, 1isize),
@@ -432,7 +423,7 @@ mod test {
                 .allow_trailing_bytes(),
         );
         let world: World = registry
-            .as_deserialize(&universe)
+            .as_deserialize()
             .deserialize(&mut deserializer)
             .unwrap();
         let entity = world.entry_ref(entity).unwrap();

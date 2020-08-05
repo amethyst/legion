@@ -764,7 +764,7 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
     /// # struct B;
     /// # struct C;
     /// # struct D;
-    /// # let mut world = World::new();
+    /// # let mut world = World::default();
     /// let mut query = <(Entity, Read<A>, Write<B>, TryRead<C>, TryWrite<D>)>::query();
     /// for chunk in query.iter_chunks_mut(&mut world) {
     ///     let slices: (&[Entity], &[A], &mut [B], Option<&[C]>, Option<&mut [D]>) = chunk.into_components();       
@@ -784,7 +784,7 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
     /// # use legion::*;
     /// # struct A;
     /// # struct B;
-    /// # let mut world = World::new();
+    /// # let mut world = World::default();
     /// let mut query = <(Entity, Read<A>, TryRead<B>)>::query();
     /// for chunk in query.iter_chunks_mut(&mut world) {
     ///     let slices: (&[Entity], &[A], Option<&[B]>) = chunk.get_components();       

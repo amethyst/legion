@@ -515,7 +515,7 @@ pub enum Step {
 /// # let find_collisions = SystemBuilder::new("find_collisions").build(|_,_,_,_| {});
 /// # let calculate_acceleration = SystemBuilder::new("calculate_acceleration").build(|_,_,_,_| {});
 /// # let update_positions = SystemBuilder::new("update_positions").build(|_,_,_,_| {});
-/// let mut world = World::new();
+/// let mut world = World::default();
 /// let mut resources = Resources::default();
 /// let mut schedule = Schedule::builder()
 ///     .add_system(find_collisions)

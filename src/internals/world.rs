@@ -28,54 +28,8 @@ use std::{
     ops::Range,
     sync::atomic::{AtomicU64, Ordering},
 };
-use thiserror::Error;
 
 type MapEntry<'a, K, V> = std::collections::hash_map::Entry<'a, K, V>;
-
-/// Unique identifier for a universe.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct UniverseId(u64);
-static UNIVERSE_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-impl UniverseId {
-    fn next() -> Self {
-        UniverseId(UNIVERSE_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
-}
-
-impl Default for UniverseId {
-    fn default() -> Self {
-        Self::next()
-    }
-}
-
-/// A Universe defines a namespace where canonical entity names will always resolve to the same
-/// [Entity](../entity/struct.Entity.html).
-#[derive(Debug, Clone, Default)]
-pub struct Universe {
-    id: UniverseId,
-}
-
-impl Universe {
-    /// Creates a new universe across the entire entity address space.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates a new [World](struct.World.html) in this universe with default options.
-    pub fn create_world(&self) -> World {
-        self.create_world_with_options(WorldOptions::default())
-    }
-
-    /// Creates a new [World](struct.World.html) in this universe.
-    pub fn create_world_with_options(&self, options: WorldOptions) -> World {
-        World {
-            id: WorldId::next(self.id),
-            universe: self.clone(),
-            ..World::with_options(options)
-        }
-    }
-}
 
 /// Error type representing a failure to aquire a storage accessor.
 #[derive(Debug)]
@@ -101,21 +55,18 @@ pub trait EntityStore {
 
 /// Unique identifier for a [world](struct.World.html).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WorldId(UniverseId, u64);
+pub struct WorldId(u64);
 static WORLD_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 impl WorldId {
-    fn next(universe: UniverseId) -> Self {
-        WorldId(universe, WORLD_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
-    fn universe(&self) -> UniverseId {
-        self.0
+    fn next() -> Self {
+        WorldId(WORLD_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
     }
 }
 
 impl Default for WorldId {
     fn default() -> Self {
-        Self::next(UniverseId::default())
+        Self::next()
     }
 }
 
@@ -135,7 +86,6 @@ pub struct WorldOptions {
 /// The entities in a world may be efficiently searched and iterated via [queries](../query/index.html).
 #[derive(Debug)]
 pub struct World {
-    universe: Universe,
     id: WorldId,
     index: SearchIndex,
     components: Components,
@@ -149,18 +99,13 @@ pub struct World {
 
 impl Default for World {
     fn default() -> Self {
-        Self::with_options(WorldOptions::default())
+        Self::new(WorldOptions::default())
     }
 }
 
 impl World {
-    /// Creates a new world in its own [universe](struct.Universe.html) with default [options](struct.WorldOptions.html).
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates a new world in its own [universe](struct.Universe.html).
-    pub fn with_options(options: WorldOptions) -> Self {
+    /// Creates a new world with the given options,
+    pub fn new(options: WorldOptions) -> Self {
         let groups: Vec<Group> = options.groups.into_iter().map(|def| def.into()).collect();
         let mut group_members = HashMap::default();
         for (i, group) in groups.iter().enumerate() {
@@ -176,12 +121,8 @@ impl World {
             }
         }
 
-        let universe = Universe::default();
-        let id = WorldId::next(universe.id);
-
         Self {
-            universe,
-            id,
+            id: WorldId::next(),
             index: SearchIndex::default(),
             components: Components::default(),
             groups,
@@ -240,14 +181,14 @@ impl World {
     /// Pushing an entity with three components:
     /// ```
     /// # use legion::*;
-    /// let mut world = World::new();
+    /// let mut world = World::default();
     /// let _entity = world.push((1usize, false, 5.3f32));
     /// ```
     ///
     /// Pushing an entity with one component (note the tuple syntax):
     /// ```
     /// # use legion::*;
-    /// let mut world = World::new();
+    /// let mut world = World::default();
     /// let _entity = world.push((1usize,));
     /// ```
     pub fn push<T>(&mut self, components: T) -> Entity
@@ -264,7 +205,7 @@ impl World {
     /// Inserting a vector of component tuples:
     /// ```
     /// # use legion::*;
-    /// let mut world = World::new();
+    /// let mut world = World::default();
     /// let _entities = world.extend(vec![
     ///     (1usize, false, 5.3f32),
     ///     (2usize, true,  5.3f32),
@@ -275,7 +216,7 @@ impl World {
     /// Inserting a tuple of component vectors:
     /// ```
     /// # use legion::*;
-    /// let mut world = World::new();
+    /// let mut world = World::default();
     /// let _entities = world.extend(
     ///     (
     ///         vec![1usize, 2usize, 3usize],
@@ -342,7 +283,7 @@ impl World {
     /// Adding a component to an entity:
     /// ```
     /// # use legion::*;
-    /// let mut world = World::new();
+    /// let mut world = World::default();
     /// let entity = world.push((true, 0isize));
     /// if let Some(mut entry) = world.entry(entity) {
     ///     entry.add_component(0.2f32);
@@ -385,11 +326,6 @@ impl World {
     /// defined when this world was created.
     pub fn pack(&mut self, options: PackOptions) {
         self.components.pack(&options);
-    }
-
-    /// Returns the world's universe.
-    pub fn universe(&self) -> &Universe {
-        &self.universe
     }
 
     pub(crate) fn components(&self) -> &Components {
@@ -568,16 +504,7 @@ impl World {
     }
 
     /// Merges the given world into this world by moving all entities out of the source world.
-    pub fn move_from<F: LayoutFilter>(
-        &mut self,
-        source: &mut World,
-        filter: &F,
-    ) -> Result<(), MergeError> {
-        // we can only merge worlds which are part of the same universe
-        if self.id.universe() != source.id.universe() {
-            return Err(MergeError::DifferentUniverses);
-        }
-
+    pub fn move_from<F: LayoutFilter>(&mut self, source: &mut World, filter: &F) {
         // find the archetypes in the source that we want to merge into the destination
         for src_arch in source.archetypes.iter_mut().filter(|arch| {
             filter
@@ -624,8 +551,6 @@ impl World {
             let (base, entities) = writer.inserted();
             self.entities.insert(entities, dst_arch_index, base);
         }
-
-        Ok(())
     }
 
     /// Clones the entities from a world into this world.
@@ -643,8 +568,8 @@ impl World {
     /// ```
     /// # use legion::*;
     /// # use legion::world::Duplicate;
-    /// let mut world_a = World::new();
-    /// let mut world_b = World::new();
+    /// let mut world_a = World::default();
+    /// let mut world_b = World::default();
     ///
     /// // any component types not registered with Duplicate will be ignored during the merge
     /// let mut merger = Duplicate::default();
@@ -659,12 +584,7 @@ impl World {
         source: &World,
         filter: &F,
         merger: &mut M,
-    ) -> Result<HashMap<Entity, Entity, EntityHasher>, MergeError> {
-        // we can only merge worlds which are part of the same universe
-        if self.id.universe() != source.id.universe() {
-            return Err(MergeError::DifferentUniverses);
-        }
-
+    ) -> HashMap<Entity, Entity, EntityHasher> {
         let mut allocator = Allocate::new();
         let mut reallocated = HashMap::default();
 
@@ -743,15 +663,13 @@ impl World {
             self.entities.insert(entities, dst_arch_index, base);
         }
 
-        let reallocated = reallocated.unwrap_or_else(|| {
+        reallocated.unwrap_or_else(|| {
             // switch the map context back to recover our hashmap
             ID_CLONE_MAPPINGS.with(|cell| {
                 std::mem::swap(&mut *cell.borrow_mut(), &mut mappings);
             });
             mappings
-        });
-
-        Ok(reallocated)
+        })
     }
 
     /// Clones a single entity from the source world into the destination world.
@@ -760,12 +678,7 @@ impl World {
         source: &World,
         entity: Entity,
         merger: &mut M,
-    ) -> Result<Entity, MergeError> {
-        // we can only merge worlds which are part of the same universe
-        if self.id.universe() != source.id.universe() {
-            return Err(MergeError::DifferentUniverses);
-        }
-
+    ) -> Entity {
         // determine the destination ID
         let mut allocator = Allocate::new();
         let dst_entity = merger.assign_id(entity, &mut allocator);
@@ -829,7 +742,7 @@ impl World {
             cell.borrow_mut().clear();
         });
 
-        Ok(dst_entity)
+        dst_entity
     }
 
     /// Creates a serde serializable representation of the world.
@@ -854,8 +767,7 @@ impl World {
     /// Serializing all entities with a `Position` component to JSON.
     /// ```
     /// # use legion::*;
-    /// # let universe = Universe::new();
-    /// # let world = universe.create_world();
+    /// # let world = World::default();
     /// # #[derive(serde::Serialize, serde::Deserialize)]
     /// # struct Position;
     /// // create a registry which uses strings as the external type ID
@@ -870,7 +782,7 @@ impl World {
     ///
     /// // registries can also be used to deserialize
     /// use serde::de::DeserializeSeed;
-    /// let world: World = registry.as_deserialize(&universe).deserialize(json).unwrap();
+    /// let world: World = registry.as_deserialize().deserialize(json).unwrap();
     /// ```
     #[cfg(feature = "serialize")]
     pub fn as_serializable<
@@ -1196,14 +1108,6 @@ impl Merger for Duplicate {
     }
 }
 
-/// An error type which indicates that a world merge failed.
-#[derive(Error, Debug, Copy, Clone, PartialEq, Hash)]
-pub enum MergeError {
-    /// The two worlds exist in differnce universes.
-    #[error("source and destination worlds belong to different universes")]
-    DifferentUniverses,
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -1217,12 +1121,6 @@ mod test {
     #[test]
     fn create() {
         let _ = World::default();
-    }
-
-    #[test]
-    fn create_in_universe() {
-        let universe = Universe::new();
-        let _ = universe.create_world();
     }
 
     #[test]
@@ -1332,7 +1230,7 @@ mod test {
         #[derive(Copy, Clone, Debug, PartialEq)]
         struct D(f32);
 
-        let mut world = crate::internals::world::World::with_options(WorldOptions {
+        let mut world = crate::internals::world::World::new(WorldOptions {
             groups: vec![<(A, B, C, D)>::to_group()],
         });
 
@@ -1364,9 +1262,8 @@ mod test {
 
     #[test]
     fn move_from() {
-        let universe = Universe::new();
-        let mut a = universe.create_world();
-        let mut b = universe.create_world();
+        let mut a = World::default();
+        let mut b = World::default();
 
         let entity_a = a.extend(vec![
             (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -1378,7 +1275,7 @@ mod test {
             (Pos(10., 11., 12.), Rot(0.10, 0.11, 0.12)),
         ])[0];
 
-        b.move_from(&mut a, &any()).unwrap();
+        b.move_from(&mut a, &any());
 
         assert!(a.entry(entity_a).is_none());
         assert_eq!(
@@ -1393,9 +1290,8 @@ mod test {
 
     #[test]
     fn clone_from() {
-        let universe = Universe::new();
-        let mut a = universe.create_world();
-        let mut b = universe.create_world();
+        let mut a = World::default();
+        let mut b = World::default();
 
         let entity_a = a.extend(vec![
             (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -1411,7 +1307,7 @@ mod test {
         merger.register_copy::<Pos>();
         merger.register_clone::<Rot>();
 
-        let map = b.clone_from(&a, &any(), &mut merger).unwrap();
+        let map = b.clone_from(&a, &any(), &mut merger);
 
         assert_eq!(
             *a.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),
@@ -1448,9 +1344,8 @@ mod test {
 
     #[test]
     fn clone_update_entity_refs() {
-        let universe = Universe::new();
-        let mut a = universe.create_world();
-        let mut b = universe.create_world();
+        let mut a = World::default();
+        let mut b = World::default();
 
         let entity_1 = a.push((Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)));
         let entity_2 = a.push((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6), entity_1));
@@ -1466,7 +1361,7 @@ mod test {
         merger.register_clone::<Rot>();
         merger.register_clone::<Entity>();
 
-        let map = b.clone_from(&a, &any(), &mut merger).unwrap();
+        let map = b.clone_from(&a, &any(), &mut merger);
 
         assert_eq!(
             *b.entry(map[&entity_1])
@@ -1486,9 +1381,8 @@ mod test {
 
     #[test]
     fn clone_from_single() {
-        let universe = Universe::new();
-        let mut a = universe.create_world();
-        let mut b = universe.create_world();
+        let mut a = World::default();
+        let mut b = World::default();
 
         let entities = a
             .extend(vec![
@@ -1506,7 +1400,7 @@ mod test {
         merger.register_copy::<Pos>();
         merger.register_clone::<Rot>();
 
-        let cloned = b.clone_from_single(&a, entities[0], &mut merger).unwrap();
+        let cloned = b.clone_from_single(&a, entities[0], &mut merger);
 
         assert_eq!(
             *a.entry(entities[0])
@@ -1547,9 +1441,8 @@ mod test {
     #[test]
     #[allow(clippy::float_cmp)]
     fn clone_from_convert() {
-        let universe = Universe::new();
-        let mut a = universe.create_world();
-        let mut b = universe.create_world();
+        let mut a = World::default();
+        let mut b = World::default();
 
         let entity_a = a.extend(vec![
             (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -1564,7 +1457,7 @@ mod test {
         let mut merger = Duplicate::default();
         merger.register_convert::<Pos, f32, _>(|comp| comp.0 as f32);
 
-        let map = b.clone_from(&a, &any(), &mut merger).unwrap();
+        let map = b.clone_from(&a, &any(), &mut merger);
 
         assert_eq!(
             *a.entry(entity_a).unwrap().get_component::<Pos>().unwrap(),

@@ -214,8 +214,7 @@ enum Command {
 /// # struct Position(f32);
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Rotation(f32);
-/// # let universe = Universe::new();
-/// # let mut world = universe.create_world();
+/// # let mut world = World::default();
 /// let mut command_buffer = CommandBuffer::new(&world);
 /// let entity = command_buffer.push(());
 ///

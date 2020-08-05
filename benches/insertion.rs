@@ -16,8 +16,7 @@ fn bench_insert_zero_baseline(c: &mut Criterion) {
 fn bench_insert_one_baseline(c: &mut Criterion) {
     c.bench_function("insert_one_baseline", |b| {
         b.iter(|| {
-            let universe = Universe::new();
-            let mut world = universe.create_world();
+            let mut world = World::default();
             let components: Vec<isize> = (0..10000).map(|i| i).collect();
             criterion::black_box(components);
 
@@ -29,8 +28,7 @@ fn bench_insert_one_baseline(c: &mut Criterion) {
 fn bench_insert_unbatched(c: &mut Criterion) {
     c.bench_function("insert_unbatched", |b| {
         b.iter(|| {
-            let universe = Universe::new();
-            let mut world = universe.create_world();
+            let mut world = World::default();
             let components: Vec<isize> = (0..10000).map(|i| i).collect();
 
             for component in components {
@@ -47,8 +45,7 @@ fn bench_insert_batched(c: &mut Criterion) {
             "counts",
             |b, n| {
                 b.iter(|| {
-                    let universe = Universe::new();
-                    let mut world = universe.create_world();
+                    let mut world = World::default();
                     let components: Vec<(isize,)> = (0..*n).map(|i| (i,)).collect();
 
                     world.extend(components);

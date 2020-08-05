@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn writeread_left_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Write<usize>>();
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn writeread_left_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Write<usize>>();
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn writeread_right_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, right) = world.split::<Write<usize>>();
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn writeread_right_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, right) = world.split::<Write<usize>>();
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn readread_left_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Read<usize>>();
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn readread_left_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Read<usize>>();
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn readread_right_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, right) = world.split::<Read<usize>>();
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn readread_right_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, right) = world.split::<Read<usize>>();
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn writewrite_left_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Write<usize>>();
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn writewrite_left_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Write<usize>>();
@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn writewrite_right_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Write<usize>>();
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn writewrite_right_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Write<usize>>();
@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn readwrite_left_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Read<usize>>();
@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn readwrite_left_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Read<usize>>();
@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn readwrite_right_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Read<usize>>();
@@ -474,7 +474,7 @@ mod tests {
 
     #[test]
     fn readwrite_right_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Read<usize>>();

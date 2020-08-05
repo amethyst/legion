@@ -33,8 +33,7 @@ fn data(n: usize) -> Vec<(Position, Orientation, Scale, Transform)> {
 }
 
 fn setup(data: Vec<(Position, Orientation, Scale, Transform)>) -> World {
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     world.extend(data);
 

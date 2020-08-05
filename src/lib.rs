@@ -11,7 +11,7 @@
 //!
 //! ```
 //! use legion::*;
-//! let world = World::new();
+//! let world = World::default();
 //! ```
 //!
 //! Entities can be inserted via either `push` (for a single entity) or `extend` (for a collection of entities with
@@ -20,7 +20,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! // a component is any type that is 'static, sized, send and sync
 //! #[derive(Clone, Copy, Debug, PartialEq)]
 //! struct Position {
@@ -50,7 +50,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! # let entity = world.push((false,));
 //! // entries return `None` if the entity does not exist
 //! if let Some(mut entry) = world.entry(entity) {
@@ -74,7 +74,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let world = World::new();
+//! # let world = World::default();
 //! # #[derive(Debug)]
 //! # struct Position;
 //! // you define a query be declaring what components you want to find, and how you will access them
@@ -90,7 +90,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! # struct Position { x: f32, y: f32 }
 //! # struct Velocity { x: f32, y: f32 }
 //! // construct a query from a "view tuple"
@@ -109,7 +109,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! # struct Position { x: f32, y: f32 }
 //! # struct Velocity { dx: f32, dy: f32 }
 //! # struct Ignore;
@@ -202,7 +202,7 @@ pub use crate::{
     },
     storage::{GroupSource, IntoSoa},
     systems::{Resources, Schedule, SystemBuilder},
-    world::{Entity, EntityStore, Universe, World, WorldOptions},
+    world::{Entity, EntityStore, World, WorldOptions},
 };
 
 #[cfg(feature = "codegen")]
