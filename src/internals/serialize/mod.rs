@@ -9,7 +9,7 @@ use crate::internals::{
     world::World,
 };
 use de::{WorldDeserializer, WorldVisitor};
-use id::Canon;
+use id::{Canon, EntitySerializer};
 use ser::WorldSerializer;
 use serde::{de::DeserializeSeed, Serializer};
 use std::{collections::HashMap, hash::Hash, marker::PhantomData};
@@ -33,10 +33,10 @@ impl<T> TypeKey for T where
 {
 }
 
-/// Provides the Entity to UUID mapping context for (de)serializing entity IDs.
-pub trait CanonSource {
-    /// Returns the Entity/UUID mapping context.
-    fn canon(&self) -> Option<&parking_lot::Mutex<Canon>>;
+/// Provides the Entity ID serializer for (de)serializing entity IDs.
+pub trait EntitySerializerSource {
+    /// Returns the Entity ID serializer.
+    fn entity_serializer(&self) -> Option<&parking_lot::Mutex<Box<dyn EntitySerializer>>>;
 }
 
 /// A [TypeKey](trait.TypeKey.html) which can construct itself for a given type T.
@@ -71,11 +71,13 @@ pub enum UnknownType {
 ///
 /// See the [legion_typeuuid crate](https://github.com/TomGillen/legion_typeuuid) for an example
 /// of a type key which is stable between compiles.
-pub struct Registry<T>
+pub struct Registry<T, S = Canon>
 where
     T: TypeKey,
+    S: EntitySerializer + 'static,
 {
-    _phantom: PhantomData<T>,
+    _phantom_t: PhantomData<T>,
+    _phantom_s: PhantomData<S>,
     missing: UnknownType,
     serialize_fns: HashMap<
         ComponentTypeId,
@@ -87,21 +89,23 @@ where
         ),
     >,
     constructors: HashMap<T, (ComponentTypeId, fn(&mut EntityLayout))>,
-    canon: parking_lot::Mutex<Canon>,
+    canon: parking_lot::Mutex<Box<dyn EntitySerializer>>,
 }
 
-impl<T> Registry<T>
+impl<T, S> Registry<T, S>
 where
     T: TypeKey,
+    S: EntitySerializer + 'static,
 {
     /// Constructs a new registry.
-    pub fn new() -> Self {
+    pub fn new(entity_serializer: S) -> Self {
         Self {
             missing: UnknownType::Error,
             serialize_fns: HashMap::new(),
             constructors: HashMap::new(),
-            canon: parking_lot::Mutex::new(Canon::default()),
-            _phantom: PhantomData,
+            canon: parking_lot::Mutex::new(Box::new(entity_serializer) as Box<dyn EntitySerializer>),
+            _phantom_t: PhantomData,
+            _phantom_s: PhantomData,
         }
     }
 
@@ -183,30 +187,39 @@ where
     }
 }
 
-impl<T: TypeKey> Default for Registry<T> {
+impl<T, S> Default for Registry<T, S>
+where
+    T: TypeKey,
+    S: EntitySerializer + Default + 'static,
+{
     fn default() -> Self {
-        Self::new()
+        Self::new(S::default())
     }
 }
 
-impl<T: TypeKey> CanonSource for Registry<T> {
-    fn canon(&self) -> Option<&parking_lot::Mutex<Canon>> {
+impl<T, S> EntitySerializerSource for Registry<T, S>
+where
+    T: TypeKey,
+    S: EntitySerializer + 'static,
+{
+    fn entity_serializer(&self) -> Option<&parking_lot::Mutex<Box<dyn EntitySerializer>>> {
         Some(&self.canon)
     }
 }
 
-impl<T> WorldSerializer for Registry<T>
+impl<T, S> WorldSerializer for Registry<T, S>
 where
     T: TypeKey,
+    S: EntitySerializer + 'static,
 {
     type TypeId = T;
 
-    unsafe fn serialize_component<S: Serializer>(
+    unsafe fn serialize_component<Ser: Serializer>(
         &self,
         ty: ComponentTypeId,
         ptr: *const u8,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
+        serializer: Ser,
+    ) -> Result<Ser::Ok, Ser::Error> {
         if let Some((_, serialize_fn, _, _)) = self.serialize_fns.get(&ty) {
             let mut serializer = Some(serializer);
             let mut result = None;
@@ -238,9 +251,10 @@ where
     }
 }
 
-impl<T> WorldDeserializer for Registry<T>
+impl<T, S> WorldDeserializer for Registry<T, S>
 where
     T: TypeKey,
+    S: EntitySerializer + 'static,
 {
     type TypeId = T;
 
@@ -363,7 +377,7 @@ mod test {
             (8usize, 8isize, EntityRef(entity)),
         ])[0];
 
-        let mut registry = Registry::<String>::new();
+        let mut registry = Registry::<String>::default();
         registry.register::<usize>("usize".to_string());
         registry.register::<bool>("bool".to_string());
         registry.register::<isize>("isize".to_string());
@@ -409,7 +423,7 @@ mod test {
             (8usize, 8isize),
         ]);
 
-        let mut registry = Registry::<i32>::new();
+        let mut registry = Registry::<i32>::default();
         registry.register::<usize>(1);
         registry.register::<bool>(2);
         registry.register::<isize>(3);

@@ -1,8 +1,8 @@
 //! World serialization types.
 
 use super::{
-    entities::ser::EntitiesLayoutSerializer, packed::ser::PackedLayoutSerializer, CanonSource,
-    UnknownType, WorldField,
+    entities::ser::EntitiesLayoutSerializer, id::run_as_context,
+    packed::ser::PackedLayoutSerializer, EntitySerializerSource, UnknownType, WorldField,
 };
 use crate::internals::{
     query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World,
@@ -10,7 +10,7 @@ use crate::internals::{
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 /// Describes a type which knows how to deserialize the components in a world.
-pub trait WorldSerializer: CanonSource {
+pub trait WorldSerializer: EntitySerializerSource {
     /// The stable type ID used to identify each component type in the serialized data.
     type TypeId: Serialize + Ord;
 
@@ -94,9 +94,9 @@ where
         }
     };
 
-    if let Some(canon) = world_serializer.canon() {
+    if let Some(canon) = world_serializer.entity_serializer() {
         let mut canon = canon.lock();
-        canon.run_as_context(run)?;
+        run_as_context(&mut canon, run)?;
     } else {
         (run)()?;
     }

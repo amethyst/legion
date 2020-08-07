@@ -1,8 +1,8 @@
 //! World deserialization types.
 
 use super::{
-    entities::de::EntitiesLayoutDeserializer, packed::de::PackedLayoutDeserializer, CanonSource,
-    UnknownType, WorldField,
+    entities::de::EntitiesLayoutDeserializer, id::run_as_context,
+    packed::de::PackedLayoutDeserializer, EntitySerializerSource, UnknownType, WorldField,
 };
 use crate::internals::{
     storage::{
@@ -18,7 +18,7 @@ use serde::{
 };
 
 /// Describes a type which knows how to deserialize the components in a world.
-pub trait WorldDeserializer: CanonSource {
+pub trait WorldDeserializer: EntitySerializerSource {
     /// The stable type ID used to identify each component type in the serialized data.
     type TypeId: for<'de> Deserialize<'de>;
 
@@ -85,9 +85,11 @@ impl<'a, 'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<'a, W> {
             Ok(())
         }
 
-        if let Some(canon) = self.world_deserializer.canon() {
+        if let Some(canon) = self.world_deserializer.entity_serializer() {
             let mut canon = canon.lock();
-            canon.run_as_context(move || run(self.world_deserializer, self.world, map))
+            run_as_context(&mut canon, move || {
+                run(self.world_deserializer, self.world, map)
+            })
         } else {
             run(self.world_deserializer, self.world, map)
         }

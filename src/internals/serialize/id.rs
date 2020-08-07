@@ -5,8 +5,46 @@ use std::collections::{hash_map::Entry, HashMap};
 use thiserror::Error;
 use uuid::Uuid;
 
+/// Describes how to serialize and deserialize a runtime `Entity` ID.
+pub trait EntitySerializer {
+    /// Serializes an `Entity` by constructing the serializable representation
+    /// and passing it into `serialize_fn`.
+    fn serialize(
+        &mut self,
+        entity: Entity,
+        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
+    );
+
+    /// Deserializes an `Entity`.
+    fn deserialize(
+        &mut self,
+        deserializer: &mut dyn erased_serde::Deserializer,
+    ) -> Result<Entity, erased_serde::Error>;
+}
+
 thread_local! {
-    static CANON: RefCell<Canon> = RefCell::new(Canon::default());
+    static SERIALIZER: RefCell<Box<dyn EntitySerializer>> = RefCell::new(Box::new(Canon::default()));
+}
+
+/// Runs the provided function with this canon as context for Entity (de)serialization.
+pub fn run_as_context<F: FnOnce() -> R, R>(context: &mut Box<dyn EntitySerializer>, f: F) -> R {
+    SERIALIZER.with(|cell| {
+        // swap context into TLS
+        {
+            let mut existing = cell.borrow_mut();
+            std::mem::swap(context, &mut *existing);
+        }
+
+        let result = (f)();
+
+        // swap context back out of LTS
+        {
+            let mut existing = cell.borrow_mut();
+            std::mem::swap(context, &mut *existing);
+        }
+
+        result
+    })
 }
 
 impl Serialize for Entity {
@@ -14,10 +52,20 @@ impl Serialize for Entity {
     where
         S: Serializer,
     {
-        CANON.with(|cell| {
-            let mut canon = cell.borrow_mut();
-            let name = Uuid::from_bytes(canon.canonize_id(*self));
-            name.serialize(serializer)
+        SERIALIZER.with(|cell| {
+            let mut entity_serializer = cell.borrow_mut();
+            let mut result = None;
+            let mut serializer = Some(serializer);
+            let result_ref = &mut result;
+            entity_serializer.serialize(*self, &mut move |serializable| {
+                *result_ref = Some(erased_serde::serialize(
+                    serializable,
+                    serializer
+                        .take()
+                        .expect("serialize can only be called once"),
+                ));
+            });
+            result.unwrap()
         })
     }
 }
@@ -27,11 +75,13 @@ impl<'de> Deserialize<'de> for Entity {
     where
         D: serde::Deserializer<'de>,
     {
-        CANON.with(|cell| {
-            let mut canon = cell.borrow_mut();
-            let name = Uuid::deserialize(deserializer)?;
-            let entity = canon.canonize_name(name.as_bytes());
-            Ok(entity)
+        use serde::de::Error;
+        SERIALIZER.with(|cell| {
+            let mut entity_serializer = cell.borrow_mut();
+            let mut deserializer = erased_serde::Deserializer::erase(deserializer);
+            entity_serializer
+                .deserialize(&mut deserializer)
+                .map_err(D::Error::custom)
         })
     }
 }
@@ -59,27 +109,6 @@ pub struct Canon {
 }
 
 impl Canon {
-    /// Runs the provided function with this canon as context for Entity (de)serialization.
-    pub fn run_as_context<F: FnOnce() -> R, R>(&mut self, f: F) -> R {
-        CANON.with(|cell| {
-            // swap self into TLS
-            {
-                let mut existing = cell.borrow_mut();
-                std::mem::swap(self, &mut *existing);
-            }
-
-            let result = (f)();
-
-            // swap self back out of LTS
-            {
-                let mut existing = cell.borrow_mut();
-                std::mem::swap(self, &mut *existing);
-            }
-
-            result
-        })
-    }
-
     /// Returns the [Entity](struct.Entity.html) ID associated with the given [EntityName](struct.EntityName.html).
     pub fn get_id(&self, name: &EntityName) -> Option<Entity> {
         self.to_id.get(name).copied()
@@ -138,5 +167,25 @@ impl Canon {
                 Ok(())
             }
         }
+    }
+}
+
+impl EntitySerializer for Canon {
+    fn serialize(
+        &mut self,
+        entity: Entity,
+        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
+    ) {
+        let name = Uuid::from_bytes(self.canonize_id(entity));
+        (serialize_fn)(&name);
+    }
+
+    fn deserialize(
+        &mut self,
+        deserializer: &mut dyn erased_serde::Deserializer,
+    ) -> Result<Entity, erased_serde::Error> {
+        let name = erased_serde::deserialize::<Uuid>(deserializer)?;
+        let entity = self.canonize_name(name.as_bytes());
+        Ok(entity)
     }
 }

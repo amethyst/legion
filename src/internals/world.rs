@@ -771,7 +771,7 @@ impl World {
     /// # #[derive(serde::Serialize, serde::Deserialize)]
     /// # struct Position;
     /// // create a registry which uses strings as the external type ID
-    /// let mut registry = Registry::<String>::new();
+    /// let mut registry = Registry::<String>::default();
     /// registry.register::<Position>("position".to_string());
     /// registry.register::<f32>("f32".to_string());
     /// registry.register::<bool>("bool".to_string());
