@@ -123,7 +123,7 @@ impl<'a, T: Component> Iterator for ReadIter<'a, T> {
                 .next()
                 .map(|i| components.get(*i).map(|c| c.into())),
             Self::Grouped { slices } => slices.next().map(|c| Some(c.into())),
-            Self::Empty => return None,
+            Self::Empty => None,
         }
     }
 }

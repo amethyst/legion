@@ -122,7 +122,7 @@ impl<'a, T: Component> Iterator for WriteIter<'a, T> {
                 .next()
                 .map(|i| unsafe { components.get_mut(*i).map(|c| c.into()) }),
             Self::Grouped { slices } => slices.next().map(|c| Some(c.into())),
-            Self::Empty => return None,
+            Self::Empty => None,
         }
     }
 }
