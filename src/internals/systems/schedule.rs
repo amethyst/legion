@@ -194,7 +194,7 @@ impl Executor {
                 let mut dependencies = HashSet::with_capacity(64);
                 for res in read_res {
                     let access = resource_accesses.entry(*res).or_default();
-                    for dep in access.add_read(i) {
+                    if let Some(dep) = access.add_read(i) {
                         dependencies.insert(dep);
                     }
                 }
@@ -215,7 +215,7 @@ impl Executor {
                 let mut comp_dependencies = HashSet::<usize>::default();
                 for comp in read_comp {
                     let access = component_accesses.entry(*comp).or_default();
-                    for dep in access.add_read(i) {
+                    if let Some(dep) = access.add_read(i) {
                         comp_dependencies.insert(dep);
                     }
                 }
