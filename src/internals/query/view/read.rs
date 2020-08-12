@@ -37,7 +37,7 @@ impl<T: Component> IntoView for Read<T> {
 
 impl<'data, T: Component> View<'data> for Read<T> {
     type Element = <Self::Fetch as IntoIndexableIter>::Item;
-    type Fetch = <ReadIter<'data, T> as Iterator>::Item;
+    type Fetch = ReadFetch<'data, T>;
     type Iter = ReadIter<'data, T>;
     type Read = [ComponentTypeId; 1];
     type Write = [ComponentTypeId; 0];
@@ -112,18 +112,19 @@ pub enum ReadIter<'a, T: Component> {
 }
 
 impl<'a, T: Component> Iterator for ReadIter<'a, T> {
-    type Item = ReadFetch<'a, T>;
+    type Item = Option<ReadFetch<'a, T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let components = match self {
+        match self {
             Self::Indexed {
                 components,
                 archetypes,
-            } => archetypes.next().and_then(|i| components.get(*i)),
-            Self::Grouped { slices } => slices.next(),
+            } => archetypes
+                .next()
+                .map(|i| components.get(*i).map(|c| c.into())),
+            Self::Grouped { slices } => slices.next().map(|c| Some(c.into())),
             Self::Empty => return None,
-        };
-        components.map(|c| c.into())
+        }
     }
 }
 

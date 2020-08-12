@@ -36,7 +36,7 @@ impl<T: Component> IntoView for Write<T> {
 
 impl<'data, T: Component> View<'data> for Write<T> {
     type Element = <Self::Fetch as IntoIndexableIter>::Item;
-    type Fetch = <WriteIter<'data, T> as Iterator>::Item;
+    type Fetch = WriteFetch<'data, T>;
     type Iter = WriteIter<'data, T>;
     type Read = [ComponentTypeId; 1];
     type Write = [ComponentTypeId; 1];
@@ -111,20 +111,19 @@ pub enum WriteIter<'a, T: Component> {
 }
 
 impl<'a, T: Component> Iterator for WriteIter<'a, T> {
-    type Item = WriteFetch<'a, T>;
+    type Item = Option<WriteFetch<'a, T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let components = match self {
+        match self {
             Self::Indexed {
                 components,
                 archetypes,
             } => archetypes
                 .next()
-                .and_then(|i| unsafe { components.get_mut(*i) }),
-            Self::Grouped { slices } => slices.next(),
-            Self::Empty => None,
-        };
-        components.map(|c| c.into())
+                .map(|i| unsafe { components.get_mut(*i).map(|c| c.into()) }),
+            Self::Grouped { slices } => slices.next().map(|c| Some(c.into())),
+            Self::Empty => return None,
+        }
     }
 }
 

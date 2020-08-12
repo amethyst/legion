@@ -63,7 +63,7 @@ pub trait View<'data>: DefaultFilter + Sized {
     /// The fetch type yielded for each archetype.
     type Fetch: Fetch + IntoIndexableIter<Item = Self::Element> + 'data;
     /// The iterator type which pulls entity data out of a world.
-    type Iter: Iterator<Item = Self::Fetch> + 'data;
+    type Iter: Iterator<Item = Option<Self::Fetch>> + 'data;
     /// Contains the type IDs read by the view.
     type Read: AsRef<[ComponentTypeId]>;
     /// Contains the type IDs written by the view.
@@ -159,14 +159,14 @@ pub struct MultiFetch<'a, T> {
     _phantom: PhantomData<&'a T>,
 }
 
-impl<'a, T> From<T> for MultiFetch<'a, T> {
-    fn from(value: T) -> Self {
-        Self {
-            fetches: value,
-            _phantom: PhantomData,
-        }
-    }
-}
+// impl<'a, T> From<T> for MultiFetch<'a, T> {
+//     fn from(value: T) -> Self {
+//         Self {
+//             fetches: value,
+//             _phantom: PhantomData,
+//         }
+//     }
+// }
 
 macro_rules! view_tuple {
     ($head_ty:ident) => {
@@ -195,8 +195,8 @@ macro_rules! impl_view_tuple {
 
         impl<'a, $( $ty: View<'a> + 'a ),*> View<'a> for ($( $ty, )*) {
             type Element = <Self::Fetch as IntoIndexableIter>::Item;
-            type Fetch = <Self::Iter as Iterator>::Item;
-            type Iter = MapInto<Zip<($( $ty::Iter, )*)>, MultiFetch<'a, ($( $ty::Fetch, )*)>>;
+            type Fetch = MultiFetch<'a, ($( $ty::Fetch, )*)>;
+            type Iter = MapInto<Zip<($( $ty::Iter, )*)>, Option<MultiFetch<'a, ($( $ty::Fetch, )*)>>>;
             type Read = Vec<ComponentTypeId>;
             type Write = Vec<ComponentTypeId>;
 
@@ -269,6 +269,24 @@ macro_rules! impl_view_tuple {
                 $(
                     $ty::writes::<Comp>()
                 )||*
+            }
+        }
+
+        impl<'a, $( $ty: Fetch ),*> crate::internals::iter::map::From<($( Option<$ty>, )*)>
+            for Option<MultiFetch<'a, ($( $ty, )*)>>
+        {
+            fn from(value: ($( Option<$ty>, )*)) -> Self {
+                #[allow(non_snake_case)]
+                let ($( $ty, )*) = value;
+                let valid = $( $ty.is_some() )&*;
+                if valid {
+                    Some(MultiFetch {
+                        fetches: ($( $ty.unwrap(), )*),
+                        _phantom: PhantomData
+                    })
+                } else {
+                    None
+                }
             }
         }
 

@@ -1,4 +1,31 @@
 use std::{iter::FusedIterator, marker::PhantomData};
+
+pub trait From<T> {
+    fn from(source: T) -> Self;
+}
+
+// impl<T, U> From<T> for U
+// where
+//     U: std::convert::From<T>,
+// {
+//     fn from(source: T) -> Self {
+//         std::convert::From::<T>::from(source)
+//     }
+// }
+
+pub trait Into<T> {
+    fn into(self) -> T;
+}
+
+impl<T, U> Into<T> for U
+where
+    T: From<U>,
+{
+    fn into(self) -> T {
+        T::from(self)
+    }
+}
+
 #[derive(Clone)]
 pub struct MapInto<I, T> {
     inner: I,

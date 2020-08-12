@@ -37,7 +37,7 @@ impl<T: Component> IntoView for TryRead<T> {
 
 impl<'data, T: Component> View<'data> for TryRead<T> {
     type Element = <Self::Fetch as IntoIndexableIter>::Item;
-    type Fetch = <TryReadIter<'data, T> as Iterator>::Item;
+    type Fetch = Slice<'data, T>;
     type Iter = TryReadIter<'data, T>;
     type Read = [ComponentTypeId; 1];
     type Write = [ComponentTypeId; 0];
@@ -100,16 +100,19 @@ pub struct TryReadIter<'a, T: Component> {
 }
 
 impl<'a, T: Component> Iterator for TryReadIter<'a, T> {
-    type Item = Slice<'a, T>;
+    type Item = Option<Slice<'a, T>>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.archetype_indexes.next().map(|i| {
-            self.components
+            let slice = self
+                .components
                 .and_then(|components| components.get(*i))
                 .map_or_else(
                     || Slice::Empty(self.archetypes[*i].entities().len()),
                     |c| c.into(),
-                )
+                );
+            Some(slice)
         })
     }
 }

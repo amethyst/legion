@@ -248,7 +248,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         let result = QueryResult::unordered(arch_slice_ref);
         let mut fetch =
             <V as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result)
-                .next()?;
+                .next()??;
 
         // if our filter has conditions beyond that of the view, then we need to evaluate the query
         if !self.is_view_filter {
@@ -855,7 +855,9 @@ where
     type Item = ChunkView<'world, V::Fetch>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        for mut fetch in &mut self.inner {
+        for fetch in &mut self.inner {
+            // if fetch is None here, filtering is broken
+            let mut fetch = fetch.unwrap();
             let idx = self.indices.next().unwrap();
             if self.filter.matches_archetype(&fetch).is_pass() {
                 fetch.accepted();
@@ -925,7 +927,8 @@ pub mod par_iter {
 
         fn next(&mut self) -> Option<Self::Item> {
             let mut filter = self.filter.lock();
-            for mut fetch in &mut self.inner {
+            for fetch in &mut self.inner {
+                let mut fetch = fetch.unwrap();
                 let idx = self.indices.next().unwrap();
                 if filter.matches_archetype(&fetch).is_pass() {
                     fetch.accepted();
