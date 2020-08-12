@@ -143,6 +143,26 @@ pub struct UnknownComponentWriter<'a> {
 }
 
 impl<'a> UnknownComponentWriter<'a> {
+    /// Writes the given components into the component storage.
+    ///
+    /// # Safety
+    /// `ptr` must point to a valid array of the correct component type of length at least as
+    /// long as `len`.
+    /// The data in this array will be memcopied into the world's internal storage.
+    /// If the component type is not `Copy`, then the caller must ensure that the memory
+    /// copied is not accessed until it is re-initialized. It is recommended to immediately
+    /// `std::mem::forget` the source after calling `extend_memcopy`.
+    pub unsafe fn extend_memcopy_raw(&mut self, ptr: *const u8, len: usize) {
+        self.components.extend_memcopy_raw(self.archetype, ptr, len)
+    }
+
+    /// Ensures that the given spare capacity is available in the target storage location.
+    /// Calling this function before calling `extend_memcopy` is not required, but may
+    /// avoid additional vector resizes.
+    pub fn ensure_capacity(&mut self, space: usize) {
+        self.components.ensure_capacity(self.archetype, space);
+    }
+
     /// Moves all of the components from the given storage location into this writer's storage.
     pub fn move_archetype_from(
         &mut self,

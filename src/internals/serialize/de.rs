@@ -1,16 +1,15 @@
 //! World deserialization types.
 
 use super::{
-    entities::de::EntitiesLayoutDeserializer, id::run_as_context,
-    packed::de::PackedLayoutDeserializer, EntitySerializerSource, UnknownType, WorldField,
+    archetypes::de::ArchetypeLayoutDeserializer, entities::de::EntitiesLayoutDeserializer,
+    id::run_as_context, EntitySerializerSource, UnknownType, WorldField,
 };
-use crate::internals::{
-    storage::{
-        archetype::{ArchetypeIndex, EntityLayout},
-        component::ComponentTypeId,
-        UnknownComponentStorage,
+use crate::{
+    internals::{
+        storage::{archetype::EntityLayout, component::ComponentTypeId},
+        world::World,
     },
-    world::World,
+    storage::UnknownComponentWriter,
 };
 use serde::{
     de::{MapAccess, Visitor},
@@ -28,12 +27,11 @@ pub trait WorldDeserializer: EntitySerializerSource {
     /// Adds the specified component to the given entity layout.
     fn register_component(&self, type_id: Self::TypeId, layout: &mut EntityLayout);
 
-    /// Deserializes a single component and inserts it into the given storage.
-    fn deserialize_insert_component<'de, D: Deserializer<'de>>(
+    /// Deserializes a slice of components and inserts them into the given storage.
+    fn deserialize_component_slice<'a, 'de, D: Deserializer<'de>>(
         &self,
         type_id: ComponentTypeId,
-        storage: &mut dyn UnknownComponentStorage,
-        arch_index: ArchetypeIndex,
+        storage: UnknownComponentWriter<'a>,
         deserializer: D,
     ) -> Result<(), D::Error>;
 
@@ -69,7 +67,7 @@ impl<'a, 'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<'a, W> {
             while let Some(key) = map.next_key()? {
                 match key {
                     WorldField::Packed => {
-                        map.next_value_seed(PackedLayoutDeserializer {
+                        map.next_value_seed(ArchetypeLayoutDeserializer {
                             world_deserializer,
                             world,
                         })?;

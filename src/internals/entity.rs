@@ -132,9 +132,10 @@ impl LocationMap {
         ids: &[Entity],
         arch: ArchetypeIndex,
         ComponentIndex(base): ComponentIndex,
-    ) {
+    ) -> Vec<EntityLocation> {
         let mut current_block = u64::MAX;
         let mut block_vec = None;
+        let mut removed = Vec::new();
         for (i, entity) in ids.iter().enumerate() {
             let block = entity.0 / BLOCK_SIZE;
             if current_block != block {
@@ -148,14 +149,13 @@ impl LocationMap {
 
             if let Some(ref mut vec) = block_vec {
                 let idx = (entity.0 - block * BLOCK_SIZE) as usize;
-                if vec[idx]
-                    .replace(EntityLocation(arch, ComponentIndex(base + i)))
-                    .is_none()
-                {
-                    self.len += 1;
+                match vec[idx].replace(EntityLocation(arch, ComponentIndex(base + i))) {
+                    Some(previous) => removed.push(previous),
+                    None => self.len += 1,
                 }
             }
         }
+        removed
     }
 
     /// Inserts or updates the location of an entity.

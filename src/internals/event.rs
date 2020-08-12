@@ -37,15 +37,16 @@ impl EventSender for crossbeam_channel::Sender<Event> {
 
 #[derive(Clone)]
 pub(crate) struct Subscriber {
-    filter: Arc<dyn LayoutFilter>,
+    filter: Arc<dyn LayoutFilter + Send + Sync>,
     sender: Arc<dyn EventSender>,
 }
 
 impl Subscriber {
-    pub(crate) fn new<F: LayoutFilter + 'static, S: EventSender + 'static>(
-        filter: F,
-        sender: S,
-    ) -> Self {
+    pub(crate) fn new<F, S>(filter: F, sender: S) -> Self
+    where
+        F: LayoutFilter + Send + Sync + 'static,
+        S: EventSender + 'static,
+    {
         Self {
             filter: Arc::new(filter),
             sender: Arc::new(sender),

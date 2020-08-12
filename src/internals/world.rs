@@ -227,19 +227,25 @@ impl World {
     /// ```
     /// SoA inserts require all vectors to have the same length. These inserts are faster than inserting via an iterator of tuples.
     pub fn extend(&mut self, components: impl IntoComponentSource) -> &[Entity] {
-        let mut components = components.into();
+        let replaced = {
+            let mut components = components.into();
 
-        let arch_index = self.get_archetype_for_components(&mut components);
-        let archetype = &mut self.archetypes[arch_index.0 as usize];
-        let mut writer =
-            ArchetypeWriter::new(arch_index, archetype, self.components.get_multi_mut());
-        components.push_components(&mut writer, Allocate::new());
+            let arch_index = self.get_archetype_for_components(&mut components);
+            let archetype = &mut self.archetypes[arch_index.0 as usize];
+            let mut writer =
+                ArchetypeWriter::new(arch_index, archetype, self.components.get_multi_mut());
+            components.push_components(&mut writer, Allocate::new());
 
-        let (base, entities) = writer.inserted();
-        self.entities.insert(entities, arch_index, base);
+            let (base, entities) = writer.inserted();
+            self.allocation_buffer.clear();
+            self.allocation_buffer.extend_from_slice(entities);
+            self.entities.insert(entities, arch_index, base)
+        };
 
-        self.allocation_buffer.clear();
-        self.allocation_buffer.extend_from_slice(entities);
+        for location in replaced {
+            self.remove_at_location(location);
+        }
+
         &self.allocation_buffer
     }
 
@@ -247,21 +253,24 @@ impl World {
     pub fn remove(&mut self, entity: Entity) -> bool {
         let location = self.entities.remove(entity);
         if let Some(location) = location {
-            let EntityLocation(arch_index, component_index) = location;
-            let archetype = &mut self.archetypes[arch_index];
-            archetype.swap_remove(component_index.0);
-            for type_id in archetype.layout().component_types() {
-                let storage = self.components.get_mut(*type_id).unwrap();
-                storage.swap_remove(arch_index, component_index);
-            }
-            if component_index.0 < archetype.entities().len() {
-                let swapped = archetype.entities()[component_index.0];
-                self.entities.set(swapped, location);
-            }
-
+            self.remove_at_location(location);
             true
         } else {
             false
+        }
+    }
+
+    fn remove_at_location(&mut self, location: EntityLocation) {
+        let EntityLocation(arch_index, component_index) = location;
+        let archetype = &mut self.archetypes[arch_index];
+        archetype.swap_remove(component_index.0);
+        for type_id in archetype.layout().component_types() {
+            let storage = self.components.get_mut(*type_id).unwrap();
+            storage.swap_remove(arch_index, component_index);
+        }
+        if component_index.0 < archetype.entities().len() {
+            let swapped = archetype.entities()[component_index.0];
+            self.entities.set(swapped, location);
         }
     }
 
@@ -307,11 +316,11 @@ impl World {
     }
 
     /// Subscribes to entity [events](../event/enum.Event.html).
-    pub fn subscribe<T: LayoutFilter + 'static, S: EventSender + 'static>(
-        &mut self,
-        sender: S,
-        filter: T,
-    ) {
+    pub fn subscribe<T, S>(&mut self, sender: S, filter: T)
+    where
+        T: LayoutFilter + Send + Sync + 'static,
+        S: EventSender + 'static,
+    {
         let subscriber = Subscriber::new(filter, sender);
         for arch in &mut self.archetypes {
             if subscriber.is_interested(arch) {
@@ -328,7 +337,8 @@ impl World {
         self.components.pack(&options);
     }
 
-    pub(crate) fn components(&self) -> &Components {
+    /// Returns the raw component storage.
+    pub fn components(&self) -> &Components {
         &self.components
     }
 
@@ -338,14 +348,6 @@ impl World {
 
     pub(crate) fn archetypes(&self) -> &[Archetype] {
         &self.archetypes
-    }
-
-    pub(crate) fn archetypes_mut(&mut self) -> &mut [Archetype] {
-        &mut self.archetypes
-    }
-
-    pub(crate) fn entities_mut(&mut self) -> &mut LocationMap {
-        &mut self.entities
     }
 
     pub(crate) unsafe fn transfer_archetype(
@@ -413,15 +415,6 @@ impl World {
             index
         } else {
             self.insert_archetype(components.layout())
-        }
-    }
-
-    pub(crate) fn get_or_insert_archetype(&mut self, layout: EntityLayout) -> ArchetypeIndex {
-        let index = self.index.search(&layout).next();
-        if let Some(index) = index {
-            index
-        } else {
-            self.insert_archetype(layout)
         }
     }
 

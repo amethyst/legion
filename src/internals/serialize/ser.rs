@@ -1,11 +1,12 @@
 //! World serialization types.
 
 use super::{
-    entities::ser::EntitiesLayoutSerializer, id::run_as_context,
-    packed::ser::PackedLayoutSerializer, EntitySerializerSource, UnknownType, WorldField,
+    archetypes::ser::ArchetypeLayoutSerializer, entities::ser::EntitiesLayoutSerializer,
+    id::run_as_context, EntitySerializerSource, UnknownType, WorldField,
 };
-use crate::internals::{
-    query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World,
+use crate::{
+    internals::{query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World},
+    storage::{ArchetypeIndex, UnknownComponentStorage},
 };
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
@@ -26,6 +27,19 @@ pub trait WorldSerializer: EntitySerializerSource {
         &self,
         ty: ComponentTypeId,
         ptr: *const u8,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>;
+
+    /// Serializes a slice of components.
+    ///
+    /// # Safety
+    /// The pointer must point to a valid instance of the component type represented by
+    /// the given component type ID.
+    unsafe fn serialize_component_slice<S: Serializer>(
+        &self,
+        ty: ComponentTypeId,
+        storage: &dyn UnknownComponentStorage,
+        archetype: ArchetypeIndex,
         serializer: S,
     ) -> Result<S::Ok, S::Error>;
 }
@@ -85,7 +99,7 @@ where
             // serialize machine-optimised representation
             root.serialize_entry(
                 &WorldField::Packed,
-                &PackedLayoutSerializer {
+                &ArchetypeLayoutSerializer {
                     world_serializer,
                     world,
                     filter,

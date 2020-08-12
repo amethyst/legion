@@ -155,15 +155,16 @@ pub mod ser {
 pub mod de {
     use crate::internals::{
         entity::Entity,
+        insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource},
         serialize::{de::WorldDeserializer, UnknownType},
-        storage::{archetype::EntityLayout, component::ComponentTypeId, ComponentIndex},
+        storage::{archetype::EntityLayout, component::ComponentTypeId},
         world::World,
     };
     use serde::{
         de::{DeserializeSeed, IgnoredAny, MapAccess, Visitor},
         Deserializer,
     };
-    use std::collections::HashMap;
+    use std::{collections::HashMap, rc::Rc};
 
     pub struct EntitiesLayoutDeserializer<'a, W: WorldDeserializer> {
         pub world_deserializer: &'a W,
@@ -269,19 +270,50 @@ pub mod de {
                         }
                     }
 
-                    let arch_index = self.world.get_or_insert_archetype(layout);
-                    let comp_index = self.world.archetypes()[arch_index].entities().len();
-                    self.world.archetypes_mut()[arch_index].push(self.entity);
-                    self.world.entities_mut().insert(
-                        &[self.entity],
-                        arch_index,
-                        ComponentIndex(comp_index),
-                    );
-
-                    for (type_id, component) in components {
-                        let storage = self.world.components_mut().get_mut(type_id).unwrap();
-                        unsafe { storage.extend_memcopy_raw(arch_index, component.as_ptr(), 1) };
+                    struct SingleEntity {
+                        entity: Entity,
+                        components: HashMap<ComponentTypeId, Box<[u8]>>,
+                        layout: Rc<EntityLayout>,
                     }
+
+                    impl ArchetypeSource for SingleEntity {
+                        type Filter = Rc<EntityLayout>;
+
+                        fn filter(&self) -> Self::Filter {
+                            self.layout.clone()
+                        }
+
+                        fn layout(&mut self) -> EntityLayout {
+                            (*self.layout).clone()
+                        }
+                    }
+
+                    impl ComponentSource for SingleEntity {
+                        fn push_components<'a>(
+                            &mut self,
+                            writer: &mut ArchetypeWriter<'a>,
+                            _: impl Iterator<Item = Entity>,
+                        ) {
+                            writer.push(self.entity);
+                            for (type_id, component) in self.components.drain() {
+                                let mut storage = writer.claim_components_unknown(type_id);
+                                unsafe { storage.extend_memcopy_raw(component.as_ptr(), 1) };
+                            }
+                        }
+                    }
+
+                    impl IntoComponentSource for SingleEntity {
+                        type Source = Self;
+                        fn into(self) -> Self::Source {
+                            self
+                        }
+                    }
+
+                    self.world.extend(SingleEntity {
+                        entity: self.entity,
+                        components,
+                        layout: Rc::new(layout),
+                    });
 
                     Ok(())
                 }

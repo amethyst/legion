@@ -1,12 +1,15 @@
 //! Contains types required to serialize and deserialize a world via the serde library.
 
-use crate::internals::{
-    storage::{
-        archetype::{ArchetypeIndex, EntityLayout},
-        component::{Component, ComponentTypeId},
-        UnknownComponentStorage,
+use crate::{
+    internals::{
+        storage::{
+            archetype::{ArchetypeIndex, EntityLayout},
+            component::{Component, ComponentTypeId},
+            UnknownComponentStorage,
+        },
+        world::World,
     },
-    world::World,
+    storage::UnknownComponentWriter,
 };
 use de::{WorldDeserializer, WorldVisitor};
 use id::{Canon, EntitySerializer};
@@ -14,10 +17,11 @@ use ser::WorldSerializer;
 use serde::{de::DeserializeSeed, Serializer};
 use std::{collections::HashMap, hash::Hash, marker::PhantomData};
 
+pub mod archetypes;
 pub mod de;
 mod entities;
 pub mod id;
-mod packed;
+//mod packed;
 pub mod ser;
 
 /// A (de)serializable type which can represent a component type in a serialized world.
@@ -46,9 +50,10 @@ pub trait AutoTypeKey<T: Component>: TypeKey {
 }
 
 type SerializeFn = fn(*const u8, &mut dyn FnMut(&dyn erased_serde::Serialize));
-type DeserializeSingleFn = fn(
-    &mut dyn UnknownComponentStorage,
-    ArchetypeIndex,
+type SerializeSliceFn =
+    fn(&dyn UnknownComponentStorage, ArchetypeIndex, &mut dyn FnMut(&dyn erased_serde::Serialize));
+type DeserializeSliceFn = fn(
+    UnknownComponentWriter,
     &mut dyn erased_serde::Deserializer,
 ) -> Result<(), erased_serde::Error>;
 type DeserializeSingleBoxedFn =
@@ -83,8 +88,9 @@ where
         ComponentTypeId,
         (
             T,
+            SerializeSliceFn,
             SerializeFn,
-            DeserializeSingleFn,
+            DeserializeSliceFn,
             DeserializeSingleBoxedFn,
         ),
     >,
@@ -120,20 +126,26 @@ where
         mapped_type_id: T,
     ) {
         let type_id = ComponentTypeId::of::<C>();
+        let serialize_slice_fn =
+            |storage: &dyn UnknownComponentStorage,
+             archetype,
+             serialize: &mut dyn FnMut(&dyn erased_serde::Serialize)| unsafe {
+                let (ptr, len) = storage.get_raw(archetype).unwrap();
+                let slice = std::slice::from_raw_parts(ptr as *const C, len);
+                (serialize)(&slice);
+            };
         let serialize_fn = |ptr, serialize: &mut dyn FnMut(&dyn erased_serde::Serialize)| {
             let component = unsafe { &*(ptr as *const C) };
             (serialize)(component);
         };
-        let deserialize_single_fn =
-            |storage: &mut dyn UnknownComponentStorage,
-             arch: ArchetypeIndex,
-             deserializer: &mut dyn erased_serde::Deserializer| {
-                let component = erased_serde::deserialize::<C>(deserializer)?;
-                unsafe {
-                    let ptr = &component as *const C as *const u8;
-                    storage.extend_memcopy_raw(arch, ptr, 1);
-                    std::mem::forget(component)
+        let deserialize_slice_fn =
+            |storage: UnknownComponentWriter, deserializer: &mut dyn erased_serde::Deserializer| {
+                // todo avoid temp vec
+                ComponentSeq::<C> {
+                    storage,
+                    _phantom: PhantomData,
                 }
+                .deserialize(deserializer)?;
                 Ok(())
             };
         let deserialize_single_boxed_fn = |deserializer: &mut dyn erased_serde::Deserializer| {
@@ -153,8 +165,9 @@ where
             type_id,
             (
                 mapped_type_id.clone(),
+                serialize_slice_fn,
                 serialize_fn,
-                deserialize_single_fn,
+                deserialize_slice_fn,
                 deserialize_single_boxed_fn,
             ),
         );
@@ -220,7 +233,7 @@ where
         ptr: *const u8,
         serializer: Ser,
     ) -> Result<Ser::Ok, Ser::Error> {
-        if let Some((_, serialize_fn, _, _)) = self.serialize_fns.get(&ty) {
+        if let Some((_, _, serialize_fn, _, _)) = self.serialize_fns.get(&ty) {
             let mut serializer = Some(serializer);
             let mut result = None;
             let result_ref = &mut result;
@@ -242,11 +255,36 @@ where
         if let Some(type_id) = self
             .serialize_fns
             .get(&type_id)
-            .map(|(type_id, _, _, _)| type_id.clone())
+            .map(|(type_id, _, _, _, _)| type_id.clone())
         {
             Ok(type_id)
         } else {
             Err(self.missing)
+        }
+    }
+
+    unsafe fn serialize_component_slice<Ser: Serializer>(
+        &self,
+        ty: ComponentTypeId,
+        storage: &dyn UnknownComponentStorage,
+        archetype: ArchetypeIndex,
+        serializer: Ser,
+    ) -> Result<Ser::Ok, Ser::Error> {
+        if let Some((_, serialize_fn, _, _, _)) = self.serialize_fns.get(&ty) {
+            let mut serializer = Some(serializer);
+            let mut result = None;
+            let result_ref = &mut result;
+            (serialize_fn)(storage, archetype, &mut move |serializable| {
+                *result_ref = Some(erased_serde::serialize(
+                    serializable,
+                    serializer
+                        .take()
+                        .expect("serialize can only be called once"),
+                ));
+            });
+            result.unwrap()
+        } else {
+            panic!();
         }
     }
 }
@@ -272,17 +310,16 @@ where
         }
     }
 
-    fn deserialize_insert_component<'de, D: serde::Deserializer<'de>>(
+    fn deserialize_component_slice<'a, 'de, D: serde::Deserializer<'de>>(
         &self,
         type_id: ComponentTypeId,
-        storage: &mut dyn UnknownComponentStorage,
-        arch_index: ArchetypeIndex,
+        storage: UnknownComponentWriter<'a>,
         deserializer: D,
     ) -> Result<(), D::Error> {
-        if let Some((_, _, deserialize, _)) = self.serialize_fns.get(&type_id) {
+        if let Some((_, _, _, deserialize, _)) = self.serialize_fns.get(&type_id) {
             use serde::de::Error;
             let mut deserializer = erased_serde::Deserializer::erase(deserializer);
-            (deserialize)(storage, arch_index, &mut deserializer).map_err(D::Error::custom)
+            (deserialize)(storage, &mut deserializer).map_err(D::Error::custom)
         } else {
             //Err(D::Error::custom("unrecognized component type"))
             panic!()
@@ -294,7 +331,7 @@ where
         type_id: ComponentTypeId,
         deserializer: D,
     ) -> Result<Box<[u8]>, D::Error> {
-        if let Some((_, _, _, deserialize)) = self.serialize_fns.get(&type_id) {
+        if let Some((_, _, _, _, deserialize)) = self.serialize_fns.get(&type_id) {
             use serde::de::Error;
             let mut deserializer = erased_serde::Deserializer::erase(deserializer);
             (deserialize)(&mut deserializer).map_err(D::Error::custom)
@@ -302,6 +339,60 @@ where
             //Err(D::Error::custom("unrecognized component type"))
             panic!()
         }
+    }
+}
+
+struct ComponentSeq<'a, T: Component> {
+    storage: UnknownComponentWriter<'a>,
+    _phantom: PhantomData<T>,
+}
+
+impl<'a, 'de, T: Component + for<'b> serde::de::Deserialize<'b>> serde::de::DeserializeSeed<'de>
+    for ComponentSeq<'a, T>
+{
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        struct SeqVisitor<'b, C: Component + for<'c> serde::de::Deserialize<'c>> {
+            storage: UnknownComponentWriter<'b>,
+            _phantom: PhantomData<C>,
+        }
+
+        impl<'b, 'de, C: Component + for<'c> serde::de::Deserialize<'c>> serde::de::Visitor<'de>
+            for SeqVisitor<'b, C>
+        {
+            type Value = ();
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("component seq")
+            }
+
+            fn visit_seq<V>(mut self, mut seq: V) -> Result<Self::Value, V::Error>
+            where
+                V: serde::de::SeqAccess<'de>,
+            {
+                if let Some(len) = seq.size_hint() {
+                    self.storage.ensure_capacity(len);
+                }
+
+                while let Some(component) = seq.next_element::<C>()? {
+                    unsafe {
+                        let ptr = &component as *const C as *const u8;
+                        self.storage.extend_memcopy_raw(ptr, 1);
+                        std::mem::forget(component)
+                    }
+                }
+                Ok(())
+            }
+        }
+
+        deserializer.deserialize_seq(SeqVisitor::<T> {
+            storage: self.storage,
+            _phantom: PhantomData,
+        })
     }
 }
 
