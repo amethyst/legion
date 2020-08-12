@@ -141,14 +141,38 @@ impl Executor {
             let mut dynamic_dependants: Vec<Vec<_>> =
                 repeat(Vec::with_capacity(64)).take(systems.len()).collect();
 
-            let mut resource_last_mutated =
-                HashMap::<ResourceTypeId, usize>::with_capacity_and_hasher(64, Default::default());
-            let mut resource_last_read =
-                HashMap::<ResourceTypeId, usize>::with_capacity_and_hasher(64, Default::default());
-            let mut component_last_mutated =
-                HashMap::<ComponentTypeId, usize>::with_capacity_and_hasher(64, Default::default());
-            let mut component_last_read =
-                HashMap::<ComponentTypeId, usize>::with_capacity_and_hasher(64, Default::default());
+            #[derive(Default)]
+            struct PreviousAccess {
+                readers: Vec<usize>,
+                last_writer: Option<usize>,
+            }
+
+            impl PreviousAccess {
+                fn add_read(&mut self, idx: usize) -> Option<usize> {
+                    self.readers.push(idx);
+                    self.last_writer
+                }
+
+                fn add_write(&mut self, idx: usize) -> Vec<usize> {
+                    let mut dependencies = Vec::new();
+                    std::mem::swap(&mut self.readers, &mut dependencies);
+                    if let Some(writer) = self.last_writer.replace(idx) {
+                        dependencies.push(writer)
+                    }
+                    dependencies
+                }
+            }
+
+            let mut resource_accesses =
+                HashMap::<ResourceTypeId, PreviousAccess>::with_capacity_and_hasher(
+                    64,
+                    Default::default(),
+                );
+            let mut component_accesses =
+                HashMap::<ComponentTypeId, PreviousAccess>::with_capacity_and_hasher(
+                    64,
+                    Default::default(),
+                );
 
             for (i, system) in systems.iter().enumerate() {
                 let span = if let Some(name) = system.name() {
@@ -169,33 +193,16 @@ impl Executor {
                 // find resource access dependencies
                 let mut dependencies = HashSet::with_capacity(64);
                 for res in read_res {
-                    trace!(resource = ?res, "Read resource");
-                    if let Some(n) = resource_last_mutated.get(res) {
-                        trace!(system_index = n, "Added write dependency");
-                        dependencies.insert(*n);
+                    let access = resource_accesses.entry(*res).or_default();
+                    for dep in access.add_read(i) {
+                        dependencies.insert(dep);
                     }
                 }
                 for res in write_res {
-                    trace!(resource = ?res, "Write resource");
-                    // Writes have to be exclusive, so we are dependent on reads too
-                    if let Some(n) = resource_last_read.get(res) {
-                        trace!(system_index = n, "Added read dependency");
-                        dependencies.insert(*n);
+                    let access = resource_accesses.entry(*res).or_default();
+                    for dep in access.add_write(i) {
+                        dependencies.insert(dep);
                     }
-
-                    if let Some(n) = resource_last_mutated.get(res) {
-                        trace!(system_index = n, "Added write dependency");
-                        dependencies.insert(*n);
-                    }
-                }
-
-                // update access tracking
-                for res in read_res {
-                    resource_last_read.insert(*res, i);
-                }
-                for res in write_res {
-                    resource_last_read.insert(*res, i);
-                    resource_last_mutated.insert(*res, i);
                 }
 
                 static_dependency_counts.push(AtomicUsize::from(dependencies.len()));
@@ -207,32 +214,16 @@ impl Executor {
                 // find component access dependencies
                 let mut comp_dependencies = HashSet::<usize>::default();
                 for comp in read_comp {
-                    trace!(component = ?comp, "Read component");
-                    if let Some(n) = component_last_mutated.get(comp) {
-                        trace!(system_index = n, "Added write dependency");
-                        comp_dependencies.insert(*n);
+                    let access = component_accesses.entry(*comp).or_default();
+                    for dep in access.add_read(i) {
+                        comp_dependencies.insert(dep);
                     }
                 }
                 for comp in write_comp {
-                    // writes have to be exclusive, so we are dependent on reads too
-                    trace!(component = ?comp, "Write component");
-                    if let Some(n) = component_last_read.get(comp) {
-                        trace!(system_index = n, "Added read dependency");
-                        comp_dependencies.insert(*n);
+                    let access = component_accesses.entry(*comp).or_default();
+                    for dep in access.add_write(i) {
+                        comp_dependencies.insert(dep);
                     }
-                    if let Some(n) = component_last_mutated.get(comp) {
-                        trace!(system_index = n, "Added write dependency");
-                        comp_dependencies.insert(*n);
-                    }
-                }
-
-                // update access tracking
-                for comp in read_comp {
-                    component_last_read.insert(*comp, i);
-                }
-                for comp in write_comp {
-                    component_last_read.insert(*comp, i);
-                    component_last_mutated.insert(*comp, i);
                 }
 
                 // remove dependencies which are already static from dynamic dependencies

@@ -142,8 +142,8 @@ where
 
     fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) {
         (
-            &self.access.resources.reads(),
-            &self.access.components.reads(),
+            &self.access.resources.reads_only(),
+            &self.access.components.reads_only(),
         )
     }
 

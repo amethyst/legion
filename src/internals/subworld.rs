@@ -94,7 +94,7 @@ impl<'a> ComponentAccess<'a> {
         ) -> Permissions<ComponentTypeId> {
             let mut denied = Permissions::new();
             // if the current permission allows reads, then everything else must deny writes
-            for read in permissions.read_only() {
+            for read in permissions.reads_only() {
                 denied.push_write(*read);
             }
 
