@@ -84,7 +84,13 @@ impl<'data, T: Component> View<'data> for Write<T> {
         if query.is_empty() {
             return WriteIter::Empty;
         };
-        let components = components.get_downcast::<T>().unwrap();
+
+        let components = if let Some(components) = components.get_downcast::<T>() {
+            components
+        } else {
+            return WriteIter::Empty;
+        };
+
         if query.is_ordered() {
             WriteIter::Grouped {
                 slices: components.iter_mut(query.range().start, query.range().end),

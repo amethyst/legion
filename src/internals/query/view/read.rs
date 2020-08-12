@@ -85,7 +85,13 @@ impl<'data, T: Component> View<'data> for Read<T> {
         if query.is_empty() {
             return ReadIter::Empty;
         };
-        let components = components.get_downcast::<T>().unwrap();
+
+        let components = if let Some(components) = components.get_downcast::<T>() {
+            components
+        } else {
+            return ReadIter::Empty;
+        };
+
         if query.is_ordered() {
             ReadIter::Grouped {
                 slices: components.iter(query.range().start, query.range().end),
