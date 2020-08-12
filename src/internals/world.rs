@@ -9,7 +9,7 @@ use super::{
     event::{EventSender, Subscriber, Subscribers},
     query::{
         filter::{EntityFilter, LayoutFilter},
-        view::View,
+        view::{IntoView, View},
         Query,
     },
     storage::{
@@ -474,8 +474,8 @@ impl World {
 
     /// Splits the world into two. The left world allows access only to the data declared by the view;
     /// the right world allows access to all else.
-    pub fn split<T: for<'v> View<'v>>(&mut self) -> (SubWorld, SubWorld) {
-        let permissions = T::requires_permissions();
+    pub fn split<T: IntoView>(&mut self) -> (SubWorld, SubWorld) {
+        let permissions = T::View::requires_permissions();
         let (left, right) = ComponentAccess::All.split(permissions);
 
         // safety: exclusive access to world, and we have split each subworld into disjoint sections
@@ -489,7 +489,7 @@ impl World {
 
     /// Splits the world into two. The left world allows access only to the data declared by the query's view;
     /// the right world allows access to all else.
-    pub fn split_for_query<'q, V: for<'v> View<'v>, F: EntityFilter>(
+    pub fn split_for_query<'q, V: IntoView, F: EntityFilter>(
         &mut self,
         _: &'q Query<V, F>,
     ) -> (SubWorld, SubWorld) {

@@ -3,6 +3,7 @@
 use legion::*;
 use std::collections::HashMap;
 
+use query::Query;
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -108,7 +109,7 @@ fn query_cached_read_entity_data() {
         }
     }
 
-    let mut query = <(Entity, Read<Pos>)>::query();
+    let mut query = Query::<(Entity, &Pos)>::default();
 
     let mut count = 0;
     for (entity, pos) in query.iter_mut(&mut world) {

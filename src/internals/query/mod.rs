@@ -16,13 +16,13 @@ pub mod filter;
 pub mod view;
 
 /// A type (typically a view) which can construct a query.
-pub trait IntoQuery: IntoView {
+pub trait IntoQuery: IntoView + Sized {
     /// Constructs a query.
-    fn query() -> Query<Self::View, <Self::View as DefaultFilter>::Filter>;
+    fn query() -> Query<Self, <Self::View as DefaultFilter>::Filter>;
 }
 
 impl<T: IntoView> IntoQuery for T {
-    fn query() -> Query<Self::View, <Self::View as DefaultFilter>::Filter> {
+    fn query() -> Query<Self, <Self::View as DefaultFilter>::Filter> {
         Self::View::validate();
 
         Query {
@@ -118,14 +118,32 @@ enum Cache {
 }
 
 /// Provides efficient means to iterate and filter entities in a world.
-pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
+pub struct Query<V: IntoView, F: EntityFilter = <<V as IntoView>::View as DefaultFilter>::Filter> {
     _view: PhantomData<V>,
     filter: Mutex<F>,
     layout_matches: HashMap<WorldId, Cache>,
     is_view_filter: bool,
 }
 
-impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
+impl<V: IntoView, F: EntityFilter> Default for Query<V, F> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<V: IntoView, F: EntityFilter> Query<V, F> {
+    /// Consructs a new Query
+    pub fn new() -> Self {
+        V::View::validate();
+
+        Self {
+            _view: PhantomData,
+            filter: Mutex::new(Default::default()),
+            layout_matches: HashMap::new(),
+            is_view_filter: true,
+        }
+    }
+
     /// Adds an additional filter to the query.
     pub fn filter<T: EntityFilter>(self, filter: T) -> Query<V, <F as std::ops::BitAnd<T>>::Output>
     where
@@ -206,7 +224,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         &'a mut self,
         world: &'a T,
     ) -> &'a [ArchetypeIndex] {
-        let accessor = world.get_component_storage::<V>().unwrap();
+        let accessor = world.get_component_storage::<V::View>().unwrap();
         let (_, result) = self.evaluate_query(&accessor);
         result.index()
     }
@@ -228,12 +246,12 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         &'query mut self,
         world: &'world T,
         entity: Entity,
-    ) -> Option<<V as View<'world>>::Element>
+    ) -> Option<<V::View as View<'world>>::Element>
     where
         T: EntityStore,
     {
         let location = world.entry_ref(entity)?.location();
-        let accessor = world.get_component_storage::<V>().unwrap();
+        let accessor = world.get_component_storage::<V::View>().unwrap();
 
         // safety:
         // This is much like the similar usage of transmute inside iter_chunks_unchecked, see
@@ -247,7 +265,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         let arch_slice_ref = std::mem::transmute(arch_slice_ref);
         let result = QueryResult::unordered(arch_slice_ref);
         let mut fetch =
-            <V as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result)
+            <V::View as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result)
                 .next()??;
 
         // if our filter has conditions beyond that of the view, then we need to evaluate the query
@@ -273,7 +291,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         &'query mut self,
         world: &'world mut T,
         entity: Entity,
-    ) -> Option<<V as View<'world>>::Element>
+    ) -> Option<<V::View as View<'world>>::Element>
     where
         T: EntityStore,
     {
@@ -286,10 +304,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         &'query mut self,
         world: &'world T,
         entity: Entity,
-    ) -> Option<<V as View<'world>>::Element>
+    ) -> Option<<V::View as View<'world>>::Element>
     where
         T: EntityStore,
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.get_unchecked(world, entity) }
@@ -309,8 +327,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub unsafe fn iter_chunks_unchecked<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world T,
-    ) -> ChunkIter<'world, 'query, V, F> {
-        let accessor = world.get_component_storage::<V>().unwrap();
+    ) -> ChunkIter<'world, 'query, V::View, F> {
+        let accessor = world.get_component_storage::<V::View>().unwrap();
         let (_, result) = self.evaluate_query(&accessor);
 
         // What we want:
@@ -351,7 +369,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         );
 
         let fetch =
-            <V as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result);
+            <V::View as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result);
         let filter = self.filter.get_mut();
         filter.prepare(world.id());
         ChunkIter {
@@ -374,8 +392,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub unsafe fn par_iter_chunks_unchecked<'a, T: EntityStore>(
         &'a mut self,
         world: &'a T,
-    ) -> par_iter::ParChunkIter<'a, V, F> {
-        let accessor = world.get_component_storage::<V>().unwrap();
+    ) -> par_iter::ParChunkIter<'a, V::View, F> {
+        let accessor = world.get_component_storage::<V::View>().unwrap();
         let (filter, result) = self.evaluate_query(&accessor);
         par_iter::ParChunkIter::new(accessor, result, filter)
     }
@@ -387,7 +405,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn iter_chunks_mut<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world mut T,
-    ) -> ChunkIter<'world, 'query, V, F> {
+    ) -> ChunkIter<'world, 'query, V::View, F> {
         // safety: we have exclusive access to world
         unsafe { self.iter_chunks_unchecked(world) }
     }
@@ -400,7 +418,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn par_iter_chunks_mut<'a, T: EntityStore>(
         &'a mut self,
         world: &'a mut T,
-    ) -> par_iter::ParChunkIter<'a, V, F> {
+    ) -> par_iter::ParChunkIter<'a, V::View, F> {
         // safety: we have exclusive access to world
         unsafe { self.par_iter_chunks_unchecked(world) }
     }
@@ -413,9 +431,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn iter_chunks<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world T,
-    ) -> ChunkIter<'world, 'query, V, F>
+    ) -> ChunkIter<'world, 'query, V::View, F>
     where
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.iter_chunks_unchecked(world) }
@@ -430,9 +448,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn par_iter_chunks<'a, T: EntityStore>(
         &'a mut self,
         world: &'a T,
-    ) -> par_iter::ParChunkIter<'a, V, F>
+    ) -> par_iter::ParChunkIter<'a, V::View, F>
     where
-        <V as View<'a>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.par_iter_chunks_unchecked(world) }
@@ -453,7 +471,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub unsafe fn iter_unchecked<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world T,
-    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V, F>> {
+    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V::View, F>> {
         self.iter_chunks_unchecked(world).flatten()
     }
 
@@ -467,7 +485,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub unsafe fn par_iter_unchecked<'a, T: EntityStore>(
         &'a mut self,
         world: &'a T,
-    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>> {
+    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V::View, F>> {
         use rayon::iter::ParallelIterator;
         self.par_iter_chunks_unchecked(world).flatten()
     }
@@ -479,7 +497,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn iter_mut<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world mut T,
-    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V, F>> {
+    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V::View, F>> {
         // safety: we have exclusive access to world
         unsafe { self.iter_unchecked(world) }
     }
@@ -490,7 +508,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn par_iter_mut<'a, T: EntityStore>(
         &'a mut self,
         world: &'a mut T,
-    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>> {
+    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V::View, F>> {
         // safety: we have exclusive access to world
         unsafe { self.par_iter_unchecked(world) }
     }
@@ -503,9 +521,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn iter<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world T,
-    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V, F>>
+    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V::View, F>>
     where
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.iter_unchecked(world) }
@@ -519,9 +537,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn par_iter<'a, T: EntityStore>(
         &'a mut self,
         world: &'a T,
-    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>>
+    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V::View, F>>
     where
-        <V as View<'a>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.par_iter_unchecked(world) }
@@ -544,7 +562,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world T,
         mut f: Body,
     ) where
-        Body: FnMut(ChunkView<<V as View<'world>>::Fetch>),
+        Body: FnMut(ChunkView<<V::View as View<'world>>::Fetch>),
     {
         for chunk in self.iter_chunks_unchecked(world) {
             f(chunk);
@@ -565,7 +583,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'a T,
         f: Body,
     ) where
-        Body: Fn(ChunkView<<V as View<'a>>::Fetch>) + Send + Sync,
+        Body: Fn(ChunkView<<V::View as View<'a>>::Fetch>) + Send + Sync,
     {
         use rayon::iter::ParallelIterator;
         self.par_iter_chunks_unchecked(world).for_each(f);
@@ -580,7 +598,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world mut T,
         f: Body,
     ) where
-        Body: FnMut(ChunkView<<V as View<'world>>::Fetch>),
+        Body: FnMut(ChunkView<<V::View as View<'world>>::Fetch>),
     {
         // safety: we have exclusive access to world
         unsafe { self.for_each_chunk_unchecked(world, f) };
@@ -592,7 +610,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     #[inline]
     pub fn par_for_each_chunk_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
     where
-        Body: Fn(ChunkView<<V as View<'a>>::Fetch>) + Send + Sync,
+        Body: Fn(ChunkView<<V::View as View<'a>>::Fetch>) + Send + Sync,
     {
         // safety: we have exclusive access to world
         unsafe { self.par_for_each_chunk_unchecked(world, f) };
@@ -608,8 +626,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world T,
         f: Body,
     ) where
-        Body: FnMut(ChunkView<<V as View<'world>>::Fetch>),
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        Body: FnMut(ChunkView<<V::View as View<'world>>::Fetch>),
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.for_each_chunk_unchecked(world, f) };
@@ -623,8 +641,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     #[inline]
     pub fn par_for_each_chunk<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
     where
-        Body: Fn(ChunkView<<V as View<'a>>::Fetch>) + Send + Sync,
-        <V as View<'a>>::Fetch: ReadOnlyFetch,
+        Body: Fn(ChunkView<<V::View as View<'a>>::Fetch>) + Send + Sync,
+        <V::View as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.par_for_each_chunk_unchecked(world, f) };
@@ -645,7 +663,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world T,
         mut f: Body,
     ) where
-        Body: FnMut(<V as View<'world>>::Element),
+        Body: FnMut(<V::View as View<'world>>::Element),
     {
         // we use a nested loop because it is significantly faster than .flatten()
         for chunk in self.iter_chunks_unchecked(world) {
@@ -667,7 +685,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'a T,
         f: Body,
     ) where
-        Body: Fn(<V as View<'a>>::Element) + Send + Sync,
+        Body: Fn(<V::View as View<'a>>::Element) + Send + Sync,
     {
         use rayon::iter::ParallelIterator;
         self.par_iter_unchecked(world).for_each(&f);
@@ -680,7 +698,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world mut T,
         f: Body,
     ) where
-        Body: FnMut(<V as View<'world>>::Element),
+        Body: FnMut(<V::View as View<'world>>::Element),
     {
         // safety: we have exclusive access to world
         unsafe { self.for_each_unchecked(world, f) };
@@ -691,7 +709,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     #[inline]
     pub fn par_for_each_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
     where
-        Body: Fn(<V as View<'a>>::Element) + Send + Sync,
+        Body: Fn(<V::View as View<'a>>::Element) + Send + Sync,
     {
         // safety: we have exclusive access to world
         unsafe { self.par_for_each_unchecked(world, f) };
@@ -706,8 +724,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world T,
         f: Body,
     ) where
-        Body: FnMut(<V as View<'world>>::Element),
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        Body: FnMut(<V::View as View<'world>>::Element),
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.for_each_unchecked(world, f) };
@@ -720,8 +738,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     #[inline]
     pub fn par_for_each<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
     where
-        Body: Fn(<V as View<'a>>::Element) + Send + Sync,
-        <V as View<'a>>::Fetch: ReadOnlyFetch,
+        Body: Fn(<V::View as View<'a>>::Element) + Send + Sync,
+        <V::View as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.par_for_each_unchecked(world, f) };

@@ -5,7 +5,11 @@ use super::{
     entity::Entity,
     entry::{EntryMut, EntryRef},
     permissions::Permissions,
-    query::{filter::EntityFilter, view::View, Query},
+    query::{
+        filter::EntityFilter,
+        view::{IntoView, View},
+        Query,
+    },
     storage::{archetype::ArchetypeIndex, component::ComponentTypeId},
     world::{ComponentAccessError, EntityStore, StorageAccessor, World, WorldId},
 };
@@ -177,11 +181,11 @@ impl<'a> SubWorld<'a> {
 
     /// Splits the world into two. The left world allows access only to the data declared by the view;
     /// the right world allows access to all else.
-    pub fn split<'b, T: for<'v> View<'v>>(&'b mut self) -> (SubWorld<'b>, SubWorld<'b>)
+    pub fn split<'b, T: IntoView>(&'b mut self) -> (SubWorld<'b>, SubWorld<'b>)
     where
         'a: 'b,
     {
-        let permissions = T::requires_permissions();
+        let permissions = T::View::requires_permissions();
         let (left, right) = self.components.split(permissions);
 
         (
@@ -200,7 +204,7 @@ impl<'a> SubWorld<'a> {
 
     /// Splits the world into two. The left world allows access only to the data declared by the query's view;
     /// the right world allows access to all else.
-    pub fn split_for_query<'q, V: for<'v> View<'v>, F: EntityFilter>(
+    pub fn split_for_query<'q, V: IntoView, F: EntityFilter>(
         &mut self,
         _: &'q Query<V, F>,
     ) -> (SubWorld, SubWorld) {

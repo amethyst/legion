@@ -10,7 +10,7 @@ use crate::internals::{
     permissions::Permissions,
     query::{
         filter::EntityFilter,
-        view::{read::Read, write::Write, View},
+        view::{read::Read, write::Write, IntoView, View},
         Query,
     },
     storage::{
@@ -68,7 +68,7 @@ impl QuerySet for () {
 
 impl<AV, AF> QuerySet for Query<AV, AF>
 where
-    AV: for<'v> View<'v> + Send + Sync,
+    AV: IntoView + Send + Sync,
     AF: EntityFilter,
 {
     fn filter_archetypes(&mut self, world: &World, bitset: &mut BitSet) {
@@ -319,11 +319,11 @@ where
         query: Query<V, F>,
     ) -> SystemBuilder<<Q as ConsAppend<Query<V, F>>>::Output, R>
     where
-        V: for<'a> View<'a>,
+        V: IntoView,
         F: 'static + EntityFilter,
         Q: ConsAppend<Query<V, F>>,
     {
-        self.component_access.add(V::requires_permissions());
+        self.component_access.add(V::View::requires_permissions());
 
         SystemBuilder {
             name: self.name,
