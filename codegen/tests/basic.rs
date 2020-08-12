@@ -53,6 +53,14 @@ fn with_cmd() {
 }
 
 #[test]
+fn with_cmd_full_path() {
+    #[system]
+    fn basic(_: &legion::systems::CommandBuffer) {}
+
+    Schedule::builder().add_system(basic_system()).build();
+}
+
+#[test]
 fn with_mut_cmd() {
     #[system]
     fn basic(_: &mut CommandBuffer) {}

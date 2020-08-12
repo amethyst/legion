@@ -333,21 +333,33 @@ impl Sig {
                             return Err(Error::InvalidArgument(ident.span()));
                         }
                     }
-                    Type::Reference(ty) if is_type(&ty.elem, &["legion", "CommandBuffer"]) => {
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["CommandBuffer"])
+                            || is_type(&ty.elem, &["legion", "CommandBuffer"])
+                            || is_type(&ty.elem, &["legion", "systems", "CommandBuffer"]) =>
+                    {
                         if ty.mutability.is_some() {
                             parameters.push(Parameter::CommandBufferMut);
                         } else {
                             parameters.push(Parameter::CommandBuffer);
                         }
                     }
-                    Type::Reference(ty) if is_type(&ty.elem, &["legion", "SubWorld"]) => {
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["SubWorld"])
+                            || is_type(&ty.elem, &["legion", "SubWorld"])
+                            || is_type(&ty.elem, &["legion", "world", "SubWorld"]) =>
+                    {
                         if ty.mutability.is_some() {
                             parameters.push(Parameter::SubWorldMut);
                         } else {
                             parameters.push(Parameter::SubWorld);
                         }
                     }
-                    Type::Reference(ty) if is_type(&ty.elem, &["legion", "Entity"]) => {
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["Entity"])
+                            || is_type(&ty.elem, &["legion", "Entity"])
+                            || is_type(&ty.elem, &["legion", "world", "Entity"]) =>
+                    {
                         parameters.push(Parameter::Component(query.len()));
                         query.push(parse_quote!(::legion::Entity));
                     }
@@ -424,12 +436,10 @@ enum ArgAttr {
 
 fn is_type(ty: &Type, segments: &[&str]) -> bool {
     if let Type::Path(path) = ty {
-        path.path
-            .segments
+        segments
             .iter()
-            .rev()
-            .zip(segments.iter().rev())
-            .all(|(a, b)| a.ident == b)
+            .zip(path.path.segments.iter())
+            .all(|(a, b)| b.ident == *a)
     } else {
         false
     }
