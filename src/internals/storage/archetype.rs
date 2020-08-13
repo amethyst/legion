@@ -103,6 +103,10 @@ impl Archetype {
             .send(Event::EntityInserted(entity, self.index));
     }
 
+    pub(crate) fn reserve(&mut self, additional: usize) {
+        self.entities.reserve(additional)
+    }
+
     pub(crate) fn swap_remove(&mut self, entity_index: usize) -> Entity {
         let removed = self.entities.swap_remove(entity_index);
         self.subscribers

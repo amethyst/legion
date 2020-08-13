@@ -21,7 +21,6 @@ pub mod archetypes;
 pub mod de;
 mod entities;
 pub mod id;
-//mod packed;
 pub mod ser;
 
 /// A (de)serializable type which can represent a component type in a serialized world.

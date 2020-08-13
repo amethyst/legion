@@ -93,6 +93,11 @@ impl<'a> ArchetypeWriter<'a> {
         self.archetype.push(entity);
     }
 
+    /// Reserves capacity for at least `additional` extra entity IDs in the archetype.
+    pub fn reserve(&mut self, additional: usize) {
+        self.archetype.reserve(additional)
+    }
+
     /// Returns a slice of entities inserted by this writer, and the component index of the first inserted entity.
     pub fn inserted(&self) -> (ComponentIndex, &[Entity]) {
         let start = self.initial_count;

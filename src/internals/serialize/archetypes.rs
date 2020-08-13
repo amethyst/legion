@@ -536,9 +536,14 @@ pub mod de {
                 where
                     V: SeqAccess<'de>,
                 {
+                    if let Some(len) = seq.size_hint() {
+                        self.writer.reserve(len);
+                    }
+
                     while let Some(entity) = seq.next_element()? {
                         self.writer.push(entity);
                     }
+
                     Ok(())
                 }
             }
