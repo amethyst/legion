@@ -181,6 +181,30 @@ impl<'a> SubWorld<'a> {
 
     /// Splits the world into two. The left world allows access only to the data declared by the view;
     /// the right world allows access to all else.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use legion::*;
+    /// # struct Position;
+    /// # let mut world = World::default();
+    /// # let (_, mut world) = world.split::<&u8>();
+    /// let (left, right) = world.split::<&mut Position>();
+    /// ```
+    ///
+    /// With the above, 'left' contains a sub-world with access _only_ to `&Position` and `&mut Position`,
+    /// and `right` contains a sub-world with access to everything _but_ `&Position` and `&mut Position`.
+    ///
+    /// ```
+    /// # use legion::*;
+    /// # struct Position;
+    /// # let mut world = World::default();
+    /// # let (_, mut world) = world.split::<&u8>();
+    /// let (left, right) = world.split::<&Position>();
+    /// ```
+    ///
+    /// In this second example, `left` is provided access _only_ to `&Position`. `right` is granted permission
+    /// to everything _but_ `&mut Position`.
     pub fn split<'b, T: IntoView>(&'b mut self) -> (SubWorld<'b>, SubWorld<'b>)
     where
         'a: 'b,
