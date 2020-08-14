@@ -31,6 +31,7 @@ fn with_mut_resource() {
 #[test]
 fn with_world() {
     #[system]
+    #[read_component(usize)]
     fn basic(_: &SubWorld) {}
 
     Schedule::builder().add_system(basic_system()).build();
@@ -39,6 +40,7 @@ fn with_world() {
 #[test]
 fn with_mut_world() {
     #[system]
+    #[read_component(usize)]
     fn basic(_: &mut SubWorld) {}
 
     Schedule::builder().add_system(basic_system()).build();
