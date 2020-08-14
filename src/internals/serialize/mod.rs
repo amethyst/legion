@@ -59,7 +59,7 @@ type DeserializeSingleBoxedFn =
     fn(&mut dyn erased_serde::Deserializer) -> Result<Box<[u8]>, erased_serde::Error>;
 
 #[derive(Copy, Clone)]
-// An error type describing what to do when a component type is unrecognized.
+/// An error type describing what to do when a component type is unrecognized.
 pub enum UnknownType {
     /// Ignore the component.
     Ignore,
