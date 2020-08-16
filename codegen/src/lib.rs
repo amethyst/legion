@@ -327,7 +327,7 @@ impl Sig {
                                             _ => {
                                                 return Err(Error::InvalidOptionArgument(
                                                     ident.span(),
-                                                    quote!(ty).to_string(),
+                                                    quote!(#ty).to_string(),
                                                 ))
                                             }
                                         },
