@@ -247,8 +247,8 @@ macro_rules! impl_view_tuple {
                 fn writes_types() -> Self::Write {
                     #![allow(non_snake_case)]
                     let types = std::iter::empty();
-                    $( let [<$ty _reads>] = $ty::reads_types(); )*
-                    $( let types = types.chain([<$ty _reads>].as_ref().iter()); )*
+                    $( let [<$ty _writes>] = $ty::writes_types(); )*
+                    $( let types = types.chain([<$ty _writes>].as_ref().iter()); )*
                     types.copied().collect()
                 }
 
