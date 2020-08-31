@@ -1,4 +1,7 @@
-use crate::{internals::entity::EntityHasher, world::Allocate, Entity};
+use crate::{
+    internals::entity::EntityHasher, internals::serialize::CustomEntitySerializer, world::Allocate,
+    Entity,
+};
 use serde::{Deserialize, Serialize, Serializer};
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap};
@@ -9,38 +12,46 @@ use uuid::Uuid;
 pub trait EntitySerializer {
     /// Serializes an `Entity` by constructing the serializable representation
     /// and passing it into `serialize_fn`.
-    fn serialize(
-        &mut self,
-        entity: Entity,
-        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
-    );
+    fn serialize(&self, entity: Entity, serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize));
 
     /// Deserializes an `Entity`.
     fn deserialize(
-        &mut self,
+        &self,
         deserializer: &mut dyn erased_serde::Deserializer,
     ) -> Result<Entity, erased_serde::Error>;
 }
 
 thread_local! {
-    static SERIALIZER: RefCell<Box<dyn EntitySerializer>> = RefCell::new(Box::new(Canon::default()));
+    static SERIALIZER: RefCell<Option<&'static dyn EntitySerializer>> = RefCell::new(None);
 }
 
 /// Runs the provided function with this canon as context for Entity (de)serialization.
-pub fn run_as_context<F: FnOnce() -> R, R>(context: &mut Box<dyn EntitySerializer>, f: F) -> R {
+pub fn run_as_context<F: FnOnce() -> R, R>(context: &dyn EntitySerializer, f: F) -> R {
     SERIALIZER.with(|cell| {
         // swap context into TLS
-        {
+        let prev = {
             let mut existing = cell.borrow_mut();
-            std::mem::swap(context, &mut *existing);
-        }
+            // Safety? Hmm
+            // This &'static reference is only stored in the TLS for the duration of this function,
+            // meaning it will be valid for all TLS uses as long as it's not copied anywhere else.
+            // Can't express this lifetime in a TLS-static, so that's why this unsafe block needs to exist.
+            //
+            // If `f` panics, we could end up with a dangling reference in the TLS block.
+            // A catch_unwind block could fix this problem
+            let hacked_context = unsafe {
+                core::mem::transmute::<&dyn EntitySerializer, &'static dyn EntitySerializer>(
+                    context,
+                )
+            };
+            std::mem::replace(&mut *existing, Some(hacked_context))
+        };
 
         let result = (f)();
 
-        // swap context back out of LTS
+        // swap context back out of LTS, putting back what we took out.
         {
             let mut existing = cell.borrow_mut();
-            std::mem::swap(context, &mut *existing);
+            *existing = prev;
         }
 
         result
@@ -57,14 +68,17 @@ impl Serialize for Entity {
             let mut result = None;
             let mut serializer = Some(serializer);
             let result_ref = &mut result;
-            entity_serializer.serialize(*self, &mut move |serializable| {
-                *result_ref = Some(erased_serde::serialize(
-                    serializable,
-                    serializer
-                        .take()
-                        .expect("serialize can only be called once"),
-                ));
-            });
+            entity_serializer
+                .as_mut()
+                .expect("No entity serializer set")
+                .serialize(*self, &mut move |serializable| {
+                    *result_ref = Some(erased_serde::serialize(
+                        serializable,
+                        serializer
+                            .take()
+                            .expect("serialize can only be called once"),
+                    ));
+                });
             result.unwrap()
         })
     }
@@ -77,9 +91,11 @@ impl<'de> Deserialize<'de> for Entity {
     {
         use serde::de::Error;
         SERIALIZER.with(|cell| {
-            let mut entity_serializer = cell.borrow_mut();
             let mut deserializer = erased_serde::Deserializer::erase(deserializer);
+            let mut entity_serializer = cell.borrow_mut();
             entity_serializer
+                .as_mut()
+                .expect("No entity serializer set")
                 .deserialize(&mut deserializer)
                 .map_err(D::Error::custom)
         })
@@ -170,22 +186,15 @@ impl Canon {
     }
 }
 
-impl EntitySerializer for Canon {
-    fn serialize(
-        &mut self,
-        entity: Entity,
-        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
-    ) {
-        let name = Uuid::from_bytes(self.canonize_id(entity));
-        (serialize_fn)(&name);
+impl CustomEntitySerializer for Canon {
+    type SerializedID = uuid::Uuid;
+    /// Constructs the serializable representation of `Entity`
+    fn to_serialized(&mut self, entity: Entity) -> Self::SerializedID {
+        uuid::Uuid::from_bytes(self.canonize_id(entity))
     }
 
-    fn deserialize(
-        &mut self,
-        deserializer: &mut dyn erased_serde::Deserializer,
-    ) -> Result<Entity, erased_serde::Error> {
-        let name = erased_serde::deserialize::<Uuid>(deserializer)?;
-        let entity = self.canonize_name(name.as_bytes());
-        Ok(entity)
+    /// Convert a `SerializedEntity` to an `Entity`.
+    fn from_serialized(&mut self, serialized: Self::SerializedID) -> Entity {
+        self.canonize_name(serialized.as_bytes())
     }
 }

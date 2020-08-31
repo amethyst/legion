@@ -2,7 +2,7 @@
 
 use super::{
     archetypes::ser::ArchetypeLayoutSerializer, entities::ser::EntitiesLayoutSerializer,
-    id::run_as_context, EntitySerializerSource, UnknownType, WorldField,
+    id::run_as_context, EntitySerializer, UnknownType, WorldField,
 };
 use crate::{
     internals::{query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World},
@@ -11,7 +11,7 @@ use crate::{
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 /// Describes a type which knows how to deserialize the components in a world.
-pub trait WorldSerializer: EntitySerializerSource {
+pub trait WorldSerializer {
     /// The stable type ID used to identify each component type in the serialized data.
     type TypeId: Serialize + Ord;
 
@@ -42,6 +42,9 @@ pub trait WorldSerializer: EntitySerializerSource {
         archetype: ArchetypeIndex,
         serializer: S,
     ) -> Result<S::Ok, S::Error>;
+
+    /// Calls `callback` with the Entity ID serializer
+    fn with_entity_serializer(&self, callback: &mut dyn FnMut(&dyn EntitySerializer));
 }
 
 /// A serializable representation of a world.
@@ -84,36 +87,35 @@ where
     let human_readable = serializer.is_human_readable();
     let mut root = serializer.serialize_map(Some(1))?;
 
-    let mut run = || {
-        if human_readable {
-            // serialize per-entity representation
-            root.serialize_entry(
-                &WorldField::Entities,
-                &EntitiesLayoutSerializer {
-                    world_serializer,
-                    world,
-                    filter,
-                },
-            )
-        } else {
-            // serialize machine-optimised representation
-            root.serialize_entry(
-                &WorldField::Packed,
-                &ArchetypeLayoutSerializer {
-                    world_serializer,
-                    world,
-                    filter,
-                },
-            )
-        }
-    };
-
-    if let Some(canon) = world_serializer.entity_serializer() {
-        let mut canon = canon.lock();
-        run_as_context(&mut canon, run)?;
-    } else {
-        (run)()?;
-    }
-
+    let mut hoist = core::cell::Cell::new(None);
+    let hoist_ref = &mut hoist;
+    let root_ref = &mut root;
+    world_serializer.with_entity_serializer(&mut |canon| {
+        run_as_context(canon, || {
+            let result = if human_readable {
+                // serialize per-entity representation
+                root_ref.serialize_entry(
+                    &WorldField::Entities,
+                    &EntitiesLayoutSerializer {
+                        world_serializer,
+                        world,
+                        filter,
+                    },
+                )
+            } else {
+                // serialize machine-optimised representation
+                root_ref.serialize_entry(
+                    &WorldField::Packed,
+                    &ArchetypeLayoutSerializer {
+                        world_serializer,
+                        world,
+                        filter,
+                    },
+                )
+            };
+            hoist_ref.set(Some(result));
+        })
+    });
+    hoist.into_inner().unwrap()?;
     root.end()
 }

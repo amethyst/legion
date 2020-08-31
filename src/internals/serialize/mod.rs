@@ -10,6 +10,7 @@ use crate::{
         world::World,
     },
     storage::UnknownComponentWriter,
+    Entity,
 };
 use de::{WorldDeserializer, WorldVisitor};
 use id::{Canon, EntitySerializer};
@@ -35,13 +36,6 @@ impl<T> TypeKey for T where
     T: serde::Serialize + for<'de> serde::Deserialize<'de> + Ord + Clone + Hash
 {
 }
-
-/// Provides the Entity ID serializer for (de)serializing entity IDs.
-pub trait EntitySerializerSource {
-    /// Returns the Entity ID serializer.
-    fn entity_serializer(&self) -> Option<&parking_lot::Mutex<Box<dyn EntitySerializer>>>;
-}
-
 /// A [TypeKey](trait.TypeKey.html) which can construct itself for a given type T.
 pub trait AutoTypeKey<T: Component>: TypeKey {
     /// Constructs the type key for component type `T`.
@@ -67,6 +61,16 @@ pub enum UnknownType {
     Error,
 }
 
+/// Describes how to serialize and deserialize a runtime `Entity` ID.
+pub trait CustomEntitySerializer {
+    type SerializedID: serde::Serialize + for<'a> serde::Deserialize<'a>;
+    /// Constructs the serializable representation of `Entity`
+    fn to_serialized(&mut self, entity: Entity) -> Self::SerializedID;
+
+    /// Convert a `SerializedEntity` to an `Entity`.
+    fn from_serialized(&mut self, serialized: Self::SerializedID) -> Entity;
+}
+
 /// A world (de)serializer which describes how to (de)serialize the component types in a world.
 ///
 /// The type parameter `T` represents the key used in the serialized output to identify each
@@ -78,7 +82,7 @@ pub enum UnknownType {
 pub struct Registry<T, S = Canon>
 where
     T: TypeKey,
-    S: EntitySerializer + 'static,
+    S: CustomEntitySerializer + 'static,
 {
     _phantom_t: PhantomData<T>,
     _phantom_s: PhantomData<S>,
@@ -94,13 +98,13 @@ where
         ),
     >,
     constructors: HashMap<T, (ComponentTypeId, fn(&mut EntityLayout))>,
-    canon: parking_lot::Mutex<Box<dyn EntitySerializer>>,
+    canon: parking_lot::Mutex<S>,
 }
 
 impl<T, S> Registry<T, S>
 where
     T: TypeKey,
-    S: EntitySerializer + 'static,
+    S: CustomEntitySerializer + 'static,
 {
     /// Constructs a new registry.
     pub fn new(entity_serializer: S) -> Self {
@@ -108,7 +112,7 @@ where
             missing: UnknownType::Error,
             serialize_fns: HashMap::new(),
             constructors: HashMap::new(),
-            canon: parking_lot::Mutex::new(Box::new(entity_serializer) as Box<dyn EntitySerializer>),
+            canon: parking_lot::Mutex::new(entity_serializer),
             _phantom_t: PhantomData,
             _phantom_s: PhantomData,
         }
@@ -202,27 +206,41 @@ where
 impl<T, S> Default for Registry<T, S>
 where
     T: TypeKey,
-    S: EntitySerializer + Default + 'static,
+    S: CustomEntitySerializer + Default + 'static,
 {
     fn default() -> Self {
         Self::new(S::default())
     }
 }
 
-impl<T, S> EntitySerializerSource for Registry<T, S>
-where
-    T: TypeKey,
-    S: EntitySerializer + 'static,
-{
-    fn entity_serializer(&self) -> Option<&parking_lot::Mutex<Box<dyn EntitySerializer>>> {
-        Some(&self.canon)
+impl<S: CustomEntitySerializer + 'static> EntitySerializer for &parking_lot::Mutex<S> {
+    fn serialize(
+        &self,
+        entity: Entity,
+        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
+    ) {
+        let mut canon = self.lock();
+        let serialized = canon.to_serialized(entity);
+        serialize_fn(&serialized);
+    }
+
+    fn deserialize(
+        &self,
+        deserializer: &mut dyn erased_serde::Deserializer,
+    ) -> Result<Entity, erased_serde::Error> {
+        let mut canon = self.lock();
+        let serialized =
+            <<S as CustomEntitySerializer>::SerializedID as serde::Deserialize>::deserialize(
+                deserializer,
+            )?;
+        Ok(canon.from_serialized(serialized))
     }
 }
 
 impl<T, S> WorldSerializer for Registry<T, S>
 where
     T: TypeKey,
-    S: EntitySerializer + 'static,
+    S: CustomEntitySerializer + 'static,
 {
     type TypeId = T;
 
@@ -286,12 +304,16 @@ where
             panic!();
         }
     }
+    fn with_entity_serializer(&self, callback: &mut dyn FnMut(&dyn EntitySerializer)) {
+        let canon_ref = &self.canon;
+        callback(&canon_ref);
+    }
 }
 
 impl<T, S> WorldDeserializer for Registry<T, S>
 where
     T: TypeKey,
-    S: EntitySerializer + 'static,
+    S: CustomEntitySerializer + 'static,
 {
     type TypeId = T;
 
@@ -338,6 +360,10 @@ where
             //Err(D::Error::custom("unrecognized component type"))
             panic!()
         }
+    }
+    fn with_entity_serializer(&self, callback: &mut dyn FnMut(&dyn EntitySerializer)) {
+        let canon_ref = &self.canon;
+        callback(&canon_ref);
     }
 }
 
