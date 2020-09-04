@@ -206,6 +206,9 @@ pub use crate::{
 };
 
 #[cfg(feature = "codegen")]
+pub use legion_codegen;
+
+#[cfg(feature = "codegen")]
 pub use legion_codegen::system;
 
 #[cfg(feature = "serialize")]
