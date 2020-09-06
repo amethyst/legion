@@ -1,7 +1,6 @@
 #![allow(unused_imports)]
 
-use legion::Entity;
-use legion_codegen::system;
+use legion::{system, Entity};
 
 #[system(par_for_each)]
 fn for_each(_: &Entity, #[resource] _: &mut usize) {}

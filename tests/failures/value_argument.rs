@@ -1,4 +1,4 @@
-use legion_codegen::system;
+use legion::system;
 
 #[system]
 fn value_arguement(_: usize) {}

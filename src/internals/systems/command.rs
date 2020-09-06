@@ -25,7 +25,6 @@ use std::{
     marker::PhantomData,
     sync::Arc,
 };
-use tracing::{span, Level};
 
 /// This trait can be used to implement custom world writer types that can be directly
 /// inserted into the command buffer, for more custom and complex world operations. This is analogous
@@ -251,9 +250,6 @@ impl CommandBuffer {
     /// Command flushes are performed in a FIFO manner, allowing for reliable, linear commands being
     /// executed in the order they were provided.
     pub fn flush(&mut self, world: &mut World) {
-        let span = span!(Level::TRACE, "Draining command buffer");
-        let _guard = span.enter();
-
         if self.world_id != world.id() {
             panic!("command buffers may only write into their parent world");
         }

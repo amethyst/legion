@@ -1,7 +1,7 @@
 error: par_for_each systems cannot accept mutable world references
- --> $DIR/par_mut_world.rs:6:1
+ --> $DIR/par_mut_world.rs:5:1
   |
-6 | #[system(par_for_each)]
+5 | #[system(par_for_each)]
   | ^^^^^^^^^^^^^^^^^^^^^^^
   |
   = note: this error originates in an attribute macro (in Nightly builds, run with -Z macro-backtrace for more info)

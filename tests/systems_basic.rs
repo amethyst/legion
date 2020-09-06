@@ -1,7 +1,7 @@
 use legion::{
-    storage::Component, systems::CommandBuffer, world::SubWorld, IntoQuery, Read, Schedule, Write,
+    storage::Component, system, systems::CommandBuffer, world::SubWorld, IntoQuery, Read, Schedule,
+    Write,
 };
-use legion_codegen::system;
 use std::fmt::Debug;
 
 #[test]

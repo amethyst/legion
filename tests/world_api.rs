@@ -18,8 +18,6 @@ struct Static;
 
 #[test]
 fn insert() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let components = vec![(4f32, 5u64, 6u16), (4f32, 5u64, 6u16)];
@@ -30,8 +28,6 @@ fn insert() {
 
 #[test]
 fn get_component() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let components = vec![
@@ -58,8 +54,6 @@ fn get_component() {
 
 #[test]
 fn get_component_wrong_type() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let entity = *world.extend(vec![(0f64,)]).get(0).unwrap();
@@ -73,8 +67,6 @@ fn get_component_wrong_type() {
 
 #[test]
 fn remove() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let components = vec![
@@ -99,8 +91,6 @@ fn remove() {
 
 #[test]
 fn delete_all() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let components = vec![
@@ -136,8 +126,6 @@ fn delete_all() {
 
 #[test]
 fn delete_last() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let components = vec![
@@ -169,8 +157,6 @@ fn delete_last() {
 
 #[test]
 fn delete_first() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let components = vec![
@@ -203,8 +189,6 @@ fn delete_first() {
 
 #[test]
 fn merge() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world_1 = World::default();
     let mut world_2 = World::default();
 
@@ -242,8 +226,6 @@ fn merge() {
 
 #[test]
 fn mutate_add_component() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let components = vec![
@@ -271,8 +253,6 @@ fn mutate_add_component() {
 
 #[test]
 fn mutate_remove_component() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let components = vec![
@@ -298,8 +278,6 @@ fn mutate_remove_component() {
 #[test]
 #[cfg(feature = "crossbeam-events")]
 fn delete_entities_on_drop() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let (tx, rx) = crossbeam_channel::unbounded::<legion::world::Event>();
@@ -332,8 +310,6 @@ fn delete_entities_on_drop() {
 // https://github.com/TomGillen/legion/issues/92
 #[test]
 fn lots_of_deletes() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     for _ in 0..10000 {
         let components = vec![
             (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -348,8 +324,6 @@ fn lots_of_deletes() {
 
 #[test]
 fn iter_entities() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     let mut world = World::default();
 
     let components = vec![

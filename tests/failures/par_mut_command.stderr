@@ -1,7 +1,7 @@
 error: par_for_each systems cannot accept mutable command buffer references
- --> $DIR/par_mut_command.rs:6:1
+ --> $DIR/par_mut_command.rs:5:1
   |
-6 | #[system(par_for_each)]
+5 | #[system(par_for_each)]
   | ^^^^^^^^^^^^^^^^^^^^^^^
   |
   = note: this error originates in an attribute macro (in Nightly builds, run with -Z macro-backtrace for more info)

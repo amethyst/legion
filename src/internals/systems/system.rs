@@ -22,7 +22,6 @@ use crate::internals::{
 };
 use bit_set::BitSet;
 use std::{any::TypeId, borrow::Cow, collections::HashMap, marker::PhantomData};
-use tracing::{debug, info, span, Level};
 
 /// Provides an abstraction across tuples of queries for system closures.
 pub trait QuerySet: Send + Sync {
@@ -169,15 +168,6 @@ where
     }
 
     unsafe fn run_unsafe(&mut self, world: &World, resources: &UnsafeResources) {
-        let span = if let Some(name) = &self.name {
-            span!(Level::INFO, "System", system = %name)
-        } else {
-            span!(Level::INFO, "System")
-        };
-        let _guard = span.enter();
-
-        debug!("Initializing");
-
         // safety:
         // It is difficult to correctly communicate the lifetime of the resource fetch through to the system closure.
         // We are hacking this by passing the fetch with a static lifetime to its internal references.
@@ -197,7 +187,6 @@ where
             .entry(world.id())
             .or_insert_with(|| CommandBuffer::new(world));
 
-        info!("Running");
         let borrow = &mut self.run_fn;
         borrow.run(cmd, &mut world_shim, &mut resources, queries);
     }

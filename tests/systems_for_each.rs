@@ -1,5 +1,6 @@
-use legion::{storage::Component, systems::CommandBuffer, world::SubWorld, Entity, Schedule};
-use legion_codegen::system;
+use legion::{
+    storage::Component, system, systems::CommandBuffer, world::SubWorld, Entity, Schedule,
+};
 use std::fmt::Debug;
 
 #[test]

@@ -3,9 +3,6 @@
 use std::cell::UnsafeCell;
 
 #[cfg(feature = "parallel")]
-use tracing::{span, trace, Level};
-
-#[cfg(feature = "parallel")]
 use std::{
     collections::{HashMap, HashSet},
     sync::atomic::{AtomicUsize, Ordering},
@@ -175,18 +172,6 @@ impl Executor {
                 );
 
             for (i, system) in systems.iter().enumerate() {
-                let span = if let Some(name) = system.name() {
-                    span!(
-                        Level::TRACE,
-                        "Building system dependencies",
-                        system = %name,
-                        index = i,
-                    )
-                } else {
-                    span!(Level::TRACE, "building system dependencies", index = i)
-                };
-                let _guard = span.enter();
-
                 let (read_res, read_comp) = system.reads();
                 let (write_res, write_comp) = system.writes();
 
@@ -206,7 +191,6 @@ impl Executor {
                 }
 
                 static_dependency_counts.push(AtomicUsize::from(dependencies.len()));
-                trace!(dependants = ?dependencies, dependency_counts = ?static_dependency_counts, "Computed static dependants");
                 for dep in &dependencies {
                     static_dependants[*dep].push(i);
                 }
@@ -231,7 +215,6 @@ impl Executor {
                     comp_dependencies.remove(static_dep);
                 }
 
-                trace!(depentants = ?comp_dependencies, "Computed dynamic dependants");
                 for dep in comp_dependencies {
                     if dep != i {
                         // dont be dependent on ourselves
@@ -239,12 +222,6 @@ impl Executor {
                     }
                 }
             }
-
-            trace!(
-                ?static_dependants,
-                ?dynamic_dependants,
-                "Computed system dependencies"
-            );
 
             let mut awaiting = Vec::with_capacity(systems.len());
             systems
@@ -365,8 +342,6 @@ impl Executor {
                 }
 
                 let awaiting = &self.awaiting;
-
-                trace!(?awaiting, "Initialized await counts");
 
                 // execute all systems with no outstanding dependencies
                 (0..systems.len())
