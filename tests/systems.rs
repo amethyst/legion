@@ -45,7 +45,7 @@ fn query_get() {
     #[read_component(f64)]
     fn sys(world: &mut SubWorld, #[state] entity: &State) {
         let mut query = <(&f32, &f64)>::query();
-        query.get_mut(world, *entity);
+        let _ = query.get_mut(world, *entity);
     }
 
     let mut world = World::default();

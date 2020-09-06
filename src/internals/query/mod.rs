@@ -1,3 +1,4 @@
+use super::world::EntityAccessError;
 use crate::internals::{
     entity::Entity,
     storage::{
@@ -246,7 +247,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         &'query mut self,
         world: &'world T,
         entity: Entity,
-    ) -> Option<<V::View as View<'world>>::Element>
+    ) -> Result<<V::View as View<'world>>::Element, EntityAccessError>
     where
         T: EntityStore,
     {
@@ -264,15 +265,20 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         let arch_slice_ref: &[ArchetypeIndex] = &arch_slice;
         let arch_slice_ref = std::mem::transmute(arch_slice_ref);
         let result = QueryResult::unordered(arch_slice_ref);
-        let mut fetch =
+        let mut fetch = if let Some(Some(fetch)) =
             <V::View as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result)
-                .next()??;
+                .next()
+        {
+            fetch
+        } else {
+            return Err(EntityAccessError::EntityNotFound);
+        };
 
         // if our filter has conditions beyond that of the view, then we need to evaluate the query
         if !self.is_view_filter {
             let (_, result) = self.evaluate_query(&accessor);
             if !result.index().contains(&location.archetype()) {
-                return None;
+                return Err(EntityAccessError::AccessDenied);
             }
         }
 
@@ -283,7 +289,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         let view = ChunkView::new(&accessor.archetypes()[location.archetype()], fetch);
         let mut iter = view.into_iter();
         use crate::internals::iter::indexed::TrustedRandomAccess;
-        Some(iter.get_unchecked(location.component().0))
+        Ok(iter.get_unchecked(location.component().0))
     }
 
     /// Returns the components for a single entity.
@@ -291,7 +297,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         &'query mut self,
         world: &'world mut T,
         entity: Entity,
-    ) -> Option<<V::View as View<'world>>::Element>
+    ) -> Result<<V::View as View<'world>>::Element, EntityAccessError>
     where
         T: EntityStore,
     {
@@ -304,7 +310,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         &'query mut self,
         world: &'world T,
         entity: Entity,
-    ) -> Option<<V::View as View<'world>>::Element>
+    ) -> Result<<V::View as View<'world>>::Element, EntityAccessError>
     where
         T: EntityStore,
         <V::View as View<'world>>::Fetch: ReadOnlyFetch,
@@ -1109,7 +1115,7 @@ mod test {
         }
 
         let single = query.get_mut(&mut world, entity);
-        assert_eq!(single, Some((&10usize, &mut false)));
+        assert_eq!(single, Ok((&10usize, &mut false)));
     }
 
     #[test]

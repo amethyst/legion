@@ -11,7 +11,7 @@ use super::{
         Query,
     },
     storage::{archetype::ArchetypeIndex, component::ComponentTypeId},
-    world::{ComponentAccessError, EntityStore, StorageAccessor, World, WorldId},
+    world::{EntityAccessError, EntityStore, StorageAccessor, World, WorldId},
 };
 use bit_set::BitSet;
 use std::borrow::Cow;
@@ -247,7 +247,7 @@ impl<'a> SubWorld<'a> {
 impl<'a> EntityStore for SubWorld<'a> {
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
-    ) -> Result<StorageAccessor, ComponentAccessError> {
+    ) -> Result<StorageAccessor, EntityAccessError> {
         if V::validate_access(&self.components) {
             Ok(self
                 .world
@@ -255,37 +255,35 @@ impl<'a> EntityStore for SubWorld<'a> {
                 .unwrap()
                 .with_allowed_archetypes(self.archetypes))
         } else {
-            Err(ComponentAccessError)
+            Err(EntityAccessError::AccessDenied)
         }
     }
 
-    fn entry_ref(&self, entity: Entity) -> Option<EntryRef> {
-        if let Some(entry) = self.world.entry_ref(entity) {
-            if !self.validate_archetype_access(entry.location().archetype()) {
-                panic!("attempted to access an entity which is outside of the subworld");
-            }
-            Some(EntryRef {
-                allowed_components: self.components.clone(),
-                ..entry
-            })
-        } else {
-            None
+    fn entry_ref(&self, entity: Entity) -> Result<EntryRef, EntityAccessError> {
+        let entry = self.world.entry_ref(entity)?;
+
+        if !self.validate_archetype_access(entry.location().archetype()) {
+            return Err(EntityAccessError::AccessDenied);
         }
+
+        Ok(EntryRef {
+            allowed_components: self.components.clone(),
+            ..entry
+        })
     }
 
-    fn entry_mut(&mut self, entity: Entity) -> Option<EntryMut> {
+    fn entry_mut(&mut self, entity: Entity) -> Result<EntryMut, EntityAccessError> {
         // safety: protected by &mut self and subworld access validation
-        if let Some(entry) = unsafe { self.world.entry_unchecked(entity) } {
-            if !self.validate_archetype_access(entry.location().archetype()) {
-                panic!("attempted to access an entity which is outside of the subworld");
-            }
-            Some(EntryMut {
-                allowed_components: self.components.clone(),
-                ..entry
-            })
-        } else {
-            None
+        let entry = unsafe { self.world.entry_unchecked(entity)? };
+
+        if !self.validate_archetype_access(entry.location().archetype()) {
+            return Err(EntityAccessError::AccessDenied);
         }
+
+        Ok(EntryMut {
+            allowed_components: self.components.clone(),
+            ..entry
+        })
     }
 
     fn id(&self) -> WorldId {

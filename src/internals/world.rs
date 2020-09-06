@@ -31,9 +31,16 @@ use std::{
 
 type MapEntry<'a, K, V> = std::collections::hash_map::Entry<'a, K, V>;
 
-/// Error type representing a failure to aquire a storage accessor.
-#[derive(Debug)]
-pub struct ComponentAccessError;
+/// Error type representing a failure to access entity data.
+#[derive(thiserror::Error, Debug, Eq, PartialEq, Hash)]
+pub enum EntityAccessError {
+    /// Attempted to access an entity which lies outside of the subworld.
+    #[error("this world does not have permission to access the entity")]
+    AccessDenied,
+    /// Attempted to access an entity which does not exist.
+    #[error("the entity does not exist")]
+    EntityNotFound,
+}
 
 /// The `EntityStore` trait abstracts access to entity data as required by queries for
 /// both [World](struct.World.html) and [SubWorld](struct.SubWorld.html)
@@ -42,15 +49,15 @@ pub trait EntityStore {
     fn id(&self) -> WorldId;
 
     /// Returns an entity entry which can be used to access entity metadata and components.
-    fn entry_ref(&self, entity: Entity) -> Option<EntryRef>;
+    fn entry_ref(&self, entity: Entity) -> Result<EntryRef, EntityAccessError>;
 
     /// Returns a mutable entity entry which can be used to access entity metadata and components.
-    fn entry_mut(&mut self, entity: Entity) -> Option<EntryMut>;
+    fn entry_mut(&mut self, entity: Entity) -> Result<EntryMut, EntityAccessError>;
 
     /// Returns a component storage accessor for component types declared in the specified [View](../query/view/trait.View.html).
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
-    ) -> Result<StorageAccessor, ComponentAccessError>;
+    ) -> Result<StorageAccessor, EntityAccessError>;
 }
 
 /// Unique identifier for a [world](struct.World.html).
@@ -304,15 +311,21 @@ impl World {
             .map(move |location| Entry::new(location, self))
     }
 
-    pub(crate) unsafe fn entry_unchecked(&self, entity: Entity) -> Option<EntryMut> {
-        self.entities.get(entity).map(|location| {
-            EntryMut::new(
-                location,
-                &self.components,
-                &self.archetypes,
-                ComponentAccess::All,
-            )
-        })
+    pub(crate) unsafe fn entry_unchecked(
+        &self,
+        entity: Entity,
+    ) -> Result<EntryMut, EntityAccessError> {
+        self.entities
+            .get(entity)
+            .map(|location| {
+                EntryMut::new(
+                    location,
+                    &self.components,
+                    &self.archetypes,
+                    ComponentAccess::All,
+                )
+            })
+            .ok_or(EntityAccessError::EntityNotFound)
     }
 
     /// Subscribes to entity [events](../event/enum.Event.html).
@@ -814,25 +827,28 @@ impl World {
 }
 
 impl EntityStore for World {
-    fn entry_ref(&self, entity: Entity) -> Option<EntryRef> {
-        self.entities.get(entity).map(|location| {
-            EntryRef::new(
-                location,
-                &self.components,
-                &self.archetypes,
-                ComponentAccess::All,
-            )
-        })
+    fn entry_ref(&self, entity: Entity) -> Result<EntryRef, EntityAccessError> {
+        self.entities
+            .get(entity)
+            .map(|location| {
+                EntryRef::new(
+                    location,
+                    &self.components,
+                    &self.archetypes,
+                    ComponentAccess::All,
+                )
+            })
+            .ok_or(EntityAccessError::EntityNotFound)
     }
 
-    fn entry_mut(&mut self, entity: Entity) -> Option<EntryMut> {
+    fn entry_mut(&mut self, entity: Entity) -> Result<EntryMut, EntityAccessError> {
         // safety: we have exclusive access to the world
         unsafe { self.entry_unchecked(entity) }
     }
 
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
-    ) -> Result<StorageAccessor, ComponentAccessError> {
+    ) -> Result<StorageAccessor, EntityAccessError> {
         Ok(StorageAccessor::new(
             self.id,
             &self.index,
