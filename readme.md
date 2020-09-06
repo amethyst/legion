@@ -11,8 +11,6 @@
 
 Legion aims to be a feature rich high performance ECS library for Rust game projects with minimal boilerplate.
 
-**note: this readme refers to v0.3, which has not yet been published to crates.io.** The easiest way to read the docs for the moment is to clone the legion repo and run `cargo doc --open`.
-
 ## Getting Started
 
 ### Worlds
