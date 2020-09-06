@@ -17,7 +17,7 @@ use syn::{
 ///
 /// By default, the wrapped function is called once each time the system runs.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::Schedule;
 /// #[system]
@@ -33,7 +33,7 @@ use syn::{
 /// The function can request resources with reference parameters marked with
 /// the `#[resource]` attribute.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::Schedule;
 /// # struct Person { name: String }
@@ -45,7 +45,7 @@ use syn::{
 ///
 /// Systems can also request a world or command buffer.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::{Schedule, systems::CommandBuffer, world::SubWorld};
 /// # struct Person { name: &'static str }
@@ -58,7 +58,7 @@ use syn::{
 /// Systems can declare access to component types with the `#[read_component]` and
 /// `#[write_component]` attributes.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::{Schedule, world::SubWorld, Read, Write, IntoQuery};
 /// # struct Time;
@@ -78,7 +78,7 @@ use syn::{
 /// (e.g. `Option<&Position>`) will be interpreted as `TryRead<T>` and `TryWrite<T>`. You can
 /// request the entity ID via a `&Entity` parameter.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # struct Position { x: f32 }
 /// # struct Velocity { x: f32 }
@@ -92,7 +92,7 @@ use syn::{
 /// `for_each` and `par_for_each` systems can request attitional filters for their query via the
 /// `#[filter]` attribute.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::maybe_changed;
 /// # struct Position { x: f32 }
@@ -108,7 +108,7 @@ use syn::{
 /// Systems can contain their own state. Add a reference marked with the `#[state]` parameter to
 /// your function. This state will be initialized when you construct the system.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::Schedule;
 /// #[system]
@@ -125,7 +125,7 @@ use syn::{
 ///
 /// Systems can contain generic parameters.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::{storage::Component, Schedule};
 /// # use std::fmt::Debug;

@@ -1,5 +1,8 @@
-#[test]
-fn ui() {
-    let t = trybuild::TestCases::new();
-    t.compile_fail("tests/failures/*.rs");
+#[cfg(feature = "codegen")]
+mod tests {
+    #[test]
+    fn ui() {
+        let t = trybuild::TestCases::new();
+        t.compile_fail("tests/failures/*.rs");
+    }
 }
