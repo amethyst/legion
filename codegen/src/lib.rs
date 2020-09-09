@@ -315,12 +315,22 @@ impl Sig {
                                                 parameters.push(Parameter::Component(query.len()));
                                                 let elem = &ty.elem;
                                                 if mutable {
+                                                    #[cfg(not(feature = "reexport"))]
                                                     query.push(
                                                         parse_quote!(::legion::TryWrite<#elem>),
                                                     );
+                                                    #[cfg(feature = "reexport")]
+                                                    query.push(
+                                                        parse_quote!(self::legion::TryWrite<#elem>),
+                                                    );
                                                 } else {
+                                                    #[cfg(not(feature = "reexport"))]
                                                     query.push(
                                                         parse_quote!(::legion::TryRead<#elem>),
+                                                    );
+                                                    #[cfg(feature = "reexport")]
+                                                    query.push(
+                                                        parse_quote!(self::legion::TryRead<#elem>),
                                                     );
                                                 }
                                             }
@@ -368,7 +378,10 @@ impl Sig {
                             || is_type(&ty.elem, &["legion", "world", "Entity"]) =>
                     {
                         parameters.push(Parameter::Component(query.len()));
+                        #[cfg(not(feature = "reexport"))]
                         query.push(parse_quote!(::legion::Entity));
+                        #[cfg(feature = "reexport")]
+                        query.push(parse_quote!(self::legion::Entity));
                     }
                     Type::Reference(ty) => {
                         let mutable = ty.mutability.is_some();
@@ -395,9 +408,15 @@ impl Sig {
                                 parameters.push(Parameter::Component(query.len()));
                                 let elem = &ty.elem;
                                 if mutable {
+                                    #[cfg(not(feature = "reexport"))]
                                     query.push(parse_quote!(::legion::Write<#elem>));
+                                    #[cfg(feature = "reexport")]
+                                    query.push(parse_quote!(self::legion::Write<#elem>));
                                 } else {
+                                    #[cfg(not(feature = "reexport"))]
                                     query.push(parse_quote!(::legion::Read<#elem>));
+                                    #[cfg(feature = "reexport")]
+                                    query.push(parse_quote!(self::legion::Read<#elem>));
                                 }
                             }
                         }
@@ -753,10 +772,25 @@ impl Config {
         };
         let read_resources = &signature.read_resources;
         let write_resources = &signature.write_resources;
+        #[cfg(not(feature = "reexport"))]
         let builder = quote! {
             use legion::IntoQuery;
             #generic_parameter_names
             ::legion::systems::SystemBuilder::new(format!("{}{}", #system_name, generic_names))
+                #(.read_component::<#read_components>())*
+                #(.write_component::<#write_components>())*
+                #(.read_resource::<#read_resources>())*
+                #(.write_resource::<#write_resources>())*
+                #query
+                .build(move |cmd, world, resources, query| {
+                    #body
+                })
+        };
+        #[cfg(feature = "reexport")]
+        let builder = quote! {
+            use legion::IntoQuery;
+            #generic_parameter_names
+            self::legion::systems::SystemBuilder::new(format!("{}{}", #system_name, generic_names))
                 #(.read_component::<#read_components>())*
                 #(.write_component::<#write_components>())*
                 #(.read_resource::<#read_resources>())*
@@ -783,8 +817,18 @@ impl Config {
         let generic_params = signature.generics.params.clone();
         let where_clause = signature.generics.make_where_clause();
 
+        #[cfg(not(feature = "reexport"))]
         let result = quote! {
             #visibility fn #constructor_name<#generic_params>(#(#fn_params),*) -> impl ::legion::systems::Runnable
+            #where_clause
+            {
+                #builder
+            }
+        };
+
+        #[cfg(feature = "reexport")]
+        let result = quote! {
+            #visibility fn #constructor_name<#generic_params>(#(#fn_params),*) -> impl self::legion::systems::Runnable
             #where_clause
             {
                 #builder

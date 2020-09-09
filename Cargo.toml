@@ -22,6 +22,7 @@ crossbeam-events = ["crossbeam-channel"]
 codegen = ["legion_codegen"]
 stdweb = ["uuid/stdweb"]
 wasm-bindgen = ["uuid/wasm-bindgen"]
+reexport = ["legion_codegen", "legion_codegen/reexport"]
 
 [dependencies]
 legion_codegen = { path = "codegen", version = "0.3", optional = true }
