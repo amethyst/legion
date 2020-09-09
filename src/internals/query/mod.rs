@@ -91,6 +91,7 @@ impl<'a> QueryResult<'a> {
     }
 
     pub(crate) fn split_at(self, index: usize) -> (Self, Self) {
+        let index = self.range.start + index;
         (
             Self {
                 range: self.range.start..index,
@@ -1190,5 +1191,24 @@ mod test {
         }
 
         assert_eq!(components[0], &1usize);
+    }
+
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn par_iter() {
+        use std::sync::atomic::*;
+
+        for _ in 0..1000 {
+            let mut w = World::default();
+
+            w.push((1usize,));
+            w.push((2usize, 3.5f32));
+
+            let count = AtomicUsize::new(0);
+            <&usize>::query().par_for_each(&w, |_: &usize| {
+                count.fetch_add(1, Ordering::SeqCst);
+            });
+            assert_eq!(count.load(Ordering::SeqCst), 2);
+        }
     }
 }
