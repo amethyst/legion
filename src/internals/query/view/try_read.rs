@@ -83,7 +83,7 @@ impl<'data, T: Component> View<'data> for TryRead<T> {
         query: QueryResult<'data>,
     ) -> Self::Iter {
         let components = components.get_downcast::<T>();
-        let archetype_indexes = query.index.iter();
+        let archetype_indexes = query.index().iter();
         TryReadIter {
             components,
             archetypes,
@@ -245,7 +245,10 @@ unsafe impl<'a, T: Component> TrustedRandomAccess for Data<'a, T> {
                 let (left, right) = slice.split_at(index);
                 (Self::Occupied(left), Self::Occupied(right))
             }
-            Self::Empty(count) => (Self::Empty(index), Self::Empty(count - index)),
+            Self::Empty(count) => {
+                debug_assert!(index < count);
+                (Self::Empty(index), Self::Empty(count - index))
+            }
         }
     }
 }

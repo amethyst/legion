@@ -74,7 +74,7 @@ impl<'data> View<'data> for Entity {
     ) -> Self::Iter {
         Iter {
             archetypes,
-            indexes: query.index.iter(),
+            indexes: query.index().iter(),
         }
     }
 }

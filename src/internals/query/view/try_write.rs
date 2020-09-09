@@ -82,7 +82,7 @@ impl<'data, T: Component> View<'data> for TryWrite<T> {
         query: QueryResult<'data>,
     ) -> Self::Iter {
         let components = components.get_downcast::<T>();
-        let archetype_indexes = query.index.iter();
+        let archetype_indexes = query.index().iter();
         TryWriteIter {
             components,
             archetypes,

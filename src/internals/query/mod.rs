@@ -1211,4 +1211,22 @@ mod test {
             assert_eq!(count.load(Ordering::SeqCst), 2);
         }
     }
+
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn par_iter_option() {
+        use crate::Entity;
+
+        for _ in 0..1 {
+            let mut w = World::default();
+
+            w.push((2usize, 3.5f32));
+            w.push((1usize,));
+            w.push((3usize,));
+            w.push((4usize, 6.12f32));
+
+            <(Entity, &usize, Option<&f32>)>::query()
+                .par_for_each(&w, |(e, x, y)| println!("{:?} {} {:?}", e, x, y));
+        }
+    }
 }
