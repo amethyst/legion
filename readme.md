@@ -146,5 +146,5 @@ Legion provides a few feature flags:
 Legion runs with parallelism on by default, which is not currently supported by Web Assembly as it runs single-threaded. Therefore, to build for WASM, ensure you set `default-features = false` in Cargo.toml. Additionally, you must enable either the `stdweb` or `wasm-bindgen` features, which will be proxied through to the `uuid` crate. See the [uuid crate](https://github.com/uuid-rs/uuid#dependencies) for more information.
 
 ```toml
-legion = { version = "*", default-features = false, features = ["stdweb"] }
+legion = { version = "*", default-features = false, features = ["wasm-bindgen"] }
 ```
