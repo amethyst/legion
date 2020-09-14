@@ -120,6 +120,8 @@ enum Cache {
 }
 
 /// Provides efficient means to iterate and filter entities in a world.
+///
+/// See the [module-level documentation](./index.html) for more details and examples.
 pub struct Query<V: IntoView, F: EntityFilter = <<V as IntoView>::View as DefaultFilter>::Filter> {
     _view: PhantomData<V>,
     filter: Mutex<F>,
