@@ -1,5 +1,5 @@
 //! Worlds store collections of entities. An entity is a collection of components, identified
-//! by a unique [Entity ID](struct.Entity.html).
+//! by a unique [Entity](struct.Entity.html) ID.
 //!
 //! # Creating a world
 //!
