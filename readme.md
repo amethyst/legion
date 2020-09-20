@@ -9,7 +9,7 @@
 [doc_img]: https://docs.rs/legion/badge.svg
 [doc_lnk]: https://docs.rs/legion
 
-Legion aims to be a feature rich high performance ECS library for Rust game projects with minimal boilerplate.
+Legion aims to be a feature rich high performance [Entity component system](https://en.wikipedia.org/wiki/Entity_component_system) (ECS) library for Rust game projects with minimal boilerplate.
 
 ## Getting Started
 
