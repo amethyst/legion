@@ -406,7 +406,7 @@ impl Builder {
     }
 
     /// Adds a boxed system to the schedule.
-    pub fn add_system_box<T: Into<Box<dyn ParallelRunnable>>>(mut self, system: T) -> Self {
+    pub fn add_system_box<T: Into<Box<dyn ParallelRunnable>>>(&mut self, system: T) -> &mut Self {
         self.accumulator.push(system.into());
         self
     }
