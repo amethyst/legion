@@ -1,6 +1,6 @@
 #![doc(hidden)]
 
-use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnly, ReadOnlyFetch, View};
 use crate::internals::{
     entity::Entity,
     iter::indexed::IndexedIter,
@@ -23,9 +23,13 @@ impl DefaultFilter for Entity {
     type Filter = EntityFilterTuple<Any, Passthrough>;
 }
 
+impl IntoView for Entity {
+    type View = Self;
+}
+
 impl<'data> View<'data> for Entity {
     type Element = <Self::Fetch as IntoIndexableIter>::Item;
-    type Fetch = <Iter<'data> as Iterator>::Item;
+    type Fetch = EntityFetch<'data>;
     type Iter = Iter<'data>;
     type Read = [ComponentTypeId; 0];
     type Write = [ComponentTypeId; 0];
@@ -70,7 +74,7 @@ impl<'data> View<'data> for Entity {
     ) -> Self::Iter {
         Iter {
             archetypes,
-            indexes: query.index.iter(),
+            indexes: query.index().iter(),
         }
     }
 }
@@ -82,12 +86,14 @@ pub struct Iter<'a> {
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = EntityFetch<'a>;
+    type Item = Option<EntityFetch<'a>>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.indexes.next().map(|i| EntityFetch {
-            entities: self.archetypes[*i].entities(),
+        self.indexes.next().map(|i| {
+            Some(EntityFetch {
+                entities: self.archetypes[*i].entities(),
+            })
         })
     }
 }

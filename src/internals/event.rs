@@ -28,25 +28,25 @@ pub trait EventSender: Send + Sync {
 #[cfg(feature = "crossbeam-events")]
 impl EventSender for crossbeam_channel::Sender<Event> {
     fn send(&self, event: Event) -> bool {
-        if let Err(crossbeam_channel::TrySendError::Disconnected(_)) = self.try_send(event) {
-            false
-        } else {
-            true
-        }
+        !matches!(
+            self.try_send(event),
+            Err(crossbeam_channel::TrySendError::Disconnected(_))
+        )
     }
 }
 
 #[derive(Clone)]
 pub(crate) struct Subscriber {
-    filter: Arc<dyn LayoutFilter>,
+    filter: Arc<dyn LayoutFilter + Send + Sync>,
     sender: Arc<dyn EventSender>,
 }
 
 impl Subscriber {
-    pub(crate) fn new<F: LayoutFilter + 'static, S: EventSender + 'static>(
-        filter: F,
-        sender: S,
-    ) -> Self {
+    pub(crate) fn new<F, S>(filter: F, sender: S) -> Self
+    where
+        F: LayoutFilter + Send + Sync + 'static,
+        S: EventSender + 'static,
+    {
         Self {
             filter: Arc::new(filter),
             sender: Arc::new(sender),

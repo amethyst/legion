@@ -19,7 +19,7 @@ Legion aims to be a feature rich high performance ECS library for Rust game proj
 
 ```rust
 use legion::*;
-let world = World::new();
+let world = World::default();
 ```
 
 Entities can be inserted via either `push` (for a single entity) or `extend` (for a collection of entities with the same component types). The world will create a unique ID for each entity upon insertion that you can use to refer to that entity later.
@@ -70,7 +70,7 @@ Entries are not the most convenient or performant way to search or bulk-access a
 
 ```rust
 // you define a query be declaring what components you want to find, and how you will access them
-let mut query = Read::<Position>::query();
+let mut query = <&Position>::query();
 
 // you can then iterate through the components found in the world
 for position in query.iter(&world) {
@@ -82,7 +82,7 @@ You can search for entities which have all of a set of components.
 
 ```rust
 // construct a query from a "view tuple"
-let mut query = <(Read<Velocity>, Write<Position>)>::query();
+let mut query = <(&Velocity, &mut Position)>::query();
 
 // this time we have &Velocity and &mut Position
 for (velocity, position) in query.iter_mut(&mut world) {
@@ -91,11 +91,11 @@ for (velocity, position) in query.iter_mut(&mut world) {
 }
 ```
 
-You can augment a basic query with additional filters. For example, you can choose to exclude entities which also have a certain component, or only include entities for which a certain component has changed since the last time the query ran (this filtering is conservative and course-grained)
+You can augment a basic query with additional filters. For example, you can choose to exclude entities which also have a certain component, or only include entities for which a certain component has changed since the last time the query ran (this filtering is conservative and coarse-grained)
 
 ```rust
 // you can use boolean expressions when adding filters
-let mut query = <(Read<Velocity>, Write<Position>)>::query()
+let mut query = <(&Velocity, &mut Position)>::query()
     .filter(!component::<Ignore>() & maybe_changed::<Position>());
 
 for (velocity, position) in query.iter_mut(&mut world) {
@@ -136,15 +136,15 @@ See the [systems module](https://docs.rs/legion/latest/legion/systems/index.html
 
 Legion provides a few feature flags:  
 
-* `par-iter` - Enables parallel iterators and parallel schedule execution via the rayon library. Enabled by default.
+* `parallel` - Enables parallel iterators and parallel schedule execution via the rayon library. Enabled by default.
 * `extended-tuple-impls` - Extends the maximum size of view and component tuples from 8 to 24, at the cost of increased compile times. Off by default.
 * `serialize` - Enables the serde serialization module and associated functionality. Enabled by default.
 * `crossbeam-events` - Implements the `EventSender` trait for crossbeam `Sender` channels, allowing them to be used for event subscriptions. Enabled by default.
 
 ## WASM
 
-Legion runs with parallelism on by default, which is not currently supported by Web Assembly as it runs single-threaded. Therefore, to build for WASM, ensure you set `default-features = false` in Cargo.toml. Additionally, you must enable either the `stdweb` or `wasm-bindgen` features, which will be proxied through to the `uuid` crate. See the [uuid crate](https://github.com/uuid-rs/uuid#dependencies) for more information.
+Legion runs with parallelism on by default, which is not currently supported by Web Assembly as it runs single-threaded. Therefore, to build for WASM, ensure you set `default-features = false` in Cargo.toml. Additionally, if you want to use the `serialize` feature, you must enable either the `stdweb` or `wasm-bindgen` features, which will be proxied through to the `uuid` crate. See the [uuid crate](https://github.com/uuid-rs/uuid#dependencies) for more information.
 
 ```toml
-legion = { version = "*", default-features = false, features = ["stdweb"] }
+legion = { version = "*", default-features = false, features = ["wasm-bindgen"] }
 ```

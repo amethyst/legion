@@ -1,7 +1,7 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use proc_macro2::Span;
-use quote::{format_ident, quote, quote_spanned, ToTokens};
+use quote::{format_ident, quote, quote_spanned};
 use syn::{
     parse_macro_input, parse_quote, Attribute, Expr, GenericArgument, Generics, Ident, Index,
     ItemFn, Lit, Meta, PathArguments, Signature, Type, Visibility,
@@ -15,9 +15,9 @@ use syn::{
 ///
 /// # Examples
 ///
-/// By default, the system function is called once when the system runs.
+/// By default, the wrapped function is called once each time the system runs.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::Schedule;
 /// #[system]
@@ -33,7 +33,7 @@ use syn::{
 /// The function can request resources with reference parameters marked with
 /// the `#[resource]` attribute.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::Schedule;
 /// # struct Person { name: String }
@@ -45,12 +45,12 @@ use syn::{
 ///
 /// Systems can also request a world or command buffer.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::{Schedule, systems::CommandBuffer, world::SubWorld};
 /// # struct Person { name: &'static str }
 /// #[system]
-/// fn create_entity(world: &mut SubWorld, cmd: &mut CommandBuffer) {
+/// fn create_entity(cmd: &mut CommandBuffer) {
 ///    cmd.push((1usize, false, Person { name: "Jane Doe" }));
 /// }
 /// ```
@@ -58,7 +58,7 @@ use syn::{
 /// Systems can declare access to component types with the `#[read_component]` and
 /// `#[write_component]` attributes.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::{Schedule, world::SubWorld, Read, Write, IntoQuery};
 /// # struct Time;
@@ -66,7 +66,7 @@ use syn::{
 /// #[read_component(usize)]
 /// #[write_component(bool)]
 /// fn run_query(world: &mut SubWorld) {
-///     let mut query = <(Read<usize>, Write<bool>)>::query();
+///     let mut query = <(&usize, &mut bool)>::query();
 ///     for (a, b) in query.iter_mut(world) {
 ///         println!("{} {}", a, b);
 ///     }
@@ -78,7 +78,7 @@ use syn::{
 /// (e.g. `Option<&Position>`) will be interpreted as `TryRead<T>` and `TryWrite<T>`. You can
 /// request the entity ID via a `&Entity` parameter.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # struct Position { x: f32 }
 /// # struct Velocity { x: f32 }
@@ -92,7 +92,7 @@ use syn::{
 /// `for_each` and `par_for_each` systems can request attitional filters for their query via the
 /// `#[filter]` attribute.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::maybe_changed;
 /// # struct Position { x: f32 }
@@ -108,7 +108,7 @@ use syn::{
 /// Systems can contain their own state. Add a reference marked with the `#[state]` parameter to
 /// your function. This state will be initialized when you construct the system.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::Schedule;
 /// #[system]
@@ -125,7 +125,7 @@ use syn::{
 ///
 /// Systems can contain generic parameters.
 ///
-/// ```
+/// ```ignore
 /// # use legion_codegen::system;
 /// # use legion::{storage::Component, Schedule};
 /// # use std::fmt::Debug;
@@ -143,22 +143,22 @@ use syn::{
 /// ```
 #[proc_macro_attribute]
 pub fn system(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(item as ItemFn);
     let attr = if attr.is_empty() {
-        SystemAttr::default()
+        Ok(SystemAttr::default())
     } else {
         let meta = parse_macro_input!(attr as Meta);
-        match SystemAttr::parse_meta(&meta) {
-            Ok(attr) => attr,
-            Err(error) => return error.emit(),
-        }
+        SystemAttr::parse_meta(&meta)
     };
 
-    let mut input = parse_macro_input!(item as ItemFn);
-    let mut config = match Config::parse(attr, &mut input) {
-        Ok(config) => config,
-        Err(error) => return error.emit(),
+    let result = attr
+        .and_then(|attr| Config::parse(attr, &mut input))
+        .and_then(|mut config| config.generate());
+
+    let system_constructor = match result {
+        Ok(ctor) => ctor,
+        Err(error) => error.emit(),
     };
-    let system_constructor = config.generate();
 
     let output = quote! {
         #system_constructor
@@ -181,17 +181,24 @@ enum Error {
     InvalidKey(Span),
     #[error("system functions must not recieve self")]
     SelfNotAllowed,
-    #[error("option arguments must contain a component reference")]
-    InvalidOptionArgument(Span),
+    #[error("option arguments must contain a component reference, consider `Option<&{1}>`")]
+    InvalidOptionArgument(Span, String),
     #[error(
         "system function parameters must be `CommandBuffer` or `SubWorld` references, \
-[optioned] component references, state references, or resource references"
+    [optioned] component references, state references, or resource references"
     )]
     InvalidArgument(Span),
     #[error("expected component type")]
     ExpectedComponentType(Span),
     #[error("expected filter expression")]
     ExpectedFilterExpression(Span),
+    #[error(
+        "system does not request any component access (sub-world will have no permissions), \
+    consider using #[read_compnent(T)] or #[write_component(T)]"
+    )]
+    SubworldWithoutPermissions,
+    #[error("{0}")]
+    Message(String),
 }
 
 impl Error {
@@ -199,16 +206,15 @@ impl Error {
         match self {
             Error::UnexpectedSystemType(span) => *span,
             Error::InvalidKey(span) => *span,
-            Error::InvalidOptionArgument(span) => *span,
+            Error::InvalidOptionArgument(span, _) => *span,
             Error::InvalidArgument(span) => *span,
             _ => Span::call_site(),
         }
     }
 
-    fn emit(&self) -> TokenStream {
+    fn emit(&self) -> proc_macro2::TokenStream {
         let message = format!("{}", self);
-        let tokens = quote_spanned!(self.span() => compile_error!(#message));
-        TokenStream::from(tokens)
+        quote_spanned!(self.span() => compile_error!(#message);)
     }
 }
 
@@ -321,6 +327,7 @@ impl Sig {
                                             _ => {
                                                 return Err(Error::InvalidOptionArgument(
                                                     ident.span(),
+                                                    quote!(#ty).to_string(),
                                                 ))
                                             }
                                         },
@@ -333,21 +340,33 @@ impl Sig {
                             return Err(Error::InvalidArgument(ident.span()));
                         }
                     }
-                    Type::Reference(ty) if is_type(&ty.elem, &["legion", "CommandBuffer"]) => {
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["CommandBuffer"])
+                            || is_type(&ty.elem, &["legion", "CommandBuffer"])
+                            || is_type(&ty.elem, &["legion", "systems", "CommandBuffer"]) =>
+                    {
                         if ty.mutability.is_some() {
                             parameters.push(Parameter::CommandBufferMut);
                         } else {
                             parameters.push(Parameter::CommandBuffer);
                         }
                     }
-                    Type::Reference(ty) if is_type(&ty.elem, &["legion", "SubWorld"]) => {
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["SubWorld"])
+                            || is_type(&ty.elem, &["legion", "SubWorld"])
+                            || is_type(&ty.elem, &["legion", "world", "SubWorld"]) =>
+                    {
                         if ty.mutability.is_some() {
                             parameters.push(Parameter::SubWorldMut);
                         } else {
                             parameters.push(Parameter::SubWorld);
                         }
                     }
-                    Type::Reference(ty) if is_type(&ty.elem, &["legion", "Entity"]) => {
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["Entity"])
+                            || is_type(&ty.elem, &["legion", "Entity"])
+                            || is_type(&ty.elem, &["legion", "world", "Entity"]) =>
+                    {
                         parameters.push(Parameter::Component(query.len()));
                         query.push(parse_quote!(::legion::Entity));
                     }
@@ -424,12 +443,10 @@ enum ArgAttr {
 
 fn is_type(ty: &Type, segments: &[&str]) -> bool {
     if let Type::Path(path) = ty {
-        path.path
-            .segments
+        segments
             .iter()
-            .rev()
-            .zip(segments.iter().rev())
-            .all(|(a, b)| a.ident == b)
+            .zip(path.path.segments.iter())
+            .all(|(a, b)| b.ident == *a)
     } else {
         false
     }
@@ -524,7 +541,85 @@ impl Config {
         })
     }
 
-    fn generate(&mut self) -> impl ToTokens {
+    fn validate(&self) -> Result<(), Error> {
+        let system_type = self.attr.system_type.unwrap_or(SystemType::Simple);
+
+        // validation
+        if !self.signature.query.is_empty() && system_type == SystemType::Simple {
+            return Err(Error::Message("simple systems cannot contain component references, consider using `#[system(for_each)]`".to_string()));
+        }
+
+        if self.signature.query.is_empty() && system_type != SystemType::Simple {
+            return Err(Error::Message(
+                "for_each and par_for_each systems require at least one component parameter"
+                    .to_string(),
+            ));
+        }
+
+        if self.signature.generics.lifetimes().next().is_some() {
+            return Err(Error::Message(
+                "system functions must not contain lifetime generic parameters".to_string(),
+            ));
+        }
+
+        if system_type == SystemType::Simple {
+            let has_subworld = self
+                .signature
+                .parameters
+                .iter()
+                .any(|p| matches!(p, Parameter::SubWorld));
+            let has_subworld_mut = self
+                .signature
+                .parameters
+                .iter()
+                .any(|p| matches!(p, Parameter::SubWorldMut));
+            let has_components =
+                !self.read_components.is_empty() || !self.write_components.is_empty();
+            if (has_subworld || has_subworld_mut) && !has_components {
+                return Err(Error::SubworldWithoutPermissions);
+            }
+        }
+
+        if system_type == SystemType::ParForEach {
+            if self
+                .signature
+                .parameters
+                .iter()
+                .any(|param| matches!(param, Parameter::SubWorldMut))
+            {
+                return Err(Error::Message(
+                    "par_for_each systems cannot accept mutable world references".to_string(),
+                ));
+            }
+            if self
+                .signature
+                .parameters
+                .iter()
+                .any(|param| matches!(param, Parameter::ResourceMut(_)))
+            {
+                return Err(Error::Message(
+                    "par_for_each systems cannot accept mutable resource references".to_string(),
+                ));
+            }
+            if self
+                .signature
+                .parameters
+                .iter()
+                .any(|param| matches!(param, Parameter::CommandBufferMut))
+            {
+                return Err(Error::Message(
+                    "par_for_each systems cannot accept mutable command buffer references"
+                        .to_string(),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn generate(&mut self) -> Result<proc_macro2::TokenStream, Error> {
+        self.validate()?;
+
         let Self {
             attr,
             visibility,
@@ -535,43 +630,6 @@ impl Config {
         } = self;
 
         let system_type = attr.system_type.unwrap_or(SystemType::Simple);
-
-        // validation
-        if !signature.query.is_empty() && system_type == SystemType::Simple {
-            panic!("simple systems cannot contain component references, consider using `#[system(for_each)]`");
-        }
-
-        if signature.query.is_empty() && system_type != SystemType::Simple {
-            panic!("for_each and par_for_each systems require at least one component parameter");
-        }
-
-        if signature.generics.lifetimes().next().is_some() {
-            panic!("system functions must not contain lifetime generic parameters");
-        }
-
-        if system_type == SystemType::ParForEach {
-            if signature
-                .parameters
-                .iter()
-                .any(|param| matches!(param, Parameter::SubWorldMut))
-            {
-                panic!("par_for_each systems cannot accept mutable world references");
-            }
-            if signature
-                .parameters
-                .iter()
-                .any(|param| matches!(param, Parameter::ResourceMut(_)))
-            {
-                panic!("par_for_each systems cannot accept mutable resource references");
-            }
-            if signature
-                .parameters
-                .iter()
-                .any(|param| matches!(param, Parameter::CommandBufferMut))
-            {
-                panic!("par_for_each systems cannot accept mutable command buffer references");
-            }
-        }
 
         // declare query
         let query = if system_type.requires_query() {
@@ -725,12 +783,14 @@ impl Config {
         let generic_params = signature.generics.params.clone();
         let where_clause = signature.generics.make_where_clause();
 
-        quote! {
+        let result = quote! {
             #visibility fn #constructor_name<#generic_params>(#(#fn_params),*) -> impl ::legion::systems::Runnable
             #where_clause
             {
                 #builder
             }
-        }
+        };
+
+        Ok(result)
     }
 }

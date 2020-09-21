@@ -29,14 +29,6 @@ impl ComponentTypeId {
     pub fn type_id(&self) -> TypeId {
         self.type_id
     }
-
-    pub(crate) fn of_id(type_id: TypeId) -> Self {
-        Self {
-            type_id,
-            #[cfg(debug_assertions)]
-            name: "<unknown>",
-        }
-    }
 }
 
 impl std::hash::Hash for ComponentTypeId {

@@ -71,7 +71,7 @@
 //! // (A, B, C) are significant queries.
 //! let group = <(A, B, C)>::to_group();
 //! let options = WorldOptions { groups: vec![group] };
-//! let world = World::with_options(options);
+//! let world = World::new(options);
 //! ```
 
 pub use crate::internals::{

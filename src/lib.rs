@@ -11,7 +11,7 @@
 //!
 //! ```
 //! use legion::*;
-//! let world = World::new();
+//! let world = World::default();
 //! ```
 //!
 //! Entities can be inserted via either `push` (for a single entity) or `extend` (for a collection of entities with
@@ -20,7 +20,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! // a component is any type that is 'static, sized, send and sync
 //! #[derive(Clone, Copy, Debug, PartialEq)]
 //! struct Position {
@@ -50,7 +50,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! # let entity = world.push((false,));
 //! // entries return `None` if the entity does not exist
 //! if let Some(mut entry) = world.entry(entity) {
@@ -74,7 +74,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let world = World::new();
+//! # let world = World::default();
 //! # #[derive(Debug)]
 //! # struct Position;
 //! // you define a query be declaring what components you want to find, and how you will access them
@@ -90,11 +90,11 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! # struct Position { x: f32, y: f32 }
 //! # struct Velocity { x: f32, y: f32 }
 //! // construct a query from a "view tuple"
-//! let mut query = <(Read<Velocity>, Write<Position>)>::query();
+//! let mut query = <(&Velocity, &mut Position)>::query();
 //!
 //! // this time we have &Velocity and &mut Position
 //! for (velocity, position) in query.iter_mut(&mut world) {
@@ -109,12 +109,12 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! # struct Position { x: f32, y: f32 }
 //! # struct Velocity { dx: f32, dy: f32 }
 //! # struct Ignore;
 //! // you can use boolean expressions when adding filters
-//! let mut query = <(Read<Velocity>, Write<Position>)>::query()
+//! let mut query = <(&Velocity, &mut Position)>::query()
 //!     .filter(!component::<Ignore>() & maybe_changed::<Position>());
 //!
 //! for (velocity, position) in query.iter_mut(&mut world) {
@@ -123,7 +123,7 @@
 //! }
 //! ```
 //!
-//! There is much more than can be done with queries. See the [query module](query/index.html) for
+//! There is much more than can be done with queries. See [query](query/struct.Query.html) for
 //! more information.
 //!
 //! ## Systems
@@ -176,7 +176,7 @@
 //! # Feature Flags
 //!
 //! Legion provides a few feature flags:  
-//! * `par-iter` - Enables parallel iterators and parallel schedule execution via the rayon library. Enabled by default.
+//! * `parallel` - Enables parallel iterators and parallel schedule execution via the rayon library. Enabled by default.
 //! * `extended-tuple-impls` - Extends the maximum size of view and component tuples from 8 to 24, at the cost of increased compile times. Off by default.
 //! * `serialize` - Enables the serde serialization module and associated functionality. Enabled by default.
 //! * `crossbeam-events` - Implements the `EventSender` trait for crossbeam `Sender` channels, allowing them to be used for event subscriptions. Enabled by default.
@@ -202,7 +202,7 @@ pub use crate::{
     },
     storage::{GroupSource, IntoSoa},
     systems::{Resources, Schedule, SystemBuilder},
-    world::{Entity, EntityStore, Universe, World, WorldOptions},
+    world::{Entity, EntityStore, World, WorldOptions},
 };
 
 #[cfg(feature = "codegen")]

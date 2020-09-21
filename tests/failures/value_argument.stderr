@@ -1,0 +1,5 @@
+error: system function parameters must be `CommandBuffer` or `SubWorld` references, [optioned] component references, state references, or resource references
+ --> $DIR/value_argument.rs:4:23
+  |
+4 | fn value_arguement(_: usize) {}
+  |                       ^^^^^

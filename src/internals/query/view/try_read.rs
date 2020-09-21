@@ -1,6 +1,6 @@
 #![doc(hidden)]
 
-use super::{DefaultFilter, Fetch, IntoIndexableIter, ReadOnly, ReadOnlyFetch, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnly, ReadOnlyFetch, View};
 use crate::internals::{
     iter::indexed::{IndexedIter, TrustedRandomAccess},
     permissions::Permissions,
@@ -31,9 +31,13 @@ impl<T: Component> DefaultFilter for TryRead<T> {
     type Filter = EntityFilterTuple<TryComponentFilter<T>, Passthrough>;
 }
 
+impl<T: Component> IntoView for TryRead<T> {
+    type View = Self;
+}
+
 impl<'data, T: Component> View<'data> for TryRead<T> {
     type Element = <Self::Fetch as IntoIndexableIter>::Item;
-    type Fetch = <TryReadIter<'data, T> as Iterator>::Item;
+    type Fetch = Slice<'data, T>;
     type Iter = TryReadIter<'data, T>;
     type Read = [ComponentTypeId; 1];
     type Write = [ComponentTypeId; 0];
@@ -79,7 +83,7 @@ impl<'data, T: Component> View<'data> for TryRead<T> {
         query: QueryResult<'data>,
     ) -> Self::Iter {
         let components = components.get_downcast::<T>();
-        let archetype_indexes = query.index.iter();
+        let archetype_indexes = query.index().iter();
         TryReadIter {
             components,
             archetypes,
@@ -96,16 +100,19 @@ pub struct TryReadIter<'a, T: Component> {
 }
 
 impl<'a, T: Component> Iterator for TryReadIter<'a, T> {
-    type Item = Slice<'a, T>;
+    type Item = Option<Slice<'a, T>>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.archetype_indexes.next().map(|i| {
-            self.components
+            let slice = self
+                .components
                 .and_then(|components| components.get(*i))
                 .map_or_else(
                     || Slice::Empty(self.archetypes[*i].entities().len()),
                     |c| c.into(),
-                )
+                );
+            Some(slice)
         })
     }
 }
@@ -238,7 +245,10 @@ unsafe impl<'a, T: Component> TrustedRandomAccess for Data<'a, T> {
                 let (left, right) = slice.split_at(index);
                 (Self::Occupied(left), Self::Occupied(right))
             }
-            Self::Empty(count) => (Self::Empty(index), Self::Empty(count - index)),
+            Self::Empty(count) => {
+                debug_assert!(index < count);
+                (Self::Empty(index), Self::Empty(count - index))
+            }
         }
     }
 }

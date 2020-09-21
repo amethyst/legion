@@ -48,8 +48,7 @@ fn data(n: usize) -> Vec<Variants> {
 }
 
 fn setup(data: &[Variants]) -> World {
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     for (i, group) in &data.iter().group_by(|x| index(**x)) {
         match i {

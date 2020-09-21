@@ -1,6 +1,6 @@
 #![doc(hidden)]
 
-use super::{DefaultFilter, Fetch, IntoIndexableIter, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, View};
 use crate::internals::{
     iter::indexed::{IndexedIter, TrustedRandomAccess},
     permissions::Permissions,
@@ -30,9 +30,13 @@ impl<T: Component> DefaultFilter for TryWrite<T> {
     type Filter = EntityFilterTuple<TryComponentFilter<T>, Passthrough>;
 }
 
+impl<T: Component> IntoView for TryWrite<T> {
+    type View = Self;
+}
+
 impl<'data, T: Component> View<'data> for TryWrite<T> {
     type Element = <Self::Fetch as IntoIndexableIter>::Item;
-    type Fetch = <TryWriteIter<'data, T> as Iterator>::Item;
+    type Fetch = Slice<'data, T>;
     type Iter = TryWriteIter<'data, T>;
     type Read = [ComponentTypeId; 1];
     type Write = [ComponentTypeId; 1];
@@ -78,7 +82,7 @@ impl<'data, T: Component> View<'data> for TryWrite<T> {
         query: QueryResult<'data>,
     ) -> Self::Iter {
         let components = components.get_downcast::<T>();
-        let archetype_indexes = query.index.iter();
+        let archetype_indexes = query.index().iter();
         TryWriteIter {
             components,
             archetypes,
@@ -95,17 +99,19 @@ pub struct TryWriteIter<'a, T: Component> {
 }
 
 impl<'a, T: Component> Iterator for TryWriteIter<'a, T> {
-    type Item = Slice<'a, T>;
+    type Item = Option<Slice<'a, T>>;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.archetype_indexes.next().map(|i| unsafe {
-            self.components
+            let slice = self
+                .components
                 .and_then(|components| components.get_mut(*i))
                 .map_or_else(
                     || Slice::Empty(self.archetypes[*i].entities().len()),
                     |c| c.into(),
-                )
+                );
+            Some(slice)
         })
     }
 }

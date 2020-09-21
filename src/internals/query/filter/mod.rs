@@ -104,7 +104,7 @@ impl std::ops::BitAnd<FilterResult> for FilterResult {
 /// A filter which selects based upon which component types are attached to an entity.
 ///
 /// These filters should be idempotent and immutable.
-pub trait LayoutFilter: Send + Sync {
+pub trait LayoutFilter {
     /// Calculates the filter's result for the given entity layout.
     fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult;
 }
@@ -135,7 +135,7 @@ pub trait GroupMatcher {
 /// [DynamicFilter](trait.DynamicFilter.html).
 pub trait EntityFilter: Default + Send + Sync {
     /// The layout filter type.
-    type Layout: LayoutFilter + GroupMatcher + Default;
+    type Layout: LayoutFilter + GroupMatcher + Default + Send + Sync;
     /// The dynamic filter type.
     type Dynamic: DynamicFilter;
 
@@ -180,8 +180,10 @@ pub struct EntityFilterTuple<L: LayoutFilter, F: DynamicFilter> {
     pub dynamic_filter: F,
 }
 
-impl<L: LayoutFilter + GroupMatcher + Default, F: DynamicFilter> EntityFilter
-    for EntityFilterTuple<L, F>
+impl<L, F> EntityFilter for EntityFilterTuple<L, F>
+where
+    L: LayoutFilter + GroupMatcher + Default + Send + Sync,
+    F: DynamicFilter,
 {
     type Layout = L;
     type Dynamic = F;

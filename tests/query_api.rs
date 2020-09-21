@@ -3,7 +3,8 @@
 use legion::*;
 use std::collections::HashMap;
 
-#[cfg(feature = "par-iter")]
+use query::Query;
+#[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -23,10 +24,7 @@ struct Static;
 
 #[test]
 fn query_read_entity_data() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -54,10 +52,7 @@ fn query_read_entity_data() {
 
 #[test]
 fn query_try_read_entity_data() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
     world.push((Pos(1., 2., 3.),));
     world.push((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)));
 
@@ -75,10 +70,7 @@ fn query_try_read_entity_data() {
 
 #[test]
 fn query_try_write_entity_data() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
     world.push((Pos(1., 2., 3.),));
     let entity = world.push((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)));
 
@@ -94,10 +86,7 @@ fn query_try_write_entity_data() {
 
 #[test]
 fn query_cached_read_entity_data() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -112,7 +101,7 @@ fn query_cached_read_entity_data() {
         }
     }
 
-    let mut query = <(Entity, Read<Pos>)>::query();
+    let mut query = Query::<(Entity, &Pos)>::default();
 
     let mut count = 0;
     for (entity, pos) in query.iter_mut(&mut world) {
@@ -124,12 +113,9 @@ fn query_cached_read_entity_data() {
 }
 
 #[test]
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 fn query_read_entity_data_par() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -157,12 +143,9 @@ fn query_read_entity_data_par() {
 }
 
 #[test]
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 fn query_read_entity_data_par_foreach() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -188,10 +171,7 @@ fn query_read_entity_data_par_foreach() {
 
 #[test]
 fn query_read_entity_data_tuple() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -220,10 +200,7 @@ fn query_read_entity_data_tuple() {
 
 #[test]
 fn query_write_entity_data() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -253,10 +230,7 @@ fn query_write_entity_data() {
 
 #[test]
 fn query_write_entity_data_tuple() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -288,10 +262,7 @@ fn query_write_entity_data_tuple() {
 
 #[test]
 fn query_mixed_entity_data_tuple() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -322,10 +293,7 @@ fn query_mixed_entity_data_tuple() {
 
 #[test]
 fn query_partial_match() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -356,10 +324,7 @@ fn query_partial_match() {
 
 #[test]
 fn query_on_changed_first() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -388,10 +353,7 @@ fn query_on_changed_first() {
 
 #[test]
 fn query_on_changed_no_changes() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -427,10 +389,7 @@ fn query_on_changed_no_changes() {
 
 #[test]
 fn query_on_changed_self_changes() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -467,8 +426,6 @@ fn query_on_changed_self_changes() {
 
 #[test]
 fn query_try_with_changed_filter() {
-    let _ = tracing_subscriber::fmt::try_init();
-
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct Sum(f32);
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -476,8 +433,7 @@ fn query_try_with_changed_filter() {
     #[derive(Clone, Copy, Debug, PartialEq)]
     struct B(f32);
 
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let sum_entity = world.push((Sum(0.),));
     let a_entity = world.push((Sum(0.), A(1.)));

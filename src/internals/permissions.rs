@@ -164,7 +164,7 @@ impl<T: PartialEq> Permissions<T> {
 
     /// Subtracts all of the permissions contained in the given set from this permission set.
     pub fn subtract(&mut self, other: &Self) {
-        for read in other.read_only() {
+        for read in other.reads_only() {
             self.remove_read(read);
         }
 
@@ -172,7 +172,7 @@ impl<T: PartialEq> Permissions<T> {
             self.remove(shared);
         }
 
-        for write in other.write_only() {
+        for write in other.writes_only() {
             self.remove_write(write);
         }
     }
@@ -188,12 +188,12 @@ impl<T: PartialEq> Permissions<T> {
     }
 
     /// Gets a slice of resources which are afforded read access but not write access.
-    pub fn read_only(&self) -> &[T] {
+    pub fn reads_only(&self) -> &[T] {
         &self.items[..self.shared]
     }
 
     /// Gets a slice of resources which are afforded write access but not read access.
-    pub fn write_only(&self) -> &[T] {
+    pub fn writes_only(&self) -> &[T] {
         &self.items[self.write..]
     }
 
@@ -204,7 +204,7 @@ impl<T: PartialEq> Permissions<T> {
 
     /// Returns `true` if all of the permissions in the given set are contained in this set.
     pub fn is_superset(&self, other: &Self) -> bool {
-        for read in other.read_only() {
+        for read in other.reads_only() {
             // exit if reads are in exclusive write range, or are not found
             if self.find(read).map(|i| i >= self.write).unwrap_or(true) {
                 return false;
@@ -222,7 +222,7 @@ impl<T: PartialEq> Permissions<T> {
             }
         }
 
-        for write in other.write_only() {
+        for write in other.writes_only() {
             // exit if writes are in exclusive read range, or are not found
             if self.find(write).map(|i| i < self.shared).unwrap_or(true) {
                 return false;
@@ -234,7 +234,7 @@ impl<T: PartialEq> Permissions<T> {
 
     /// Returns `true` if none of the permissions in the given set are contained in this set.
     pub fn is_disjoint(&self, other: &Self) -> bool {
-        for read in other.read_only() {
+        for read in other.reads_only() {
             // exit if reads are in read-only or shared range
             if self.find(read).map(|i| i < self.write).unwrap_or(false) {
                 return false;
@@ -248,7 +248,7 @@ impl<T: PartialEq> Permissions<T> {
             }
         }
 
-        for write in other.write_only() {
+        for write in other.writes_only() {
             // exit if writes are in write-only or shared range
             if self.find(write).map(|i| i >= self.shared).unwrap_or(false) {
                 return false;
@@ -315,9 +315,9 @@ mod tests {
         permissions.push_read(1usize);
 
         let empty: &[usize] = &[];
-        assert_eq!(permissions.read_only(), &[1usize]);
+        assert_eq!(permissions.reads_only(), &[1usize]);
         assert_eq!(permissions.readwrite(), empty);
-        assert_eq!(permissions.write_only(), empty);
+        assert_eq!(permissions.writes_only(), empty);
     }
 
     #[test]
@@ -326,9 +326,9 @@ mod tests {
         permissions.push_write(1usize);
 
         let empty: &[usize] = &[];
-        assert_eq!(permissions.read_only(), empty);
+        assert_eq!(permissions.reads_only(), empty);
         assert_eq!(permissions.readwrite(), empty);
-        assert_eq!(permissions.write_only(), &[1usize]);
+        assert_eq!(permissions.writes_only(), &[1usize]);
     }
 
     #[test]
@@ -337,9 +337,9 @@ mod tests {
         permissions.push(1usize);
 
         let empty: &[usize] = &[];
-        assert_eq!(permissions.read_only(), empty);
+        assert_eq!(permissions.reads_only(), empty);
         assert_eq!(permissions.readwrite(), &[1usize]);
-        assert_eq!(permissions.write_only(), empty);
+        assert_eq!(permissions.writes_only(), empty);
     }
 
     #[test]
@@ -349,9 +349,9 @@ mod tests {
         permissions.push_write(1usize);
 
         let empty: &[usize] = &[];
-        assert_eq!(permissions.read_only(), empty);
+        assert_eq!(permissions.reads_only(), empty);
         assert_eq!(permissions.readwrite(), &[1usize]);
-        assert_eq!(permissions.write_only(), empty);
+        assert_eq!(permissions.writes_only(), empty);
     }
 
     #[test]
@@ -361,9 +361,9 @@ mod tests {
         permissions.push_read(1usize);
 
         let empty: &[usize] = &[];
-        assert_eq!(permissions.read_only(), empty);
+        assert_eq!(permissions.reads_only(), empty);
         assert_eq!(permissions.readwrite(), &[1usize]);
-        assert_eq!(permissions.write_only(), empty);
+        assert_eq!(permissions.writes_only(), empty);
     }
 
     #[test]
@@ -373,9 +373,9 @@ mod tests {
         permissions.remove_write(&1usize);
 
         let empty: &[usize] = &[];
-        assert_eq!(permissions.read_only(), empty);
+        assert_eq!(permissions.reads_only(), empty);
         assert_eq!(permissions.readwrite(), empty);
-        assert_eq!(permissions.write_only(), empty);
+        assert_eq!(permissions.writes_only(), empty);
     }
 
     #[test]
@@ -385,9 +385,9 @@ mod tests {
         permissions.remove_read(&1usize);
 
         let empty: &[usize] = &[];
-        assert_eq!(permissions.read_only(), empty);
+        assert_eq!(permissions.reads_only(), empty);
         assert_eq!(permissions.readwrite(), empty);
-        assert_eq!(permissions.write_only(), empty);
+        assert_eq!(permissions.writes_only(), empty);
     }
 
     #[test]
@@ -397,9 +397,9 @@ mod tests {
         permissions.remove_write(&1usize);
 
         let empty: &[usize] = &[];
-        assert_eq!(permissions.read_only(), &[1usize]);
+        assert_eq!(permissions.reads_only(), &[1usize]);
         assert_eq!(permissions.readwrite(), empty);
-        assert_eq!(permissions.write_only(), empty);
+        assert_eq!(permissions.writes_only(), empty);
     }
 
     #[test]
@@ -409,8 +409,8 @@ mod tests {
         permissions.remove_read(&1usize);
 
         let empty: &[usize] = &[];
-        assert_eq!(permissions.read_only(), empty);
+        assert_eq!(permissions.reads_only(), empty);
         assert_eq!(permissions.readwrite(), empty);
-        assert_eq!(permissions.write_only(), &[1usize]);
+        assert_eq!(permissions.writes_only(), &[1usize]);
     }
 }

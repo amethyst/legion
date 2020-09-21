@@ -18,10 +18,7 @@ struct Static;
 
 #[test]
 fn insert() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![(4f32, 5u64, 6u16), (4f32, 5u64, 6u16)];
     let entities = world.extend(components);
@@ -31,10 +28,7 @@ fn insert() {
 
 #[test]
 fn get_component() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -60,10 +54,7 @@ fn get_component() {
 
 #[test]
 fn get_component_wrong_type() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let entity = *world.extend(vec![(0f64,)]).get(0).unwrap();
 
@@ -76,10 +67,7 @@ fn get_component_wrong_type() {
 
 #[test]
 fn remove() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -103,10 +91,7 @@ fn remove() {
 
 #[test]
 fn delete_all() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -141,10 +126,7 @@ fn delete_all() {
 
 #[test]
 fn delete_last() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -175,10 +157,7 @@ fn delete_last() {
 
 #[test]
 fn delete_first() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -210,11 +189,8 @@ fn delete_first() {
 
 #[test]
 fn merge() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world_1 = universe.create_world();
-    let mut world_2 = universe.create_world();
+    let mut world_1 = World::default();
+    let mut world_2 = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -231,7 +207,7 @@ fn merge() {
         world_2_entities.push(*e);
     }
 
-    world_1.move_from(&mut world_2, &any()).unwrap();
+    world_1.move_from(&mut world_2, &any());
 
     for (i, e) in world_2_entities.iter().enumerate() {
         assert!(world_1.contains(*e));
@@ -250,10 +226,7 @@ fn merge() {
 
 #[test]
 fn mutate_add_component() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -280,10 +253,7 @@ fn mutate_add_component() {
 
 #[test]
 fn mutate_remove_component() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -308,10 +278,7 @@ fn mutate_remove_component() {
 #[test]
 #[cfg(feature = "crossbeam-events")]
 fn delete_entities_on_drop() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let (tx, rx) = crossbeam_channel::unbounded::<legion::world::Event>();
 
@@ -343,10 +310,6 @@ fn delete_entities_on_drop() {
 // https://github.com/TomGillen/legion/issues/92
 #[test]
 fn lots_of_deletes() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-
     for _ in 0..10000 {
         let components = vec![
             (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),
@@ -354,17 +317,14 @@ fn lots_of_deletes() {
             (Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)),
         ];
 
-        let mut world = universe.create_world();
+        let mut world = World::default();
         world.extend(components).to_vec();
     }
 }
 
 #[test]
 fn iter_entities() {
-    let _ = tracing_subscriber::fmt::try_init();
-
-    let universe = Universe::new();
-    let mut world = universe.create_world();
+    let mut world = World::default();
 
     let components = vec![
         (Pos(1., 2., 3.), Rot(0.1, 0.2, 0.3)),

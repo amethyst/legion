@@ -26,6 +26,26 @@ pub mod try_read;
 pub mod try_write;
 pub mod write;
 
+pub trait IntoView {
+    type View: for<'a> View<'a> + 'static;
+}
+
+impl<'a, T: Component> IntoView for &'a T {
+    type View = read::Read<T>;
+}
+
+impl<'a, T: Component> IntoView for &'a mut T {
+    type View = write::Write<T>;
+}
+
+impl<'a, T: Component> IntoView for Option<&'a T> {
+    type View = try_read::TryRead<T>;
+}
+
+impl<'a, T: Component> IntoView for Option<&'a mut T> {
+    type View = try_write::TryWrite<T>;
+}
+
 // View and Fetch types are separate traits so that View implementations can be
 // zero sized types and therefore not need the user to provide a lifetime when they
 // declare queries.
@@ -43,7 +63,7 @@ pub trait View<'data>: DefaultFilter + Sized {
     /// The fetch type yielded for each archetype.
     type Fetch: Fetch + IntoIndexableIter<Item = Self::Element> + 'data;
     /// The iterator type which pulls entity data out of a world.
-    type Iter: Iterator<Item = Self::Fetch> + 'data;
+    type Iter: Iterator<Item = Option<Self::Fetch>> + 'data;
     /// Contains the type IDs read by the view.
     type Read: AsRef<[ComponentTypeId]>;
     /// Contains the type IDs written by the view.
@@ -139,14 +159,14 @@ pub struct MultiFetch<'a, T> {
     _phantom: PhantomData<&'a T>,
 }
 
-impl<'a, T> From<T> for MultiFetch<'a, T> {
-    fn from(value: T) -> Self {
-        Self {
-            fetches: value,
-            _phantom: PhantomData,
-        }
-    }
-}
+// impl<'a, T> From<T> for MultiFetch<'a, T> {
+//     fn from(value: T) -> Self {
+//         Self {
+//             fetches: value,
+//             _phantom: PhantomData,
+//         }
+//     }
+// }
 
 macro_rules! view_tuple {
     ($head_ty:ident) => {
@@ -169,10 +189,14 @@ macro_rules! impl_view_tuple {
             >;
         }
 
+        impl<$( $ty: IntoView ),*> IntoView for ($( $ty, )*) {
+            type View = ($( $ty::View, )*);
+        }
+
         impl<'a, $( $ty: View<'a> + 'a ),*> View<'a> for ($( $ty, )*) {
             type Element = <Self::Fetch as IntoIndexableIter>::Item;
-            type Fetch = <Self::Iter as Iterator>::Item;
-            type Iter = MapInto<Zip<($( $ty::Iter, )*)>, MultiFetch<'a, ($( $ty::Fetch, )*)>>;
+            type Fetch = MultiFetch<'a, ($( $ty::Fetch, )*)>;
+            type Iter = MapInto<Zip<($( $ty::Iter, )*)>, Option<MultiFetch<'a, ($( $ty::Fetch, )*)>>>;
             type Read = Vec<ComponentTypeId>;
             type Write = Vec<ComponentTypeId>;
 
@@ -223,8 +247,8 @@ macro_rules! impl_view_tuple {
                 fn writes_types() -> Self::Write {
                     #![allow(non_snake_case)]
                     let types = std::iter::empty();
-                    $( let [<$ty _reads>] = $ty::reads_types(); )*
-                    $( let types = types.chain([<$ty _reads>].as_ref().iter()); )*
+                    $( let [<$ty _writes>] = $ty::writes_types(); )*
+                    $( let types = types.chain([<$ty _writes>].as_ref().iter()); )*
                     types.copied().collect()
                 }
 
@@ -245,6 +269,24 @@ macro_rules! impl_view_tuple {
                 $(
                     $ty::writes::<Comp>()
                 )||*
+            }
+        }
+
+        impl<'a, $( $ty: Fetch ),*> crate::internals::iter::map::From<($( Option<$ty>, )*)>
+            for Option<MultiFetch<'a, ($( $ty, )*)>>
+        {
+            fn from(value: ($( Option<$ty>, )*)) -> Self {
+                #[allow(non_snake_case)]
+                let ($( $ty, )*) = value;
+                let valid = $( $ty.is_some() )&*;
+                if valid {
+                    Some(MultiFetch {
+                        fetches: ($( $ty.unwrap(), )*),
+                        _phantom: PhantomData
+                    })
+                } else {
+                    None
+                }
             }
         }
 

@@ -5,9 +5,13 @@ use super::{
     entity::Entity,
     entry::{EntryMut, EntryRef},
     permissions::Permissions,
-    query::{filter::EntityFilter, view::View, Query},
+    query::{
+        filter::EntityFilter,
+        view::{IntoView, View},
+        Query,
+    },
     storage::{archetype::ArchetypeIndex, component::ComponentTypeId},
-    world::{ComponentAccessError, EntityStore, StorageAccessor, World, WorldId},
+    world::{EntityAccessError, EntityStore, StorageAccessor, World, WorldId},
 };
 use bit_set::BitSet;
 use std::borrow::Cow;
@@ -94,7 +98,7 @@ impl<'a> ComponentAccess<'a> {
         ) -> Permissions<ComponentTypeId> {
             let mut denied = Permissions::new();
             // if the current permission allows reads, then everything else must deny writes
-            for read in permissions.read_only() {
+            for read in permissions.reads_only() {
                 denied.push_write(*read);
             }
 
@@ -177,11 +181,35 @@ impl<'a> SubWorld<'a> {
 
     /// Splits the world into two. The left world allows access only to the data declared by the view;
     /// the right world allows access to all else.
-    pub fn split<'b, T: for<'v> View<'v>>(&'b mut self) -> (SubWorld<'b>, SubWorld<'b>)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use legion::*;
+    /// # struct Position;
+    /// # let mut world = World::default();
+    /// # let (_, mut world) = world.split::<&u8>();
+    /// let (left, right) = world.split::<&mut Position>();
+    /// ```
+    ///
+    /// With the above, 'left' contains a sub-world with access _only_ to `&Position` and `&mut Position`,
+    /// and `right` contains a sub-world with access to everything _but_ `&Position` and `&mut Position`.
+    ///
+    /// ```
+    /// # use legion::*;
+    /// # struct Position;
+    /// # let mut world = World::default();
+    /// # let (_, mut world) = world.split::<&u8>();
+    /// let (left, right) = world.split::<&Position>();
+    /// ```
+    ///
+    /// In this second example, `left` is provided access _only_ to `&Position`. `right` is granted permission
+    /// to everything _but_ `&mut Position`.
+    pub fn split<'b, T: IntoView>(&'b mut self) -> (SubWorld<'b>, SubWorld<'b>)
     where
         'a: 'b,
     {
-        let permissions = T::requires_permissions();
+        let permissions = T::View::requires_permissions();
         let (left, right) = self.components.split(permissions);
 
         (
@@ -200,7 +228,7 @@ impl<'a> SubWorld<'a> {
 
     /// Splits the world into two. The left world allows access only to the data declared by the query's view;
     /// the right world allows access to all else.
-    pub fn split_for_query<'q, V: for<'v> View<'v>, F: EntityFilter>(
+    pub fn split_for_query<'q, V: IntoView, F: EntityFilter>(
         &mut self,
         _: &'q Query<V, F>,
     ) -> (SubWorld, SubWorld) {
@@ -219,7 +247,7 @@ impl<'a> SubWorld<'a> {
 impl<'a> EntityStore for SubWorld<'a> {
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
-    ) -> Result<StorageAccessor, ComponentAccessError> {
+    ) -> Result<StorageAccessor, EntityAccessError> {
         if V::validate_access(&self.components) {
             Ok(self
                 .world
@@ -227,37 +255,35 @@ impl<'a> EntityStore for SubWorld<'a> {
                 .unwrap()
                 .with_allowed_archetypes(self.archetypes))
         } else {
-            Err(ComponentAccessError)
+            Err(EntityAccessError::AccessDenied)
         }
     }
 
-    fn entry_ref(&self, entity: Entity) -> Option<EntryRef> {
-        if let Some(entry) = self.world.entry_ref(entity) {
-            if !self.validate_archetype_access(entry.location().archetype()) {
-                panic!("attempted to access an entity which is outside of the subworld");
-            }
-            Some(EntryRef {
-                allowed_components: self.components.clone(),
-                ..entry
-            })
-        } else {
-            None
+    fn entry_ref(&self, entity: Entity) -> Result<EntryRef, EntityAccessError> {
+        let entry = self.world.entry_ref(entity)?;
+
+        if !self.validate_archetype_access(entry.location().archetype()) {
+            return Err(EntityAccessError::AccessDenied);
         }
+
+        Ok(EntryRef {
+            allowed_components: self.components.clone(),
+            ..entry
+        })
     }
 
-    fn entry_mut(&mut self, entity: Entity) -> Option<EntryMut> {
+    fn entry_mut(&mut self, entity: Entity) -> Result<EntryMut, EntityAccessError> {
         // safety: protected by &mut self and subworld access validation
-        if let Some(entry) = unsafe { self.world.entry_unchecked(entity) } {
-            if !self.validate_archetype_access(entry.location().archetype()) {
-                panic!("attempted to access an entity which is outside of the subworld");
-            }
-            Some(EntryMut {
-                allowed_components: self.components.clone(),
-                ..entry
-            })
-        } else {
-            None
+        let entry = unsafe { self.world.entry_unchecked(entity)? };
+
+        if !self.validate_archetype_access(entry.location().archetype()) {
+            return Err(EntityAccessError::AccessDenied);
         }
+
+        Ok(EntryMut {
+            allowed_components: self.components.clone(),
+            ..entry
+        })
     }
 
     fn id(&self) -> WorldId {
@@ -287,7 +313,7 @@ mod tests {
 
     #[test]
     fn writeread_left_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Write<usize>>();
@@ -300,7 +326,7 @@ mod tests {
 
     #[test]
     fn writeread_left_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Write<usize>>();
@@ -311,7 +337,7 @@ mod tests {
 
     #[test]
     fn writeread_right_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, right) = world.split::<Write<usize>>();
@@ -324,7 +350,7 @@ mod tests {
 
     #[test]
     fn writeread_right_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, right) = world.split::<Write<usize>>();
@@ -337,7 +363,7 @@ mod tests {
 
     #[test]
     fn readread_left_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Read<usize>>();
@@ -350,7 +376,7 @@ mod tests {
 
     #[test]
     fn readread_left_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (left, _) = world.split::<Read<usize>>();
@@ -361,7 +387,7 @@ mod tests {
 
     #[test]
     fn readread_right_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, right) = world.split::<Read<usize>>();
@@ -374,7 +400,7 @@ mod tests {
 
     #[test]
     fn readread_right_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, right) = world.split::<Read<usize>>();
@@ -389,7 +415,7 @@ mod tests {
 
     #[test]
     fn writewrite_left_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Write<usize>>();
@@ -402,7 +428,7 @@ mod tests {
 
     #[test]
     fn writewrite_left_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Write<usize>>();
@@ -413,7 +439,7 @@ mod tests {
 
     #[test]
     fn writewrite_right_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Write<usize>>();
@@ -426,7 +452,7 @@ mod tests {
 
     #[test]
     fn writewrite_right_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Write<usize>>();
@@ -439,7 +465,7 @@ mod tests {
 
     #[test]
     fn readwrite_left_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Read<usize>>();
@@ -450,7 +476,7 @@ mod tests {
 
     #[test]
     fn readwrite_left_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (mut left, _) = world.split::<Read<usize>>();
@@ -461,7 +487,7 @@ mod tests {
 
     #[test]
     fn readwrite_right_included() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Read<usize>>();
@@ -474,7 +500,7 @@ mod tests {
 
     #[test]
     fn readwrite_right_excluded() {
-        let mut world = World::new();
+        let mut world = World::default();
         let entity = world.push((1usize, false));
 
         let (_, mut right) = world.split::<Read<usize>>();

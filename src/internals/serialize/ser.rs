@@ -1,20 +1,22 @@
 //! World serialization types.
 
 use super::{
-    entities::ser::EntitiesLayoutSerializer, packed::ser::PackedLayoutSerializer, WorldField,
+    archetypes::ser::ArchetypeLayoutSerializer, entities::ser::EntitiesLayoutSerializer,
+    id::run_as_context, EntitySerializer, UnknownType, WorldField,
 };
-use crate::internals::{
-    query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World,
+use crate::{
+    internals::{query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World},
+    storage::{ArchetypeIndex, UnknownComponentStorage},
 };
 use serde::ser::{Serialize, SerializeMap, Serializer};
 
 /// Describes a type which knows how to deserialize the components in a world.
 pub trait WorldSerializer {
-    /// The stable type ID used to identify each component type.
+    /// The stable type ID used to identify each component type in the serialized data.
     type TypeId: Serialize + Ord;
 
     /// Converts a runtime component type ID into the serialized type ID.
-    fn map_id(&self, type_id: ComponentTypeId) -> Option<Self::TypeId>;
+    fn map_id(&self, type_id: ComponentTypeId) -> Result<Self::TypeId, UnknownType>;
 
     /// Serializes a single component.
     ///
@@ -27,6 +29,22 @@ pub trait WorldSerializer {
         ptr: *const u8,
         serializer: S,
     ) -> Result<S::Ok, S::Error>;
+
+    /// Serializes a slice of components.
+    ///
+    /// # Safety
+    /// The pointer must point to a valid instance of the component type represented by
+    /// the given component type ID.
+    unsafe fn serialize_component_slice<S: Serializer>(
+        &self,
+        ty: ComponentTypeId,
+        storage: &dyn UnknownComponentStorage,
+        archetype: ArchetypeIndex,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>;
+
+    /// Calls `callback` with the Entity ID serializer
+    fn with_entity_serializer(&self, callback: &mut dyn FnMut(&dyn EntitySerializer));
 }
 
 /// A serializable representation of a world.
@@ -69,32 +87,35 @@ where
     let human_readable = serializer.is_human_readable();
     let mut root = serializer.serialize_map(Some(1))?;
 
-    crate::internals::entity::serde::UNIVERSE.with(|cell| {
-        *cell.borrow_mut() = Some(world.universe().clone());
-
-        if human_readable {
-            // serialize per-entity representation
-            root.serialize_entry(
-                &WorldField::Entities,
-                &EntitiesLayoutSerializer {
-                    world_serializer,
-                    world,
-                    filter,
-                },
-            )?;
-        } else {
-            // serialize machine-optimised representation
-            root.serialize_entry(
-                &WorldField::Packed,
-                &PackedLayoutSerializer {
-                    world_serializer,
-                    world,
-                    filter,
-                },
-            )?;
-        }
-
-        *cell.borrow_mut() = None;
-        root.end()
-    })
+    let mut hoist = core::cell::Cell::new(None);
+    let hoist_ref = &mut hoist;
+    let root_ref = &mut root;
+    world_serializer.with_entity_serializer(&mut |canon| {
+        run_as_context(canon, || {
+            let result = if human_readable {
+                // serialize per-entity representation
+                root_ref.serialize_entry(
+                    &WorldField::Entities,
+                    &EntitiesLayoutSerializer {
+                        world_serializer,
+                        world,
+                        filter,
+                    },
+                )
+            } else {
+                // serialize machine-optimised representation
+                root_ref.serialize_entry(
+                    &WorldField::Packed,
+                    &ArchetypeLayoutSerializer {
+                        world_serializer,
+                        world,
+                        filter,
+                    },
+                )
+            };
+            hoist_ref.set(Some(result));
+        })
+    });
+    hoist.into_inner().unwrap()?;
+    root.end()
 }

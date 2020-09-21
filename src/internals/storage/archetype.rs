@@ -19,6 +19,7 @@ use crate::internals::{
 };
 use std::{
     ops::{Index, IndexMut},
+    rc::Rc,
     sync::Arc,
 };
 
@@ -102,13 +103,8 @@ impl Archetype {
             .send(Event::EntityInserted(entity, self.index));
     }
 
-    pub(crate) fn extend(&mut self, entities: impl IntoIterator<Item = Entity>) {
-        let start = self.entities.len();
-        self.entities.extend(entities);
-        for entity in &self.entities[start..] {
-            self.subscribers
-                .send(Event::EntityInserted(*entity, self.index));
-        }
+    pub(crate) fn reserve(&mut self, additional: usize) {
+        self.entities.reserve(additional)
     }
 
     pub(crate) fn swap_remove(&mut self, entity_index: usize) -> Entity {
@@ -212,6 +208,15 @@ impl EntityLayout {
 }
 
 impl LayoutFilter for EntityLayout {
+    fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
+        FilterResult::Match(
+            components.len() == self.components.len()
+                && self.components.iter().all(|t| components.contains(t)),
+        )
+    }
+}
+
+impl LayoutFilter for Rc<EntityLayout> {
     fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
         FilterResult::Match(
             components.len() == self.components.len()

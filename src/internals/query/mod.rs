@@ -1,3 +1,4 @@
+use super::world::EntityAccessError;
 use crate::internals::{
     entity::Entity,
     storage::{
@@ -10,25 +11,26 @@ use crate::internals::{
 use filter::{DynamicFilter, EntityFilter, GroupMatcher};
 use parking_lot::Mutex;
 use std::{collections::HashMap, marker::PhantomData, ops::Range, slice::Iter};
-use view::{Fetch, IntoIndexableIter, ReadOnlyFetch, View};
+use view::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnlyFetch, View};
 
 pub mod filter;
 pub mod view;
 
 /// A type (typically a view) which can construct a query.
-pub trait IntoQuery: for<'a> View<'a> {
+pub trait IntoQuery: IntoView + Sized {
     /// Constructs a query.
-    fn query() -> Query<Self, Self::Filter>;
+    fn query() -> Query<Self, <Self::View as DefaultFilter>::Filter>;
 }
 
-impl<T: for<'a> View<'a>> IntoQuery for T {
-    fn query() -> Query<Self, Self::Filter> {
-        Self::validate();
+impl<T: IntoView> IntoQuery for T {
+    fn query() -> Query<Self, <Self::View as DefaultFilter>::Filter> {
+        Self::View::validate();
 
         Query {
             _view: PhantomData,
-            filter: Mutex::new(<Self::Filter as Default>::default()),
+            filter: Mutex::new(<<Self::View as DefaultFilter>::Filter as Default>::default()),
             layout_matches: HashMap::new(),
+            is_view_filter: true,
         }
     }
 }
@@ -89,6 +91,7 @@ impl<'a> QueryResult<'a> {
     }
 
     pub(crate) fn split_at(self, index: usize) -> (Self, Self) {
+        let index = self.range.start + index;
         (
             Self {
                 range: self.range.start..index,
@@ -117,13 +120,34 @@ enum Cache {
 }
 
 /// Provides efficient means to iterate and filter entities in a world.
-pub struct Query<V: for<'a> View<'a>, F: EntityFilter> {
+///
+/// See the [module-level documentation](./index.html) for more details and examples.
+pub struct Query<V: IntoView, F: EntityFilter = <<V as IntoView>::View as DefaultFilter>::Filter> {
     _view: PhantomData<V>,
     filter: Mutex<F>,
     layout_matches: HashMap<WorldId, Cache>,
+    is_view_filter: bool,
 }
 
-impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
+impl<V: IntoView, F: EntityFilter> Default for Query<V, F> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<V: IntoView, F: EntityFilter> Query<V, F> {
+    /// Consructs a new Query
+    pub fn new() -> Self {
+        V::View::validate();
+
+        Self {
+            _view: PhantomData,
+            filter: Mutex::new(Default::default()),
+            layout_matches: HashMap::new(),
+            is_view_filter: true,
+        }
+    }
+
     /// Adds an additional filter to the query.
     pub fn filter<T: EntityFilter>(self, filter: T) -> Query<V, <F as std::ops::BitAnd<T>>::Output>
     where
@@ -134,6 +158,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
             _view: self._view,
             filter: Mutex::new(self.filter.into_inner() & filter),
             layout_matches: HashMap::default(),
+            is_view_filter: false,
         }
     }
 
@@ -203,7 +228,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         &'a mut self,
         world: &'a T,
     ) -> &'a [ArchetypeIndex] {
-        let accessor = world.get_component_storage::<V>().unwrap();
+        let accessor = world.get_component_storage::<V::View>().unwrap();
         let (_, result) = self.evaluate_query(&accessor);
         result.index()
     }
@@ -214,6 +239,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     /// Returns the components for a single entity.
     ///
+    /// This function will not evaluate the query's dynamic filters. This means, for example, that
+    /// calling `get` on all entities in an archetype will not prevent `maybe_changed` from returning
+    /// those entities the next time the query is iterated.
+    ///
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.
@@ -221,17 +250,12 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         &'query mut self,
         world: &'world T,
         entity: Entity,
-    ) -> Option<<V as View<'world>>::Element>
+    ) -> Result<<V::View as View<'world>>::Element, EntityAccessError>
     where
         T: EntityStore,
     {
         let location = world.entry_ref(entity)?.location();
-        let accessor = world.get_component_storage::<V>().unwrap();
-        let (_, result) = self.evaluate_query(&accessor);
-
-        if !result.index().contains(&location.archetype()) {
-            return None;
-        }
+        let accessor = world.get_component_storage::<V::View>().unwrap();
 
         // safety:
         // This is much like the similar usage of transmute inside iter_chunks_unchecked, see
@@ -244,22 +268,31 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         let arch_slice_ref: &[ArchetypeIndex] = &arch_slice;
         let arch_slice_ref = std::mem::transmute(arch_slice_ref);
         let result = QueryResult::unordered(arch_slice_ref);
-        let mut fetch =
-            <V as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result)
-                .next()?;
-
-        let filter = self.filter.get_mut();
-        filter.prepare(world.id());
-
-        if filter.matches_archetype(&fetch).is_pass() {
-            fetch.accepted();
-            let view = ChunkView::new(&accessor.archetypes()[location.archetype()], fetch);
-            let mut iter = view.into_iter();
-            use crate::internals::iter::indexed::TrustedRandomAccess;
-            Some(iter.get_unchecked(location.component().0))
+        let mut fetch = if let Some(Some(fetch)) =
+            <V::View as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result)
+                .next()
+        {
+            fetch
         } else {
-            None
+            return Err(EntityAccessError::EntityNotFound);
+        };
+
+        // if our filter has conditions beyond that of the view, then we need to evaluate the query
+        if !self.is_view_filter {
+            let (_, result) = self.evaluate_query(&accessor);
+            if !result.index().contains(&location.archetype()) {
+                return Err(EntityAccessError::AccessDenied);
+            }
         }
+
+        // accept the fetch to trigger version increments
+        fetch.accepted();
+
+        // construct a chunk view for the archetype, then index the entity we want
+        let view = ChunkView::new(&accessor.archetypes()[location.archetype()], fetch);
+        let mut iter = view.into_iter();
+        use crate::internals::iter::indexed::TrustedRandomAccess;
+        Ok(iter.get_unchecked(location.component().0))
     }
 
     /// Returns the components for a single entity.
@@ -267,7 +300,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         &'query mut self,
         world: &'world mut T,
         entity: Entity,
-    ) -> Option<<V as View<'world>>::Element>
+    ) -> Result<<V::View as View<'world>>::Element, EntityAccessError>
     where
         T: EntityStore,
     {
@@ -280,10 +313,10 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         &'query mut self,
         world: &'world T,
         entity: Entity,
-    ) -> Option<<V as View<'world>>::Element>
+    ) -> Result<<V::View as View<'world>>::Element, EntityAccessError>
     where
         T: EntityStore,
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.get_unchecked(world, entity) }
@@ -303,8 +336,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub unsafe fn iter_chunks_unchecked<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world T,
-    ) -> ChunkIter<'world, 'query, V, F> {
-        let accessor = world.get_component_storage::<V>().unwrap();
+    ) -> ChunkIter<'world, 'query, V::View, F> {
+        let accessor = world.get_component_storage::<V::View>().unwrap();
         let (_, result) = self.evaluate_query(&accessor);
 
         // What we want:
@@ -345,7 +378,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         );
 
         let fetch =
-            <V as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result);
+            <V::View as View<'world>>::fetch(accessor.components(), accessor.archetypes(), result);
         let filter = self.filter.get_mut();
         filter.prepare(world.id());
         ChunkIter {
@@ -364,12 +397,12 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.    
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     pub unsafe fn par_iter_chunks_unchecked<'a, T: EntityStore>(
         &'a mut self,
         world: &'a T,
-    ) -> par_iter::ParChunkIter<'a, V, F> {
-        let accessor = world.get_component_storage::<V>().unwrap();
+    ) -> par_iter::ParChunkIter<'a, V::View, F> {
+        let accessor = world.get_component_storage::<V::View>().unwrap();
         let (filter, result) = self.evaluate_query(&accessor);
         par_iter::ParChunkIter::new(accessor, result, filter)
     }
@@ -381,7 +414,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn iter_chunks_mut<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world mut T,
-    ) -> ChunkIter<'world, 'query, V, F> {
+    ) -> ChunkIter<'world, 'query, V::View, F> {
         // safety: we have exclusive access to world
         unsafe { self.iter_chunks_unchecked(world) }
     }
@@ -389,12 +422,12 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// Returns a parallel iterator which will yield all entity chunks which match the query.
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter_chunks_mut<'a, T: EntityStore>(
         &'a mut self,
         world: &'a mut T,
-    ) -> par_iter::ParChunkIter<'a, V, F> {
+    ) -> par_iter::ParChunkIter<'a, V::View, F> {
         // safety: we have exclusive access to world
         unsafe { self.par_iter_chunks_unchecked(world) }
     }
@@ -407,9 +440,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn iter_chunks<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world T,
-    ) -> ChunkIter<'world, 'query, V, F>
+    ) -> ChunkIter<'world, 'query, V::View, F>
     where
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.iter_chunks_unchecked(world) }
@@ -419,14 +452,14 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.
     /// Only usable with queries who's views are read-only.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter_chunks<'a, T: EntityStore>(
         &'a mut self,
         world: &'a T,
-    ) -> par_iter::ParChunkIter<'a, V, F>
+    ) -> par_iter::ParChunkIter<'a, V::View, F>
     where
-        <V as View<'a>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.par_iter_chunks_unchecked(world) }
@@ -447,7 +480,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub unsafe fn iter_unchecked<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world T,
-    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V, F>> {
+    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V::View, F>> {
         self.iter_chunks_unchecked(world).flatten()
     }
 
@@ -456,12 +489,12 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub unsafe fn par_iter_unchecked<'a, T: EntityStore>(
         &'a mut self,
         world: &'a T,
-    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>> {
+    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V::View, F>> {
         use rayon::iter::ParallelIterator;
         self.par_iter_chunks_unchecked(world).flatten()
     }
@@ -473,18 +506,18 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn iter_mut<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world mut T,
-    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V, F>> {
+    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V::View, F>> {
         // safety: we have exclusive access to world
         unsafe { self.iter_unchecked(world) }
     }
 
     /// Returns a parallel iterator which will yield all components which match the query.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter_mut<'a, T: EntityStore>(
         &'a mut self,
         world: &'a mut T,
-    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>> {
+    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V::View, F>> {
         // safety: we have exclusive access to world
         unsafe { self.par_iter_unchecked(world) }
     }
@@ -497,9 +530,9 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     pub fn iter<'query, 'world, T: EntityStore>(
         &'query mut self,
         world: &'world T,
-    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V, F>>
+    ) -> std::iter::Flatten<ChunkIter<'world, 'query, V::View, F>>
     where
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.iter_unchecked(world) }
@@ -508,14 +541,14 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// Returns a parallel iterator which will yield all components which match the query.
     ///
     /// Only usable with queries who's views are read-only.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter<'a, T: EntityStore>(
         &'a mut self,
         world: &'a T,
-    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V, F>>
+    ) -> rayon::iter::Flatten<par_iter::ParChunkIter<'a, V::View, F>>
     where
-        <V as View<'a>>::Fetch: ReadOnlyFetch,
+        <V::View as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.par_iter_unchecked(world) }
@@ -538,7 +571,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world T,
         mut f: Body,
     ) where
-        Body: FnMut(ChunkView<<V as View<'world>>::Fetch>),
+        Body: FnMut(ChunkView<<V::View as View<'world>>::Fetch>),
     {
         for chunk in self.iter_chunks_unchecked(world) {
             f(chunk);
@@ -552,14 +585,14 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub unsafe fn par_for_each_chunk_unchecked<'a, T: EntityStore, Body>(
         &'a mut self,
         world: &'a T,
         f: Body,
     ) where
-        Body: Fn(ChunkView<<V as View<'a>>::Fetch>) + Send + Sync,
+        Body: Fn(ChunkView<<V::View as View<'a>>::Fetch>) + Send + Sync,
     {
         use rayon::iter::ParallelIterator;
         self.par_iter_chunks_unchecked(world).for_each(f);
@@ -574,7 +607,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world mut T,
         f: Body,
     ) where
-        Body: FnMut(ChunkView<<V as View<'world>>::Fetch>),
+        Body: FnMut(ChunkView<<V::View as View<'world>>::Fetch>),
     {
         // safety: we have exclusive access to world
         unsafe { self.for_each_chunk_unchecked(world, f) };
@@ -582,11 +615,11 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
 
     /// Iterates in parallel through all entity chunks which match the query.  
     /// Each chunk contains slices of components for entities which all have the same component layout.  
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each_chunk_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
     where
-        Body: Fn(ChunkView<<V as View<'a>>::Fetch>) + Send + Sync,
+        Body: Fn(ChunkView<<V::View as View<'a>>::Fetch>) + Send + Sync,
     {
         // safety: we have exclusive access to world
         unsafe { self.par_for_each_chunk_unchecked(world, f) };
@@ -602,8 +635,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world T,
         f: Body,
     ) where
-        Body: FnMut(ChunkView<<V as View<'world>>::Fetch>),
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        Body: FnMut(ChunkView<<V::View as View<'world>>::Fetch>),
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.for_each_chunk_unchecked(world, f) };
@@ -613,12 +646,12 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.  
     /// Only usable with queries who's views are read-only.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each_chunk<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
     where
-        Body: Fn(ChunkView<<V as View<'a>>::Fetch>) + Send + Sync,
-        <V as View<'a>>::Fetch: ReadOnlyFetch,
+        Body: Fn(ChunkView<<V::View as View<'a>>::Fetch>) + Send + Sync,
+        <V::View as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.par_for_each_chunk_unchecked(world, f) };
@@ -639,7 +672,7 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world T,
         mut f: Body,
     ) where
-        Body: FnMut(<V as View<'world>>::Element),
+        Body: FnMut(<V::View as View<'world>>::Element),
     {
         // we use a nested loop because it is significantly faster than .flatten()
         for chunk in self.iter_chunks_unchecked(world) {
@@ -654,14 +687,14 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// # Safety
     /// This function allows mutable access via a shared world reference. The caller is responsible for
     /// ensuring that no component accesses may create mutable aliases.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub unsafe fn par_for_each_unchecked<'a, T: EntityStore, Body>(
         &'a mut self,
         world: &'a T,
         f: Body,
     ) where
-        Body: Fn(<V as View<'a>>::Element) + Send + Sync,
+        Body: Fn(<V::View as View<'a>>::Element) + Send + Sync,
     {
         use rayon::iter::ParallelIterator;
         self.par_iter_unchecked(world).for_each(&f);
@@ -674,18 +707,18 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world mut T,
         f: Body,
     ) where
-        Body: FnMut(<V as View<'world>>::Element),
+        Body: FnMut(<V::View as View<'world>>::Element),
     {
         // safety: we have exclusive access to world
         unsafe { self.for_each_unchecked(world, f) };
     }
 
     /// Iterates in parallel through all components which match the query.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
     where
-        Body: Fn(<V as View<'a>>::Element) + Send + Sync,
+        Body: Fn(<V::View as View<'a>>::Element) + Send + Sync,
     {
         // safety: we have exclusive access to world
         unsafe { self.par_for_each_unchecked(world, f) };
@@ -700,8 +733,8 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
         world: &'world T,
         f: Body,
     ) where
-        Body: FnMut(<V as View<'world>>::Element),
-        <V as View<'world>>::Fetch: ReadOnlyFetch,
+        Body: FnMut(<V::View as View<'world>>::Element),
+        <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.for_each_unchecked(world, f) };
@@ -710,12 +743,12 @@ impl<V: for<'a> View<'a>, F: EntityFilter> Query<V, F> {
     /// Iterates in parallel through all components which match the query.
     ///
     /// Only usable with queries who's views are read-only.
-    #[cfg(feature = "par-iter")]
+    #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
     where
-        Body: Fn(<V as View<'a>>::Element) + Send + Sync,
-        <V as View<'a>>::Fetch: ReadOnlyFetch,
+        Body: Fn(<V::View as View<'a>>::Element) + Send + Sync,
+        <V::View as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
         unsafe { self.par_for_each_unchecked(world, f) };
@@ -764,7 +797,7 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
     /// # struct B;
     /// # struct C;
     /// # struct D;
-    /// # let mut world = World::new();
+    /// # let mut world = World::default();
     /// let mut query = <(Entity, Read<A>, Write<B>, TryRead<C>, TryWrite<D>)>::query();
     /// for chunk in query.iter_chunks_mut(&mut world) {
     ///     let slices: (&[Entity], &[A], &mut [B], Option<&[C]>, Option<&mut [D]>) = chunk.into_components();       
@@ -784,7 +817,7 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
     /// # use legion::*;
     /// # struct A;
     /// # struct B;
-    /// # let mut world = World::new();
+    /// # let mut world = World::default();
     /// let mut query = <(Entity, Read<A>, TryRead<B>)>::query();
     /// for chunk in query.iter_chunks_mut(&mut world) {
     ///     let slices: (&[Entity], &[A], Option<&[B]>) = chunk.get_components();       
@@ -817,7 +850,7 @@ impl<'a, F: Fetch> IntoIterator for ChunkView<'a, F> {
     }
 }
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 impl<'a, F: Fetch> rayon::iter::IntoParallelIterator for ChunkView<'a, F> {
     type Iter = crate::internals::iter::indexed::par_iter::Par<<F as IntoIndexableIter>::IntoIter>;
     type Item = <<F as IntoIndexableIter>::IntoIter as crate::internals::iter::indexed::TrustedRandomAccess>::Item;
@@ -849,7 +882,9 @@ where
     type Item = ChunkView<'world, V::Fetch>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        for mut fetch in &mut self.inner {
+        for fetch in &mut self.inner {
+            // if fetch is None here, filtering is broken
+            let mut fetch = fetch.unwrap();
             let idx = self.indices.next().unwrap();
             if self.filter.matches_archetype(&fetch).is_pass() {
                 fetch.accepted();
@@ -889,7 +924,7 @@ where
 // {
 // }
 
-#[cfg(feature = "par-iter")]
+#[cfg(feature = "parallel")]
 pub mod par_iter {
     use super::*;
     use rayon::iter::plumbing::{bridge_unindexed, Folder, UnindexedConsumer, UnindexedProducer};
@@ -919,7 +954,8 @@ pub mod par_iter {
 
         fn next(&mut self) -> Option<Self::Item> {
             let mut filter = self.filter.lock();
-            for mut fetch in &mut self.inner {
+            for fetch in &mut self.inner {
+                let mut fetch = fetch.unwrap();
                 let idx = self.indices.next().unwrap();
                 if filter.matches_archetype(&fetch).is_pass() {
                     fetch.accepted();
@@ -1070,7 +1106,7 @@ mod test {
             println!("{:?}, {:?}", x, y);
         }
 
-        #[cfg(feature = "par-iter")]
+        #[cfg(feature = "parallel")]
         {
             query.par_for_each_mut(&mut world, |(x, y)| println!("{:?}, {:?}", x, y));
             use rayon::iter::ParallelIterator;
@@ -1082,7 +1118,7 @@ mod test {
         }
 
         let single = query.get_mut(&mut world, entity);
-        assert_eq!(single, Some((&10usize, &mut false)));
+        assert_eq!(single, Ok((&10usize, &mut false)));
     }
 
     #[test]
@@ -1157,5 +1193,42 @@ mod test {
         }
 
         assert_eq!(components[0], &1usize);
+    }
+
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn par_iter() {
+        use std::sync::atomic::*;
+
+        for _ in 0..1000 {
+            let mut w = World::default();
+
+            w.push((1usize,));
+            w.push((2usize, 3.5f32));
+
+            let count = AtomicUsize::new(0);
+            <&usize>::query().par_for_each(&w, |_: &usize| {
+                count.fetch_add(1, Ordering::SeqCst);
+            });
+            assert_eq!(count.load(Ordering::SeqCst), 2);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn par_iter_option() {
+        use crate::Entity;
+
+        for _ in 0..1 {
+            let mut w = World::default();
+
+            w.push((2usize, 3.5f32));
+            w.push((1usize,));
+            w.push((3usize,));
+            w.push((4usize, 6.12f32));
+
+            <(Entity, &usize, Option<&f32>)>::query()
+                .par_for_each(&w, |(e, x, y)| println!("{:?} {} {:?}", e, x, y));
+        }
     }
 }

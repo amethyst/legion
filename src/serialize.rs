@@ -14,12 +14,11 @@
 //! Serializing all entities with a `Position` component to JSON.
 //! ```
 //! # use legion::*;
-//! # let universe = Universe::new();
-//! # let world = universe.create_world();
+//! # let world = World::default();
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct Position;
 //! // create a registry which uses strings as the external type ID
-//! let mut registry = Registry::<String>::new();
+//! let mut registry = Registry::<String>::default();
 //! registry.register::<Position>("position".to_string());
 //! registry.register::<f32>("f32".to_string());
 //! registry.register::<bool>("bool".to_string());
@@ -30,11 +29,15 @@
 //!
 //! // registries are also serde deserializers
 //! use serde::de::DeserializeSeed;
-//! let world: World = registry.as_deserialize(&universe).deserialize(json).unwrap();
+//! let world: World = registry.as_deserialize().deserialize(json).unwrap();
 //! ```
 
 pub use crate::internals::serialize::{
     de::WorldDeserializer,
+    id::{Canon, EntityName, EntitySerializer},
     ser::{SerializableWorld, WorldSerializer},
-    Registry, SerializableTypeId, TypeKey, UniverseDeserializerWrapper, WorldDeserializerWrapper,
+    AutoTypeKey, DeserializeIntoWorld, DeserializeNewWorld, Registry, TypeKey, UnknownType,
 };
+
+#[cfg(feature = "type-uuid")]
+pub use crate::internals::serialize::SerializableTypeUuid;

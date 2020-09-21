@@ -4,13 +4,11 @@ use super::{
 };
 use std::{
     cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
+    collections::HashMap,
     fmt::Debug,
     hash::BuildHasherDefault,
     sync::atomic::{AtomicU64, Ordering},
 };
-use thiserror::Error;
-use uuid::Uuid;
 
 /// An opaque identifier for an entity.
 #[derive(Debug, Copy, PartialEq, Eq, Hash)]
@@ -30,64 +28,13 @@ impl Clone for Entity {
     }
 }
 
-#[cfg(feature = "serialize")]
-pub mod serde {
-    use super::Entity;
-    use crate::internals::world::Universe;
-    use serde::{Deserialize, Serialize, Serializer};
-    use std::cell::RefCell;
-    use uuid::Uuid;
-
-    thread_local! {
-        pub static UNIVERSE: RefCell<Option<Universe>> = RefCell::new(None);
-    }
-
-    impl Serialize for Entity {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            UNIVERSE.with(|cell| {
-                let universe = cell.borrow();
-                if let Some(ref universe) = *universe {
-                    let mut canon = universe.canon_mut();
-                    let name = Uuid::from_bytes(canon.canonize_id(*self));
-                    name.serialize(serializer)
-                } else {
-                    use serde::ser::Error;
-                    Err(S::Error::custom("no universe context"))
-                }
-            })
-        }
-    }
-
-    impl<'de> Deserialize<'de> for Entity {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            UNIVERSE.with(|cell| {
-                let universe = cell.borrow();
-                if let Some(ref universe) = *universe {
-                    let name = Uuid::deserialize(deserializer)?;
-                    let mut canon = universe.canon_mut();
-                    let entity = canon.canonize_name(name.as_bytes());
-                    Ok(entity)
-                } else {
-                    use serde::de::Error;
-                    Err(D::Error::custom("no universe context"))
-                }
-            })
-        }
-    }
-}
-
 const BLOCK_SIZE: u64 = 16;
 const BLOCK_SIZE_USIZE: usize = BLOCK_SIZE as usize;
 
 static NEXT_ENTITY: AtomicU64 = AtomicU64::new(0);
 
 /// An iterator which yields new entity IDs.
+#[derive(Debug)]
 pub struct Allocate {
     base: u64,
     count: u64,
@@ -185,9 +132,10 @@ impl LocationMap {
         ids: &[Entity],
         arch: ArchetypeIndex,
         ComponentIndex(base): ComponentIndex,
-    ) {
+    ) -> Vec<EntityLocation> {
         let mut current_block = u64::MAX;
         let mut block_vec = None;
+        let mut removed = Vec::new();
         for (i, entity) in ids.iter().enumerate() {
             let block = entity.0 / BLOCK_SIZE;
             if current_block != block {
@@ -201,14 +149,13 @@ impl LocationMap {
 
             if let Some(ref mut vec) = block_vec {
                 let idx = (entity.0 - block * BLOCK_SIZE) as usize;
-                if vec[idx]
-                    .replace(EntityLocation(arch, ComponentIndex(base + i)))
-                    .is_none()
-                {
-                    self.len += 1;
+                match vec[idx].replace(EntityLocation(arch, ComponentIndex(base + i))) {
+                    Some(previous) => removed.push(previous),
+                    None => self.len += 1,
                 }
             }
         }
+        removed
     }
 
     /// Inserts or updates the location of an entity.
@@ -240,89 +187,6 @@ impl LocationMap {
             original
         } else {
             None
-        }
-    }
-}
-
-/// A 16 byte UUID which uniquely identifies an entity.
-pub type EntityName = [u8; 16];
-
-/// Error returned on unsucessful attempt to canonize an entity.
-#[derive(Error, Debug, Copy, Clone, PartialEq, Hash)]
-pub enum CanonizeError {
-    /// The entity already exists bound to a different name.
-    #[error("the entity is already bound to name {0:?}")]
-    EntityAlreadyBound(Entity, EntityName),
-    /// The name already exists bound to a different entity.
-    #[error("the name is already bound to a different entity")]
-    NameAlreadyBound(Entity, EntityName),
-}
-
-/// Contains the canon names of entities.
-#[derive(Default, Debug)]
-pub struct Canon {
-    to_name: HashMap<Entity, EntityName, EntityHasher>,
-    to_id: HashMap<EntityName, Entity>,
-}
-
-impl Canon {
-    /// Returns the [Entity](struct.Entity.html) ID associated with the given [EntityName](struct.EntityName.html).
-    pub fn get_id(&self, name: &EntityName) -> Option<Entity> {
-        self.to_id.get(name).copied()
-    }
-
-    /// Returns the [EntityName](struct.EntityName.html) associated with the given [Entity](struct.Entity.html) ID.
-    pub fn get_name(&self, entity: Entity) -> Option<EntityName> {
-        self.to_name.get(&entity).copied()
-    }
-
-    /// Canonizes a given [EntityName](struct.EntityName.html) and returns the associated [Entity](struct.Entity.html) ID.
-    pub fn canonize_name(&mut self, name: &EntityName) -> Entity {
-        match self.to_id.entry(*name) {
-            Entry::Occupied(occupied) => *occupied.get(),
-            Entry::Vacant(vacant) => {
-                let entity = Allocate::new().next().unwrap();
-                vacant.insert(entity);
-                self.to_name.insert(entity, *name);
-                entity
-            }
-        }
-    }
-
-    /// Canonizes a given [Entity](struct.Entity.html) ID and returns the associated [EntityName](struct.EntityName.html).
-    pub fn canonize_id(&mut self, entity: Entity) -> EntityName {
-        match self.to_name.entry(entity) {
-            Entry::Occupied(occupied) => *occupied.get(),
-            Entry::Vacant(vacant) => {
-                let uuid = Uuid::new_v4();
-                let name = *uuid.as_bytes();
-                vacant.insert(name);
-                self.to_id.insert(name, entity);
-                name
-            }
-        }
-    }
-
-    /// Canonizes the given entity and name pair.
-    pub fn canonize(&mut self, entity: Entity, name: EntityName) -> Result<(), CanonizeError> {
-        if let Some(existing) = self.to_id.get(&name) {
-            if existing != &entity {
-                return Err(CanonizeError::NameAlreadyBound(*existing, name));
-            }
-        }
-        match self.to_name.entry(entity) {
-            Entry::Occupied(occupied) => {
-                if occupied.get() == &name {
-                    Ok(())
-                } else {
-                    Err(CanonizeError::EntityAlreadyBound(entity, *occupied.get()))
-                }
-            }
-            Entry::Vacant(vacant) => {
-                vacant.insert(name);
-                self.to_id.insert(name, entity);
-                Ok(())
-            }
         }
     }
 }

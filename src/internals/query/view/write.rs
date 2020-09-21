@@ -1,6 +1,6 @@
 #![doc(hidden)]
 
-use super::{DefaultFilter, Fetch, IntoIndexableIter, View};
+use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, View};
 use crate::internals::{
     iter::indexed::IndexedIter,
     permissions::Permissions,
@@ -30,9 +30,13 @@ impl<T: Component> DefaultFilter for Write<T> {
     type Filter = EntityFilterTuple<ComponentFilter<T>, Passthrough>;
 }
 
+impl<T: Component> IntoView for Write<T> {
+    type View = Self;
+}
+
 impl<'data, T: Component> View<'data> for Write<T> {
     type Element = <Self::Fetch as IntoIndexableIter>::Item;
-    type Fetch = <WriteIter<'data, T> as Iterator>::Item;
+    type Fetch = WriteFetch<'data, T>;
     type Iter = WriteIter<'data, T>;
     type Read = [ComponentTypeId; 1];
     type Write = [ComponentTypeId; 1];
@@ -80,7 +84,13 @@ impl<'data, T: Component> View<'data> for Write<T> {
         if query.is_empty() {
             return WriteIter::Empty;
         };
-        let components = components.get_downcast::<T>().unwrap();
+
+        let components = if let Some(components) = components.get_downcast::<T>() {
+            components
+        } else {
+            return WriteIter::Empty;
+        };
+
         if query.is_ordered() {
             WriteIter::Grouped {
                 slices: components.iter_mut(query.range().start, query.range().end),
@@ -107,20 +117,19 @@ pub enum WriteIter<'a, T: Component> {
 }
 
 impl<'a, T: Component> Iterator for WriteIter<'a, T> {
-    type Item = WriteFetch<'a, T>;
+    type Item = Option<WriteFetch<'a, T>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let components = match self {
+        match self {
             Self::Indexed {
                 components,
                 archetypes,
             } => archetypes
                 .next()
-                .and_then(|i| unsafe { components.get_mut(*i) }),
-            Self::Grouped { slices } => slices.next(),
+                .map(|i| unsafe { components.get_mut(*i).map(|c| c.into()) }),
+            Self::Grouped { slices } => slices.next().map(|c| Some(c.into())),
             Self::Empty => None,
-        };
-        components.map(|c| c.into())
+        }
     }
 }
 

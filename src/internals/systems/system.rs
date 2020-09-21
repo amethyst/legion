@@ -10,7 +10,7 @@ use crate::internals::{
     permissions::Permissions,
     query::{
         filter::EntityFilter,
-        view::{read::Read, write::Write, View},
+        view::{read::Read, write::Write, IntoView, View},
         Query,
     },
     storage::{
@@ -22,7 +22,6 @@ use crate::internals::{
 };
 use bit_set::BitSet;
 use std::{any::TypeId, borrow::Cow, collections::HashMap, marker::PhantomData};
-use tracing::{debug, info, span, Level};
 
 /// Provides an abstraction across tuples of queries for system closures.
 pub trait QuerySet: Send + Sync {
@@ -68,7 +67,7 @@ impl QuerySet for () {
 
 impl<AV, AF> QuerySet for Query<AV, AF>
 where
-    AV: for<'v> View<'v> + Send + Sync,
+    AV: IntoView + Send + Sync,
     AF: EntityFilter,
 {
     fn filter_archetypes(&mut self, world: &World, bitset: &mut BitSet) {
@@ -142,8 +141,8 @@ where
 
     fn reads(&self) -> (&[ResourceTypeId], &[ComponentTypeId]) {
         (
-            &self.access.resources.reads(),
-            &self.access.components.reads(),
+            &self.access.resources.reads_only(),
+            &self.access.components.reads_only(),
         )
     }
 
@@ -169,15 +168,6 @@ where
     }
 
     unsafe fn run_unsafe(&mut self, world: &World, resources: &UnsafeResources) {
-        let span = if let Some(name) = &self.name {
-            span!(Level::INFO, "System", system = %name)
-        } else {
-            span!(Level::INFO, "System")
-        };
-        let _guard = span.enter();
-
-        debug!("Initializing");
-
         // safety:
         // It is difficult to correctly communicate the lifetime of the resource fetch through to the system closure.
         // We are hacking this by passing the fetch with a static lifetime to its internal references.
@@ -197,7 +187,6 @@ where
             .entry(world.id())
             .or_insert_with(|| CommandBuffer::new(world));
 
-        info!("Running");
         let borrow = &mut self.run_fn;
         borrow.run(cmd, &mut world_shim, &mut resources, queries);
     }
@@ -319,11 +308,11 @@ where
         query: Query<V, F>,
     ) -> SystemBuilder<<Q as ConsAppend<Query<V, F>>>::Output, R>
     where
-        V: for<'a> View<'a>,
+        V: IntoView,
         F: 'static + EntityFilter,
         Q: ConsAppend<Query<V, F>>,
     {
-        self.component_access.add(V::requires_permissions());
+        self.component_access.add(V::View::requires_permissions());
 
         SystemBuilder {
             name: self.name,

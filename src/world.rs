@@ -1,18 +1,14 @@
 //! Worlds store collections of entities. An entity is a collection of components, identified
-//! by a unique [Entity ID](struct.Entity.html).
+//! by a unique [Entity](struct.Entity.html) ID.
 //!
 //! # Creating a world
 //!
-//! Each [World](struct.World.html) belongs to a [Universe](struct.Universe.html), which defines
-//! the address space for entity ID allocation. All worlds created within the same universe will
-//! allocate unique entity IDs and can be merged without risk of ID conflicts.
-//!
 //! ```
 //! # use legion::*;
-//! let universe = Universe::new();
-//! let mut world = universe.create_world();
+//! let mut world = World::default();
 //! ```
-//! A world can also be created in its own universe via `World::new()`.
+//!
+//! `World::new()` can be used to construct a new world with custom options.
 //!
 //! # Inserting entities
 //!
@@ -22,7 +18,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! // a component is any type that is 'static, sized, send and sync
 //! #[derive(Clone, Copy, Debug, PartialEq)]
 //! struct Position {
@@ -53,7 +49,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! let mut world = World::new();
+//! let mut world = World::default();
 //! let _entities = world.extend(
 //!     (
 //!         vec![1usize, 2usize, 3usize],
@@ -72,7 +68,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! # let entity = world.push((false, 1usize));
 //! // entries return `None` if the entity does not exist
 //! if let Some(mut entry) = world.entry(entity) {
@@ -95,7 +91,7 @@
 //!
 //! ```
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! # let entity = world.push((false, 12f32));
 //! // entries return `None` if the entity does not exist
 //! if let Some(mut entry) = world.entry(entity) {
@@ -115,7 +111,7 @@
 //!
 //! ```ignore
 //! # use legion::*;
-//! # let mut world = World::new();
+//! # let mut world = World::default();
 //! # struct Position;
 //! // subscribe to events involving entities with a `Position` with a
 //! // crossbeam channel.
@@ -133,7 +129,7 @@
 //! # struct A;
 //! # struct B;
 //! # struct C;
-//! let mut world = World::new();
+//! let mut world = World::default();
 //! let entity = world.push((A, B, C));
 //! let (mut left, mut right) = world.split::<(Read<A>, Write<B>)>();
 //!
@@ -146,13 +142,13 @@
 //! ```
 
 pub use crate::internals::{
-    entity::{Allocate, Canon, CanonizeError, Entity, EntityLocation, EntityName, LocationMap},
+    entity::{Allocate, Entity, EntityHasher, EntityLocation, LocationMap},
     entry::{ComponentError, Entry, EntryMut, EntryRef},
     event::{Event, EventSender},
     permissions::Permissions,
     subworld::{ArchetypeAccess, ComponentAccess, SubWorld},
     world::{
-        ComponentAccessError, Duplicate, EntityRewrite, EntityStore, MergeError, Merger,
-        StorageAccessor, Universe, UniverseId, World, WorldId, WorldOptions,
+        Duplicate, EntityAccessError, EntityRewrite, EntityStore, Merger, StorageAccessor, World,
+        WorldId, WorldOptions,
     },
 };
