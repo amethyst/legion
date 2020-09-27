@@ -158,6 +158,34 @@ impl LocationMap {
         removed
     }
 
+    /// Push an entity into the location map.
+    pub fn push(
+        &mut self,
+        entity: &Entity,
+        arch: ArchetypeIndex,
+        ComponentIndex(base): ComponentIndex,
+    ) {
+        let mut block_vec = None;
+        let block = entity.0 / BLOCK_SIZE;
+        if block != u64::MAX {
+            block_vec = Some(
+                self.blocks
+                    .entry(block)
+                    .or_insert_with(|| Box::new([None; BLOCK_SIZE_USIZE])),
+            );
+        }
+
+        if let Some(ref mut vec) = block_vec {
+            let idx = (entity.0 - block * BLOCK_SIZE) as usize;
+            if vec[idx]
+                .replace(EntityLocation(arch, ComponentIndex(base)))
+                .is_none()
+            {
+                self.len += 1;
+            }
+        }
+    }
+
     /// Inserts or updates the location of an entity.
     pub fn set(&mut self, entity: Entity, location: EntityLocation) {
         self.insert(&[entity], location.archetype(), location.component());

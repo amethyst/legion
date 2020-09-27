@@ -773,6 +773,58 @@ impl World {
         dst_entity
     }
 
+    /// Clones a single entity from the source world into the destination world.
+    /// All components are copied.
+    pub fn clone_from_single_all_components(&mut self, source: &World, entity: Entity) -> Entity {
+        // Determine the destination ID.
+        // Accesses a global variable, hence why this looks like it'd be constant.
+        let mut allocator = Allocate::new();
+        let dst_entity = allocator.next().unwrap();
+
+        // Find conflicts, and remove the existing entity, to be replaced with that defined in the source.
+        // TODO: When does this happen?
+        self.remove(dst_entity);
+
+        // find the source
+        let src_location = source
+            .entities
+            .get(entity)
+            .expect("entity not found in source world");
+        let src_arch = &source.archetypes[src_location.archetype()];
+
+        // construct the destination entity layout
+        let layout = &**src_arch.layout();
+        let dst_arch_index = if src_arch.entities().len() < 32 {
+            self.index.search(layout).next()
+        } else {
+            None
+        };
+
+        // find or construct the destination archetype
+        let dst_arch_index =
+            dst_arch_index.unwrap_or_else(|| self.insert_archetype(layout.clone()));
+        let dst_arch = &mut self.archetypes[dst_arch_index.0 as usize];
+
+        // build a writer for the destination archetype
+        let mut writer =
+            ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
+
+        // push the entity ID into the archetype
+        writer.push(dst_entity);
+
+        for component in src_arch.layout().component_types() {
+            let src_storage = source.components.get(*component).unwrap();
+            let mut dst_storage = writer.claim_components_unknown(*component);
+            dst_storage.copy_archetype_from(src_arch.index(), src_storage);
+        }
+
+        // record entity location
+        let (base, entities) = writer.inserted();
+        self.entities.push(&entities[0], dst_arch_index, base);
+
+        dst_entity
+    }
+
     /// Creates a serde serializable representation of the world.
     ///
     /// A [filter](../query/trait.LayoutFilter.html) selects which entities shall be serialized.  

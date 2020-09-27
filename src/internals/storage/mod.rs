@@ -94,6 +94,14 @@ pub trait UnknownComponentStorage: Downcast + Send + Sync {
         dst: &mut dyn UnknownComponentStorage,
     );
 
+    /// Copies an archetype's component slice to a new storage.
+    fn copy_archetype(
+        &self,
+        src_archetype: ArchetypeIndex,
+        dst_archetype: ArchetypeIndex,
+        dst: &mut dyn UnknownComponentStorage,
+    );
+
     /// Moves a component to a new storage.
     fn transfer_component(
         &mut self,

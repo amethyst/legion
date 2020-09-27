@@ -177,6 +177,15 @@ impl<'a> UnknownComponentWriter<'a> {
         src.transfer_archetype(src_archetype, self.archetype, self.components);
     }
 
+    /// Copies all of the components from the given storage location into this writer's storage.
+    pub fn copy_archetype_from(
+        &mut self,
+        src_archetype: ArchetypeIndex,
+        src: &dyn UnknownComponentStorage,
+    ) {
+        src.copy_archetype(src_archetype, self.archetype, self.components);
+    }
+
     /// Moves a single component from the given storage location into this writer's storage.
     pub fn move_component_from(
         &mut self,

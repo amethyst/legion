@@ -415,6 +415,28 @@ impl<T: Component> UnknownComponentStorage for PackedStorage<T> {
         dst.update_slice(dst_index);
     }
 
+    fn copy_archetype(
+        &self,
+        src_archetype: ArchetypeIndex,
+        dst_archetype: ArchetypeIndex,
+        dst: &mut dyn UnknownComponentStorage,
+    ) {
+        let dst = dst.downcast_mut::<Self>().unwrap();
+        let src_index = self.index(src_archetype);
+        let dst_index = dst.index(dst_archetype);
+
+        // update total count
+        let count = self.allocations[src_index].len();
+        dst.entity_len += count;
+
+        // memcopy components into the destination
+        let (ptr, len) = self.get_raw(src_archetype).unwrap();
+        unsafe { dst.extend_memcopy_raw(dst_archetype, ptr, len) };
+
+        // update slice pointer
+        dst.update_slice(dst_index);
+    }
+
     /// Moves a component to a new storage.
     fn transfer_component(
         &mut self,
