@@ -4,7 +4,7 @@ use super::{
 };
 use crate::internals::{query::view::Fetch, storage::component::ComponentTypeId, world::WorldId};
 
-/// A filter which requires all filters within `T` match.
+/// A filter which requires any filter within `T` match.
 #[derive(Debug, Clone)]
 pub struct Or<T> {
     pub(super) filters: T,

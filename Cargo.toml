@@ -1,17 +1,14 @@
 [package]
 name = "legion"
-version = "0.3.0"
+version = "0.3.1"
 description = "High performance entity component system (ECS) library"
 authors = ["Thomas Gillen <thomas.gillen@googlemail.com>"]
-repository = "https://github.com/TomGillen/legion"
+repository = "https://github.com/amethyst/legion"
 keywords = ["ecs", "game"]
 categories = ["game-engines", "data-structures"]
 readme = "readme.md"
 license = "MIT"
 edition = "2018"
-
-[badges]
-travis-ci = { repository = "TomGillen/legion", branch = "master" }
 
 [features]
 default = ["parallel", "serialize", "crossbeam-events", "codegen"]

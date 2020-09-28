@@ -288,7 +288,7 @@ impl Default for SystemBuilder<(), ()> {
 impl<Q, R> SystemBuilder<Q, R>
 where
     Q: 'static + Send + ConsFlatten,
-    R: 'static + Send + ConsFlatten,
+    R: 'static + ConsFlatten,
 {
     /// Provides a name to the system being built.
     pub fn with_name(self, name: SystemId) -> Self {

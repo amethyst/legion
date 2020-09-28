@@ -372,8 +372,8 @@ impl Sig {
                     }
                     Type::Reference(ty) => {
                         let mutable = ty.mutability.is_some();
-                        let resource = Self::find_remove_arg_attr(&mut arg.attrs);
-                        match resource {
+                        let attribute = Self::find_remove_arg_attr(&mut arg.attrs);
+                        match attribute {
                             Some(ArgAttr::Resource) => {
                                 if mutable {
                                     parameters.push(Parameter::ResourceMut(write_resources.len()));
