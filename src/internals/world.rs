@@ -775,7 +775,11 @@ impl World {
 
     /// Clones a single entity from the source world into the destination world.
     /// All components are copied.
-    pub fn clone_from_single_all_components(&mut self, source: &World, entity: Entity) -> Entity {
+    pub fn clone_from_single_all_components(
+        &mut self,
+        prefab_world: &World,
+        prefab: Entity,
+    ) -> Entity {
         // Determine the destination ID.
         // Accesses a global variable, hence why this looks like it'd be constant.
         let mut allocator = Allocate::new();
@@ -785,12 +789,20 @@ impl World {
         // TODO: When does this happen?
         self.remove(dst_entity);
 
+        self.clone_into_entity(prefab_world, prefab, dst_entity);
+
+        dst_entity
+    }
+
+    /// Clones a single entity from the source world into the destination world.
+    /// All components are copied.
+    pub fn clone_into_entity(&mut self, prefab_world: &World, prefab: Entity, entity: Entity) {
         // find the source
-        let src_location = source
+        let src_location = prefab_world
             .entities
-            .get(entity)
+            .get(prefab)
             .expect("entity not found in source world");
-        let src_arch = &source.archetypes[src_location.archetype()];
+        let src_arch = &prefab_world.archetypes[src_location.archetype()];
 
         // construct the destination entity layout
         let layout = &**src_arch.layout();
@@ -810,10 +822,10 @@ impl World {
             ArchetypeWriter::new(dst_arch_index, dst_arch, self.components.get_multi_mut());
 
         // push the entity ID into the archetype
-        writer.push(dst_entity);
+        writer.push(entity);
 
         for component in src_arch.layout().component_types() {
-            let src_storage = source.components.get(*component).unwrap();
+            let src_storage = prefab_world.components.get(*component).unwrap();
             let mut dst_storage = writer.claim_components_unknown(*component);
             dst_storage.copy_archetype_from(src_arch.index(), src_storage);
         }
@@ -821,8 +833,6 @@ impl World {
         // record entity location
         let (base, entities) = writer.inserted();
         self.entities.push(&entities[0], dst_arch_index, base);
-
-        dst_entity
     }
 
     /// Creates a serde serializable representation of the world.

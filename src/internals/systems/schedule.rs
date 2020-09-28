@@ -267,10 +267,10 @@ impl Executor {
 
     /// Executes all systems and then flushes their command buffers.
     #[cfg(feature = "parallel")]
-    pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
+    pub fn execute(&mut self, world: &mut World, prefab_world: &World, resources: &mut Resources) {
         let resources = resources.internal();
         rayon::join(|| self.run_systems(world, resources), || {});
-        self.flush_command_buffers(world);
+        self.flush_command_buffers(world, prefab_world);
     }
 
     /// Executes all systems sequentially.
@@ -363,12 +363,12 @@ impl Executor {
     }
 
     /// Flushes the recorded command buffers for all systems.
-    pub fn flush_command_buffers(&mut self, world: &mut World) {
+    pub fn flush_command_buffers(&mut self, world: &mut World, prefab_world: &World) {
         self.systems.iter().for_each(|system| {
-            // safety: systems are exlcusive due to &mut self
+            // safety: systems are exclusive due to &mut self
             let system = unsafe { system.get_mut() };
             if let Some(cmd) = system.command_buffer_mut(world.id()) {
-                cmd.flush(world);
+                cmd.flush(world, prefab_world);
             }
         });
     }
@@ -518,11 +518,16 @@ impl Schedule {
 
     /// Executes all of the steps in the schedule.
     #[cfg(feature = "parallel")]
-    pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
-        self.execute_internal(world, resources, |world, resources, executor| {
-            let resources = resources.internal();
-            rayon::join(|| executor.run_systems(world, resources), || {});
-        });
+    pub fn execute(&mut self, world: &mut World, prefab_world: &World, resources: &mut Resources) {
+        self.execute_internal(
+            world,
+            prefab_world,
+            resources,
+            |world, resources, executor| {
+                let resources = resources.internal();
+                rayon::join(|| executor.run_systems(world, resources), || {});
+            },
+        );
     }
 
     /// Executes all of the steps in the schedule, with parallelized systems running in
@@ -531,18 +536,25 @@ impl Schedule {
     pub fn execute_in_thread_pool(
         &mut self,
         world: &mut World,
+        prefab_world: &World,
         resources: &mut Resources,
         pool: &rayon::ThreadPool,
     ) {
-        self.execute_internal(world, resources, |world, resources, executor| {
-            let resources = resources.internal();
-            pool.install(|| executor.run_systems(world, resources));
-        });
+        self.execute_internal(
+            world,
+            prefab_world,
+            resources,
+            |world, resources, executor| {
+                let resources = resources.internal();
+                pool.install(|| executor.run_systems(world, resources));
+            },
+        );
     }
 
     fn execute_internal<F: FnMut(&mut World, &mut Resources, &mut Executor)>(
         &mut self,
         world: &mut World,
+        prefab_world: &World,
         resources: &mut Resources,
         mut run_executor: F,
     ) {
@@ -560,8 +572,8 @@ impl Schedule {
                 }
                 Step::FlushCmdBuffers => {
                     waiting_flush.drain(..).for_each(|e| match e {
-                        ToFlush::Executor(exec) => exec.flush_command_buffers(world),
-                        ToFlush::System(cmd) => cmd.flush(world),
+                        ToFlush::Executor(exec) => exec.flush_command_buffers(world, prefab_world),
+                        ToFlush::System(cmd) => cmd.flush(world, prefab_world),
                     });
                 }
                 Step::ThreadLocalFn(function) => function(world, resources),
@@ -607,6 +619,7 @@ mod tests {
     #[test]
     fn execute_in_order() {
         let mut world = World::default();
+        let prefab_world = World::default();
 
         #[derive(Default)]
         struct Resource;
@@ -635,7 +648,7 @@ mod tests {
             .add_system(system_three)
             .build();
 
-        schedule.execute(&mut world, &mut resources);
+        schedule.execute(&mut world, &prefab_world, &mut resources);
 
         let order = order.lock().unwrap();
         let sorted: Vec<usize> = sorted(order.clone()).collect();
@@ -645,6 +658,7 @@ mod tests {
     #[test]
     fn flush() {
         let mut world = World::default();
+        let prefab_world = World::default();
         let mut resources = Resources::default();
 
         #[derive(Clone, Copy, Debug, PartialEq)]
@@ -671,12 +685,13 @@ mod tests {
             .add_system(system_three)
             .build();
 
-        schedule.execute(&mut world, &mut resources);
+        schedule.execute(&mut world, &prefab_world, &mut resources);
     }
 
     #[test]
     fn flush_thread_local() {
         let mut world = World::default();
+        let prefab_world = World::default();
         let mut resources = Resources::default();
 
         #[derive(Clone, Copy, Debug, PartialEq)]
@@ -694,7 +709,7 @@ mod tests {
 
             let mut schedule = Schedule::builder().add_thread_local(system_one).build();
 
-            schedule.execute(&mut world, &mut resources);
+            schedule.execute(&mut world, &prefab_world, &mut resources);
         }
 
         let entity = entity.lock().unwrap();
@@ -706,6 +721,7 @@ mod tests {
     #[test]
     fn thread_local_resource() {
         let mut world = World::default();
+        let prefab_world = World::default();
         let mut resources = Resources::default();
 
         #[derive(Clone, Copy, Debug, PartialEq)]
@@ -722,6 +738,6 @@ mod tests {
         // this should not compile
         // let mut schedule = Schedule::builder().add_system(system).build();
 
-        schedule.execute(&mut world, &mut resources);
+        schedule.execute(&mut world, &prefab_world, &mut resources);
     }
 }

@@ -10,9 +10,10 @@ fn basic_system() {
     }
 
     let mut world = World::default();
+    let prefab_world = World::default();
     let mut schedule = Schedule::builder().add_system(hello_world_system()).build();
 
-    schedule.execute(&mut world, &mut Resources::default());
+    schedule.execute(&mut world, &prefab_world, &mut Resources::default());
 }
 
 #[test]
@@ -24,6 +25,7 @@ fn for_each_system() {
     }
 
     let mut world = World::default();
+    let prefab_world = World::default();
     world.extend(vec![(1usize, true), (2usize, false), (3usize, true)]);
 
     let mut resources = Resources::default();
@@ -31,7 +33,7 @@ fn for_each_system() {
 
     let mut schedule = Schedule::builder().add_system(sum_system()).build();
 
-    schedule.execute(&mut world, &mut resources);
+    schedule.execute(&mut world, &prefab_world, &mut resources);
     assert_eq!(*resources.get::<usize>().unwrap(), 6usize);
 }
 
@@ -49,11 +51,12 @@ fn query_get() {
     }
 
     let mut world = World::default();
+    let prefab_world = World::default();
     let entity = world.push(());
 
     let mut schedule = Schedule::builder().add_system(sys_system(entity)).build();
 
     let mut resources = Resources::default();
 
-    schedule.execute(&mut world, &mut resources);
+    schedule.execute(&mut world, &prefab_world, &mut resources);
 }

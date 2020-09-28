@@ -192,10 +192,16 @@ where
     }
 }
 
+struct PushPrefab {
+    prefab: Entity,
+    spawned_index: usize, // index into pending_insertion
+}
+
 #[allow(clippy::enum_variant_names)]
 enum Command {
     WriteWorld(Arc<dyn WorldWritable>),
     ExecMutWorld(Arc<dyn Fn(&mut World) + Send + Sync>),
+    PushPrefab(PushPrefab),
 }
 
 /// A command buffer used to queue mutable changes to the world from a system. This buffer is automatically
@@ -249,7 +255,7 @@ impl CommandBuffer {
     ///
     /// Command flushes are performed in a FIFO manner, allowing for reliable, linear commands being
     /// executed in the order they were provided.
-    pub fn flush(&mut self, world: &mut World) {
+    pub fn flush(&mut self, world: &mut World, prefab_world: &World) {
         if self.world_id != world.id() {
             panic!("command buffers may only write into their parent world");
         }
@@ -258,6 +264,13 @@ impl CommandBuffer {
             match command {
                 Command::WriteWorld(ptr) => ptr.write(world, self),
                 Command::ExecMutWorld(closure) => closure(world),
+                Command::PushPrefab(push_prefab) => {
+                    let spawned_entity = self.pending_insertion[push_prefab.spawned_index];
+                    if world.contains(spawned_entity) {
+                        panic!("Attempting to clone prefab into an entity ID, however that entity ID already exists");
+                    }
+                    world.clone_into_entity(prefab_world, push_prefab.prefab, spawned_entity);
+                }
             }
         }
 
@@ -291,6 +304,21 @@ impl CommandBuffer {
         <Option<T> as IntoComponentSource>::Source: KnownLength + Send + Sync,
     {
         self.extend(Some(components))[0]
+    }
+
+    /// Queues the insertion of a single prefab entity into the world.
+    /// The prefab entity belongs to prefab_world during flushing
+    pub fn push_prefab(&mut self, prefab: Entity) -> Entity {
+        let spawned_index = self.pending_insertion.len();
+        self.pending_insertion
+            .push(self.entity_allocator.next().unwrap());
+
+        self.commands.push_front(Command::PushPrefab(PushPrefab {
+            prefab,
+            spawned_index,
+        }));
+
+        self.pending_insertion[spawned_index]
     }
 
     /// Queues the insertion of new entities into the world.
@@ -383,7 +411,8 @@ mod tests {
         //    command.write_components()
         //);
 
-        command.flush(&mut world);
+        let prefab_world = World::default();
+        command.flush(&mut world, &prefab_world);
 
         let mut query = Read::<Pos>::query();
 
