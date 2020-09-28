@@ -31,6 +31,26 @@ mod tests {
     }
 
     #[test]
+    fn with_not_sendsync_resource() {
+        struct NotSync(*const usize);
+
+        #[system]
+        fn basic(#[resource] _: &NotSync) {}
+
+        Schedule::builder().add_thread_local(basic_system()).build();
+    }
+
+    #[test]
+    fn with_mut_not_sendsync_resource() {
+        struct NotSync(*const usize);
+
+        #[system]
+        fn basic(#[resource] _: &mut NotSync) {}
+
+        Schedule::builder().add_thread_local(basic_system()).build();
+    }
+
+    #[test]
     fn with_world() {
         #[system]
         #[read_component(usize)]
