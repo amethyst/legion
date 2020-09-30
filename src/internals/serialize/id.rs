@@ -27,34 +27,39 @@ thread_local! {
 
 /// Runs the provided function with this canon as context for Entity (de)serialization.
 pub fn run_as_context<F: FnOnce() -> R, R>(context: &dyn EntitySerializer, f: F) -> R {
+    struct SerializerGuard(Option<&'static dyn EntitySerializer>);
+
+    impl Drop for SerializerGuard {
+        fn drop(&mut self) {
+            // swap context back out of TLS, putting back what we took out.
+            SERIALIZER.with(|cell| {
+                let mut existing = cell.borrow_mut();
+                *existing = self.0.take();
+            });
+        }
+    }
+
     SERIALIZER.with(|cell| {
         // swap context into TLS
-        let prev = {
+        let _serializer_guard = {
             let mut existing = cell.borrow_mut();
             // Safety? Hmm
             // This &'static reference is only stored in the TLS for the duration of this function,
             // meaning it will be valid for all TLS uses as long as it's not copied anywhere else.
             // Can't express this lifetime in a TLS-static, so that's why this unsafe block needs to exist.
             //
-            // If `f` panics, we could end up with a dangling reference in the TLS block.
-            // A catch_unwind block could fix this problem
+            // If `f` unwinds, the SerializerGuard destructor will restore the previous value of
+            // SERIALIZER, so there's no risk of leaving a dangling reference.
             let hacked_context = unsafe {
                 core::mem::transmute::<&dyn EntitySerializer, &'static dyn EntitySerializer>(
                     context,
                 )
             };
-            std::mem::replace(&mut *existing, Some(hacked_context))
+            let prev = std::mem::replace(&mut *existing, Some(hacked_context));
+            SerializerGuard(prev)
         };
 
-        let result = (f)();
-
-        // swap context back out of LTS, putting back what we took out.
-        {
-            let mut existing = cell.borrow_mut();
-            *existing = prev;
-        }
-
-        result
+        (f)()
     })
 }
 
