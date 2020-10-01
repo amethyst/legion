@@ -27,15 +27,16 @@ thread_local! {
 
 /// Runs the provided function with this canon as context for Entity (de)serialization.
 pub fn run_as_context<F: FnOnce() -> R, R>(context: &dyn EntitySerializer, f: F) -> R {
-    struct SerializerGuard(Option<&'static dyn EntitySerializer>);
+    struct SerializerGuard<'a> {
+        cell: &'a RefCell<Option<&'static dyn EntitySerializer>>,
+        prev: Option<&'static dyn EntitySerializer>,
+    }
 
-    impl Drop for SerializerGuard {
+    impl Drop for SerializerGuard<'_> {
         fn drop(&mut self) {
             // swap context back out of TLS, putting back what we took out.
-            SERIALIZER.with(|cell| {
-                let mut existing = cell.borrow_mut();
-                *existing = self.0.take();
-            });
+            let mut existing = self.cell.borrow_mut();
+            *existing = self.prev;
         }
     }
 
@@ -56,7 +57,7 @@ pub fn run_as_context<F: FnOnce() -> R, R>(context: &dyn EntitySerializer, f: F)
                 )
             };
             let prev = std::mem::replace(&mut *existing, Some(hacked_context));
-            SerializerGuard(prev)
+            SerializerGuard { cell, prev }
         };
 
         (f)()
