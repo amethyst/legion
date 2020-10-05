@@ -3,7 +3,7 @@
 //!
 //! Entities in the same archetype have all of their components stored next
 //! to each other and in the same order, allowing their components to be
-//! accessed zipped slices.
+//! accessed as zipped slices.
 //!
 //! Legion performs all entity filtering at the archetype level; decisions are
 //! never made per-entity.

@@ -44,7 +44,7 @@
 //! ]);
 //! ```
 //!
-//! If your data is already organized as such, you can alternatively insert entites as a
+//! If your data is already organized as such, you can alternatively insert entities as a
 //! strucure-of-arrays.
 //!
 //! ```
@@ -80,7 +80,7 @@
 //! }
 //! ```
 //!
-//! Note that it is significantly faster to create an entity with it's initial set of components
+//! Note that it is significantly faster to create an entity with its initial set of components
 //! via `push` or `extend` than it is to add the components one-by-one after creating the entity.
 //!
 //! # Accessing components

@@ -77,7 +77,7 @@ pub(crate) fn next_component_version() -> u64 {
     COMPONENT_VERSION.fetch_add(1, Ordering::SeqCst)
 }
 
-/// A storage location for component data slices. Each component storage may hold once slice for
+/// A storage location for component data slices. Each component storage may hold one slice for
 /// each archetype inserted into the storage. The type of component stored is not known statically.
 pub trait UnknownComponentStorage: Downcast + Send + Sync {
     /// Notifies the storage of the start of a new epoch.

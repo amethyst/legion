@@ -26,8 +26,8 @@ pub mod filter_fns {
 
     /// Constructs a filter which requires that the component cannot be certain to have not changed.
     ///
-    /// This check is course grained and should be used to reject the majority of entities which have
-    /// not changed, but not all entities passed by the filter are guarenteed to have been modified.
+    /// This check is coarse grained and should be used to reject the majority of entities which have
+    /// not changed, but not all entities passed by the filter are guaranteed to have been modified.
     pub fn maybe_changed<T: Component>(
     ) -> EntityFilterTuple<TryComponentFilter<T>, ComponentChangedFilter<T>> {
         Default::default()

@@ -1,7 +1,7 @@
 //! Queries provide efficient iteration and filtering of entity components in a world.
 //!
 //! Queries are defined by two parts; "views" and "filters".
-//! Views declare what data you want to access it, and how you want to access it.
+//! Views declare what data you want to access, and how you want to access it.
 //! Filters decide which entities are to be included in the results.
 //!
 //! To construct a query, we declare our view, and then call `::query()` to convert it into
@@ -38,7 +38,7 @@
 //!
 //! Once you have a query, you can use it to pull data out of a world. At its core, a query
 //! allows you to iterate over [chunks](struct.ChunkView.html). Each chunk contains a set of
-//! entities which all have extactly the same component types attached, and the chunk provides
+//! entities which all have exactly the same component types attached, and the chunk provides
 //! access to slices of each component. A single index in each slice in a chunk contains the
 //! component for the same entity.
 //!

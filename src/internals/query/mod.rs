@@ -353,7 +353,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         // The problem:
         // The index used by the iterator, depending on the state of the query, might be
         // borrowing data from *either* the query or the world. Therefore the two lifetimes
-        // "flow into" each other. This confuses rustc as it cant pick a lifetime.
+        // "flow into" each other. This confuses rustc as it can't pick a lifetime.
         //
         // Solving this with safe code would require two lifetime HRTBs on View/Fetch with
         // constraints between them. You can't do this.
@@ -435,7 +435,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
     /// Returns an iterator which will yield all entity chunks which match the query.
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.  
-    /// Only usable with queries who's views are read-only.
+    /// Only usable with queries whose views are read-only.
     #[inline]
     pub fn iter_chunks<'query, 'world, T: EntityStore>(
         &'query mut self,
@@ -451,7 +451,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
     /// Returns a parallel iterator which will yield all entity chunks which match the query.
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.
-    /// Only usable with queries who's views are read-only.
+    /// Only usable with queries whose views are read-only.
     #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter_chunks<'a, T: EntityStore>(
@@ -525,7 +525,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
     /// Returns an iterator which will yield all components which match the query.
     ///
     /// Prefer `for_each` as it yields better performance.  
-    /// Only usable with queries who's views are read-only.
+    /// Only usable with queries whose views are read-only.
     #[inline]
     pub fn iter<'query, 'world, T: EntityStore>(
         &'query mut self,
@@ -540,7 +540,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
 
     /// Returns a parallel iterator which will yield all components which match the query.
     ///
-    /// Only usable with queries who's views are read-only.
+    /// Only usable with queries whose views are read-only.
     #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_iter<'a, T: EntityStore>(
@@ -628,7 +628,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
     /// Iterates through all entity chunks which match the query.  
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.  
-    /// Only usable with queries who's views are read-only.
+    /// Only usable with queries whose views are read-only.
     #[inline]
     pub fn for_each_chunk<'query, 'world, T: EntityStore, Body>(
         &'query mut self,
@@ -645,7 +645,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
     /// Iterates in parallel through all entity chunks which match the query.
     ///
     /// Each chunk contains slices of components for entities which all have the same component layout.  
-    /// Only usable with queries who's views are read-only.
+    /// Only usable with queries whose views are read-only.
     #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each_chunk<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
@@ -726,7 +726,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
 
     /// Iterates through all components which match the query.
     ///
-    /// Only usable with queries who's views are read-only.
+    /// Only usable with queries whose views are read-only.
     #[inline]
     pub fn for_each<'query, 'world, T: EntityStore, Body>(
         &'query mut self,
@@ -742,7 +742,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
 
     /// Iterates in parallel through all components which match the query.
     ///
-    /// Only usable with queries who's views are read-only.
+    /// Only usable with queries whose views are read-only.
     #[cfg(feature = "parallel")]
     #[inline]
     pub fn par_for_each<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
@@ -787,7 +787,7 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
         self.fetch.find_mut::<T>()
     }
 
-    /// Converts the chunk into a tuple of it's inner slices.
+    /// Converts the chunk into a tuple of its inner slices.
     ///
     /// # Examples
     ///
@@ -807,9 +807,9 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
         self.fetch.into_components()
     }
 
-    /// Converts the chunk into a tuple of it's inner slices.
+    /// Converts the chunk into a tuple of its inner slices.
     ///
-    /// Only usable with views who's elements are all read-only.
+    /// Only usable with views whose elements are all read-only.
     ///
     /// # Examples
     ///
