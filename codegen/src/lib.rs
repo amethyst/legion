@@ -1,4 +1,14 @@
+#![recursion_limit = "256"]
+
 extern crate proc_macro;
+extern crate proc_macro2;
+#[macro_use]
+extern crate quote;
+#[macro_use]
+extern crate syn;
+
+mod derive;
+
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{format_ident, quote, quote_spanned};
@@ -6,6 +16,8 @@ use syn::{
     parse_macro_input, parse_quote, Attribute, Expr, GenericArgument, Generics, Ident, Index,
     ItemFn, Lit, Meta, PathArguments, Signature, Type, Visibility,
 };
+
+// pub mod derive;
 
 /// Wraps a function in a system, and generates a new function which constructs that system.
 ///
@@ -167,6 +179,16 @@ pub fn system(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(output)
+}
+
+#[proc_macro_derive(SystemResources)]
+// TODO: accept legion crate name parameter
+pub fn system_resources(input: TokenStream) -> TokenStream {
+    let ast = syn::parse(input).unwrap();
+
+    let gen = derive::impl_system_resources(&ast);
+
+    gen.into()
 }
 
 #[derive(thiserror::Error, Debug)]

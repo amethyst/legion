@@ -18,6 +18,8 @@ use std::{
     ops::{Deref, DerefMut},
     sync::atomic::AtomicIsize,
 };
+use crate::internals::query::view::system_resources_view::SystemResourcesView;
+use crate::system_data::SystemResources;
 
 /// Unique ID for a resource.
 #[derive(Copy, Clone, Debug, Eq, PartialOrd, Ord)]
@@ -140,6 +142,14 @@ impl<'a, T: Resource> ResourceSet<'a> for Write<T> {
     unsafe fn fetch_unchecked(resources: &'a UnsafeResources) -> Self::Result {
         let type_id = &ResourceTypeId::of::<T>();
         resources.get(&type_id).unwrap().get_mut::<T>().unwrap()
+    }
+}
+
+impl<'a, S: 'a + SystemResources<'a>> ResourceSet<'a> for SystemResourcesView<S> {
+    type Result = S;
+
+    unsafe fn fetch_unchecked(resources: &'a UnsafeResources) -> Self::Result {
+        S::fetch_unchecked(resources)
     }
 }
 
@@ -358,7 +368,8 @@ impl UnsafeResources {
         self.map.remove(type_id).map(|cell| cell.into_inner())
     }
 
-    fn get(&self, type_id: &ResourceTypeId) -> Option<&ResourceCell> {
+    /// TODO
+    pub fn get(&self, type_id: &ResourceTypeId) -> Option<&ResourceCell> {
         self.map.get(type_id)
     }
 

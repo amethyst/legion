@@ -5,6 +5,8 @@ use super::{
     resources::{Resource, ResourceSet, ResourceTypeId, UnsafeResources},
     schedule::Runnable,
 };
+
+
 use crate::internals::{
     cons::{ConsAppend, ConsFlatten},
     permissions::Permissions,
@@ -20,8 +22,10 @@ use crate::internals::{
     subworld::{ArchetypeAccess, ComponentAccess, SubWorld},
     world::{World, WorldId},
 };
+use crate::system_data::{SystemResources};
 use bit_set::BitSet;
 use std::{any::TypeId, borrow::Cow, collections::HashMap, marker::PhantomData};
+use crate::internals::query::view::system_resources_view::SystemResourcesView;
 
 /// Provides an abstraction across tuples of queries for system closures.
 pub trait QuerySet: Send + Sync {
@@ -131,7 +135,7 @@ pub struct System<R, Q, F> {
 
 impl<R, Q, F> Runnable for System<R, Q, F>
 where
-    R: for<'a> ResourceSet<'a>,
+    R: ResourceSet<'static>,
     Q: QuerySet,
     F: SystemFn<R, Q>,
 {
@@ -408,6 +412,33 @@ where
         self
     }
 
+    /// A proxy function to `SystemResources::register`.
+    /// TODO: better docs
+    pub fn register_system_resources<S>(
+        mut self,
+    ) -> SystemBuilder<Q, <R as ConsAppend<SystemResourcesView<S>>>::Output>
+    where
+        S: 'static + SystemResources<'static>,
+        R: ConsAppend<SystemResourcesView<S>>,
+        <R as ConsAppend<SystemResourcesView<S>>>::Output: ConsFlatten,
+    {
+        for resource_type_id in S::read_resource_type_ids() {
+            self.resource_access.push_read(resource_type_id);
+        }
+        for resource_type_id in S::write_resource_type_ids() {
+            self.resource_access.push(resource_type_id);
+        }
+
+        SystemBuilder {
+            name: self.name,
+            queries: self.queries,
+            resources: ConsAppend::append(self.resources, SystemResourcesView::default()),
+            resource_access: self.resource_access,
+            component_access: self.component_access,
+            access_all_archetypes: self.access_all_archetypes,
+        }
+    }
+
     /// Builds a system which is not `Schedulable`, as it is not thread safe (!Send and !Sync),
     /// but still implements all the calling infrastructure of the `Runnable` trait. This provides
     /// a way for legion consumers to leverage the `System` construction and type-handling of
@@ -417,7 +448,7 @@ where
         run_fn: F,
     ) -> System<<R as ConsFlatten>::Output, <Q as ConsFlatten>::Output, F>
     where
-        <R as ConsFlatten>::Output: for<'a> ResourceSet<'a>,
+        <R as ConsFlatten>::Output: ResourceSet<'static>,
         <Q as ConsFlatten>::Output: QuerySet,
         F: FnMut(
             &mut CommandBuffer,

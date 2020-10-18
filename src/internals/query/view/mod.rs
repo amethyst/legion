@@ -22,6 +22,7 @@ use std::marker::PhantomData;
 
 pub mod entity;
 pub mod read;
+pub mod system_resources_view;
 pub mod try_read;
 pub mod try_write;
 pub mod write;
