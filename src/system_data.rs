@@ -1,9 +1,6 @@
 //! TODO
 
-
 use crate::internals::systems::resources::{ResourceTypeId, UnsafeResources};
-
-
 
 /// TODO
 pub trait SystemResources<'a> {
@@ -22,8 +19,6 @@ pub trait SystemResources<'a> {
     /// TODO
     fn write_resource_type_ids() -> Vec<ResourceTypeId>;
 }
-
-
 
 /// TODO
 pub trait SystemView {

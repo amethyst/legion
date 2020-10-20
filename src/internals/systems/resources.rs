@@ -3,10 +3,12 @@
 //! Use resources to share persistent data between systems or to provide a system with state
 //! external to entities.
 
+use crate::internals::query::view::system_resources_view::SystemResourcesView;
 use crate::internals::{
     hash::ComponentTypeIdHasher,
     query::view::{read::Read, write::Write, ReadOnly},
 };
+use crate::system_data::SystemResources;
 use downcast_rs::{impl_downcast, Downcast};
 use std::{
     any::TypeId,
@@ -18,8 +20,6 @@ use std::{
     ops::{Deref, DerefMut},
     sync::atomic::AtomicIsize,
 };
-use crate::internals::query::view::system_resources_view::SystemResourcesView;
-use crate::system_data::SystemResources;
 
 /// Unique ID for a resource.
 #[derive(Copy, Clone, Debug, Eq, PartialOrd, Ord)]

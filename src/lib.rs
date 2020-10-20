@@ -188,9 +188,9 @@ mod internals;
 // public API organized into logical modules
 pub mod query;
 pub mod storage;
+pub mod system_data;
 pub mod systems;
 pub mod world;
-pub mod system_data;
 
 #[cfg(feature = "serialize")]
 pub mod serialize;
@@ -198,7 +198,7 @@ pub mod serialize;
 // useful for users who want to construct their wrappers around SystemBuilder
 /// TODO: this is probably a bit weird way to re-export these
 pub mod cons {
-    pub use super::internals::cons::{ConsFlatten, ConsAppend, ConsPrepend};
+    pub use super::internals::cons::{ConsAppend, ConsFlatten, ConsPrepend};
 }
 
 // re-export most common types into the root

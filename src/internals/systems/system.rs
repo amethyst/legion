@@ -6,13 +6,14 @@ use super::{
     schedule::Runnable,
 };
 
-
 use crate::internals::{
     cons::{ConsAppend, ConsFlatten},
     permissions::Permissions,
     query::{
         filter::EntityFilter,
-        view::{read::Read, write::Write, IntoView, View},
+        view::{
+            read::Read, system_resources_view::SystemResourcesView, write::Write, IntoView, View,
+        },
         Query,
     },
     storage::{
@@ -22,10 +23,9 @@ use crate::internals::{
     subworld::{ArchetypeAccess, ComponentAccess, SubWorld},
     world::{World, WorldId},
 };
-use crate::system_data::{SystemResources};
+use crate::system_data::SystemResources;
 use bit_set::BitSet;
 use std::{any::TypeId, borrow::Cow, collections::HashMap, marker::PhantomData};
-use crate::internals::query::view::system_resources_view::SystemResourcesView;
 
 /// Provides an abstraction across tuples of queries for system closures.
 pub trait QuerySet: Send + Sync {

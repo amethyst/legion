@@ -207,7 +207,8 @@ enum Error {
     InvalidOptionArgument(Span, String),
     #[error(
         "system function parameters must be `CommandBuffer` or `SubWorld` references, \
-    [optioned] component references, state references, or resource references"
+    [optioned] component references, state references, resource references, \
+    or references to structs deriving SystemResources"
     )]
     InvalidArgument(Span),
     #[error("expected component type")]
@@ -309,6 +310,7 @@ struct Sig {
     query: Vec<Type>,
     read_resources: Vec<Type>,
     write_resources: Vec<Type>,
+    system_resources: Vec<Type>,
     state_args: Vec<Type>,
     generics: Generics,
 }
@@ -319,6 +321,7 @@ impl Sig {
         let mut query = Vec::<Type>::new();
         let mut read_resources = Vec::new();
         let mut write_resources = Vec::new();
+        let mut system_resources = Vec::new();
         let mut state_args = Vec::new();
         for param in &mut item.inputs {
             match param {
@@ -405,6 +408,17 @@ impl Sig {
                                     read_resources.push(ty.elem.as_ref().clone());
                                 }
                             }
+                            Some(ArgAttr::SystemResources) => {
+                                if mutable {
+                                    parameters.push(Parameter::SystemResourcesMut(
+                                        system_resources.len(),
+                                    ));
+                                } else {
+                                    parameters
+                                        .push(Parameter::SystemResources(system_resources.len()));
+                                }
+                                system_resources.push(ty.elem.as_ref().clone());
+                            }
                             Some(ArgAttr::State) => {
                                 if mutable {
                                     parameters.push(Parameter::StateMut(state_args.len()));
@@ -436,6 +450,7 @@ impl Sig {
             query,
             read_resources,
             write_resources,
+            system_resources,
             state_args,
         })
     }
@@ -446,6 +461,10 @@ impl Sig {
                 Some(ident) if ident == "resource" => {
                     attributes.remove(i);
                     return Some(ArgAttr::Resource);
+                }
+                Some(ident) if ident == "system_resources" => {
+                    attributes.remove(i);
+                    return Some(ArgAttr::SystemResources);
                 }
                 Some(ident) if ident == "state" => {
                     attributes.remove(i);
@@ -460,6 +479,7 @@ impl Sig {
 
 enum ArgAttr {
     Resource,
+    SystemResources,
     State,
 }
 
@@ -499,6 +519,8 @@ enum Parameter {
     Component(usize),
     Resource(usize),
     ResourceMut(usize),
+    SystemResources(usize),
+    SystemResourcesMut(usize),
     State(usize),
     StateMut(usize),
 }
@@ -668,8 +690,10 @@ impl Config {
 
         // construct function arguments
         let has_query = !signature.query.is_empty();
-        let single_resource =
-            (signature.read_resources.len() + signature.write_resources.len()) == 1;
+        let single_resource = (signature.read_resources.len()
+            + signature.write_resources.len()
+            + signature.system_resources.len())
+            == 1;
         let mut call_params = Vec::new();
         let mut fn_params = Vec::new();
         let mut world = None;
@@ -717,6 +741,24 @@ impl Config {
                 Parameter::ResourceMut(idx) => {
                     let idx = Index::from(*idx + signature.read_resources.len());
                     call_params.push(quote!(&mut *resources.#idx));
+                }
+                Parameter::SystemResources(_) if single_resource => {
+                    call_params.push(quote!(&*resources))
+                }
+                Parameter::SystemResourcesMut(_) if single_resource => {
+                    call_params.push(quote!(&mut *resources))
+                }
+                Parameter::SystemResources(idx) => {
+                    let idx = Index::from(
+                        *idx + signature.read_resources.len() + signature.write_resources.len(),
+                    );
+                    call_params.push(quote!(&resources.#idx));
+                }
+                Parameter::SystemResourcesMut(idx) => {
+                    let idx = Index::from(
+                        *idx + signature.read_resources.len() + signature.write_resources.len(),
+                    );
+                    call_params.push(quote!(&mut resources.#idx));
                 }
                 Parameter::State(idx) => {
                     let arg_name = format_ident!("state_{}", idx);
@@ -775,6 +817,7 @@ impl Config {
         };
         let read_resources = &signature.read_resources;
         let write_resources = &signature.write_resources;
+        let system_resources = &signature.system_resources;
         let builder = quote! {
             use legion::IntoQuery;
             #generic_parameter_names
@@ -783,8 +826,9 @@ impl Config {
                 #(.write_component::<#write_components>())*
                 #(.read_resource::<#read_resources>())*
                 #(.write_resource::<#write_resources>())*
+                #(.register_system_resources::<#system_resources>())*
                 #query
-                .build(move |cmd, world, resources, query| {
+                .build(move |cmd, world, mut resources, query| {
                     #body
                 })
         };
