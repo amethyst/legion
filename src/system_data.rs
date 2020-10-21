@@ -19,12 +19,3 @@ pub trait SystemResources<'a> {
     /// TODO
     fn write_resource_type_ids() -> Vec<ResourceTypeId>;
 }
-
-/// TODO
-pub trait SystemView {
-    // /// TODO
-    // fn register<Q, R>(system_builder: SystemBuilder<Q, R>) -> SystemBuilder<Q, R>
-    // where
-    //     Q: 'static + Send + ConsFlatten,
-    //     R: 'static + ConsFlatten;
-}
