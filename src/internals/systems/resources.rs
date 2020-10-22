@@ -130,7 +130,10 @@ impl<'a, T: Resource> ResourceSet<'a> for Read<T> {
 
     unsafe fn fetch_unchecked(resources: &'a UnsafeResources) -> Self::Result {
         let type_id = &ResourceTypeId::of::<T>();
-        resources.get(&type_id).unwrap().get::<T>().unwrap()
+        resources
+            .get(&type_id)
+            .and_then(|x| x.get::<T>())
+            .expect("resource does not exist")
     }
 }
 
@@ -139,7 +142,10 @@ impl<'a, T: Resource> ResourceSet<'a> for Write<T> {
 
     unsafe fn fetch_unchecked(resources: &'a UnsafeResources) -> Self::Result {
         let type_id = &ResourceTypeId::of::<T>();
-        resources.get(&type_id).unwrap().get_mut::<T>().unwrap()
+        resources
+            .get(&type_id)
+            .and_then(|x| x.get_mut::<T>())
+            .expect("resource does not exist")
     }
 }
 
