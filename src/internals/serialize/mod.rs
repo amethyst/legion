@@ -565,4 +565,19 @@ mod test {
 
         assert_eq!(8, world.len());
     }
+
+    #[test]
+    fn run_as_context_panic() {
+        std::panic::catch_unwind(|| {
+            let registry = Registry::<i32>::default();
+
+            super::WorldSerializer::with_entity_serializer(&registry, &mut |canon| {
+                super::id::run_as_context(canon, || panic!());
+            });
+        })
+        .unwrap_err();
+
+        // run the serialize_bincode test again
+        serialize_bincode();
+    }
 }
