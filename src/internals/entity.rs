@@ -31,19 +31,19 @@ impl Clone for Entity {
 const BLOCK_SIZE: u64 = 16;
 const BLOCK_SIZE_USIZE: usize = BLOCK_SIZE as usize;
 
+// Always divisible by BLOCK_SIZE.
 static NEXT_ENTITY: AtomicU64 = AtomicU64::new(0);
 
 /// An iterator which yields new entity IDs.
 #[derive(Debug)]
 pub struct Allocate {
-    base: u64,
-    count: u64,
+    next: u64,
 }
 
 impl Allocate {
     /// Constructs a new enity ID allocator iterator.
     pub fn new() -> Self {
-        Self { base: 0, count: 0 }
+        Self { next: 0 }
     }
 }
 
@@ -58,13 +58,15 @@ impl<'a> Iterator for Allocate {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.count == 0 {
-            self.base = NEXT_ENTITY.fetch_add(BLOCK_SIZE, Ordering::Relaxed);
-            self.count = BLOCK_SIZE;
+        if self.next % BLOCK_SIZE == 0 {
+            // This is either the first block, or we overflowed to the next block.
+            self.next = NEXT_ENTITY.fetch_add(BLOCK_SIZE, Ordering::Relaxed);
+            debug_assert_eq!(self.next % BLOCK_SIZE, 0);
         }
 
-        self.count -= 1;
-        Some(Entity(self.base + self.count))
+        let result = Some(Entity(self.next));
+        self.next += 1;
+        result
     }
 }
 
@@ -148,13 +150,16 @@ impl LocationMap {
             }
 
             if let Some(ref mut vec) = block_vec {
-                let idx = (entity.0 - block * BLOCK_SIZE) as usize;
-                match vec[idx].replace(EntityLocation(arch, ComponentIndex(base + i))) {
-                    Some(previous) => removed.push(previous),
-                    None => self.len += 1,
+                let idx = (entity.0 % BLOCK_SIZE) as usize;
+                let loc = EntityLocation(arch, ComponentIndex(base + i));
+                if let Some(previous) = vec[idx].replace(loc) {
+                    removed.push(previous);
                 }
             }
         }
+
+        self.len += ids.len() - removed.len();
+
         removed
     }
 
@@ -166,7 +171,7 @@ impl LocationMap {
     /// Returns the location of an entity.
     pub fn get(&self, entity: Entity) -> Option<EntityLocation> {
         let block = entity.0 / BLOCK_SIZE;
-        let idx = (entity.0 - block * BLOCK_SIZE) as usize;
+        let idx = (entity.0 % BLOCK_SIZE) as usize;
         if let Some(&result) = self.blocks.get(&block).and_then(|v| v.get(idx)) {
             result
         } else {
@@ -177,13 +182,12 @@ impl LocationMap {
     /// Removes an entity from the location map.
     pub fn remove(&mut self, entity: Entity) -> Option<EntityLocation> {
         let block = entity.0 / BLOCK_SIZE;
-        let idx = (entity.0 - block * BLOCK_SIZE) as usize;
+        let idx = (entity.0 % BLOCK_SIZE) as usize;
         if let Some(loc) = self.blocks.get_mut(&block).and_then(|v| v.get_mut(idx)) {
-            let original = *loc;
+            let original = loc.take();
             if original.is_some() {
                 self.len -= 1;
             }
-            *loc = None;
             original
         } else {
             None
