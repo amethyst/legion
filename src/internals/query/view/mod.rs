@@ -56,7 +56,7 @@ pub trait DefaultFilter {
     type Filter: EntityFilter + 'static;
 }
 
-/// A type which can pull entitiy data out of a world.
+/// A type which can pull entity data out of a world.
 pub trait View<'data>: DefaultFilter + Sized {
     /// The type of component references returned.
     type Element: Send + Sync + 'data;
@@ -75,7 +75,7 @@ pub trait View<'data>: DefaultFilter + Sized {
     ///
     /// This method may return mutable references to entity data via shared world references.
     /// The caller must ensure that no two view iterators are alive at the same time which access
-    /// any components in a manor which may cause mutable aliasing.
+    /// any components in a manner which may cause mutable aliasing.
     unsafe fn fetch(
         components: &'data Components,
         archetypes: &'data [Archetype],
@@ -115,7 +115,7 @@ pub trait IntoIndexableIter {
     fn into_indexable_iter(self) -> Self::IntoIter;
 }
 
-/// A type which holds onto a slice of entitiy data retrieved from a single archetype.
+/// A type which holds onto a slice of entity data retrieved from a single archetype.
 pub trait Fetch: IntoIndexableIter + Send + Sync {
     /// The inner data representation fetched from the archetype. Typically a slice reference.
     type Data;

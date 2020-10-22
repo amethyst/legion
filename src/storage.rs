@@ -2,7 +2,7 @@
 //!
 //! Any combination of types of components can be attached to each entity
 //! in a [world](../world/struct.World.html). Storing the (potentially
-//! unique) set of component values for each entity in a manor which is
+//! unique) set of component values for each entity in a manner which is
 //! efficient to search and access is the responsibility of the ECS libary.
 //!
 //! Legion achieves this via the use of "archetypes". Archetypes are a
@@ -19,7 +19,7 @@
 //!
 //! Because these components are stored contiguously in memory, iterating
 //! through the components in an archetype is extremely performant as
-//! it offers perfect cache coherence. By storing each component type in
+//! it offers perfect cache locality. By storing each component type in
 //! its own array, we only need to access the memory containing components
 //! actually reqested by the query's view (see the
 //! [query module](../query/index.html)).
@@ -30,10 +30,10 @@
 //! exists among the result set of a query.
 //!
 //! Legion mitigates this by conservatively packing archetype component
-//! slices next to each other. A component slice is considered eligable
+//! slices next to each other. A component slice is considered eligible
 //! for packing if its components have remained stable for some time (i.e no
 //! entities have been added or removed from the archetype recently) and
-//! and estimate of potential saved cache misses passes a "worthwhile"
+//! an estimate of potential saved cache misses passes a "worthwhile"
 //! threshold.
 //!
 //! By default, legion will pack component slices in the order in which

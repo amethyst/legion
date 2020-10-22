@@ -4,7 +4,7 @@ use super::{
 use crate::internals::{query::view::Fetch, storage::component::Component, world::WorldId};
 use std::{collections::HashMap, marker::PhantomData};
 
-/// A filter which performs course-grained change detection.
+/// A filter which performs coarse-grained change detection.
 ///
 /// This filter will reject _most_ components which have not
 /// been changed, but not all.
