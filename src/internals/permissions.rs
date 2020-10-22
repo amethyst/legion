@@ -55,7 +55,7 @@ impl<T: PartialEq> Permissions<T> {
             // if the item had exclusive write, move it into shared
             if index >= self.write {
                 // swap it down to the beginning of the exclusive write segment,
-                // then move the boundry over it
+                // then move the boundary over it
                 self.items.swap(index, self.write);
                 self.write += 1;
             }

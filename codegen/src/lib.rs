@@ -208,6 +208,8 @@ impl Error {
             Error::InvalidKey(span) => *span,
             Error::InvalidOptionArgument(span, _) => *span,
             Error::InvalidArgument(span) => *span,
+            Error::ExpectedComponentType(span) => *span,
+            Error::ExpectedFilterExpression(span) => *span,
             _ => Span::call_site(),
         }
     }

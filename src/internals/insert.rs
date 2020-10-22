@@ -254,8 +254,8 @@ impl<T> Drop for SoaElement<T> {
     }
 }
 
-/// Desribes a type which can convert itself into an [SoA](trait.Soa.html)
-/// representation for entity intertion.
+/// Describes a type which can convert itself into an [SoA](trait.Soa.html)
+/// representation for entity insertion.
 pub trait IntoSoa {
     /// The output entity source.
     type Source;
@@ -264,7 +264,7 @@ pub trait IntoSoa {
     fn into_soa(self) -> Self::Source;
 }
 
-/// A wrapper for an Array of Structures used for entity intertions.
+/// A wrapper for an Array of Structures used for entity insertions.
 pub struct Aos<T, Iter> {
     _phantom: PhantomData<T>,
     iter: Iter,
@@ -295,7 +295,7 @@ where
     }
 }
 
-/// A layout filter used to select the appropriate archetype for interting
+/// A layout filter used to select the appropriate archetype for inserting
 /// entities from a component source into a world.
 pub struct ComponentSourceFilter<T>(PhantomData<T>);
 

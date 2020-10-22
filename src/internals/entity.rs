@@ -126,7 +126,7 @@ impl LocationMap {
         self.get(entity).is_some()
     }
 
-    /// Inserts an collection of adjacent entities into the location map.
+    /// Inserts a collection of adjacent entities into the location map.
     pub fn insert(
         &mut self,
         ids: &[Entity],

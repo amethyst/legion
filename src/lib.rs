@@ -105,7 +105,7 @@
 //!
 //! You can augment a basic query with additional filters. For example, you can choose to exclude
 //! entities which also have a certain component, or only include entities for which a certain
-//! component has changed since the last time the query ran (this filtering is conservative and course-grained)
+//! component has changed since the last time the query ran (this filtering is conservative and coarse-grained)
 //!
 //! ```
 //! # use legion::*;
