@@ -260,17 +260,17 @@ impl Executor {
     /// Executes all systems and then flushes their command buffers.
     #[cfg(not(feature = "parallel"))]
     pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
-        let resources = resources.internal();
-        self.run_systems(world, resources);
-        self.flush_command_buffers(world);
+        let unsafe_resources = resources.internal();
+        self.run_systems(world, unsafe_resources);
+        self.flush_command_buffers(world, resources);
     }
 
     /// Executes all systems and then flushes their command buffers.
     #[cfg(feature = "parallel")]
     pub fn execute(&mut self, world: &mut World, resources: &mut Resources) {
-        let resources = resources.internal();
-        rayon::join(|| self.run_systems(world, resources), || {});
-        self.flush_command_buffers(world);
+        let unsafe_resources = resources.internal();
+        rayon::join(|| self.run_systems(world, unsafe_resources), || {});
+        self.flush_command_buffers(world, resources);
     }
 
     /// Executes all systems sequentially.
@@ -363,12 +363,12 @@ impl Executor {
     }
 
     /// Flushes the recorded command buffers for all systems.
-    pub fn flush_command_buffers(&mut self, world: &mut World) {
+    pub fn flush_command_buffers(&mut self, world: &mut World, resources: &mut Resources) {
         self.systems.iter().for_each(|system| {
             // safety: systems are exlcusive due to &mut self
             let system = unsafe { system.get_mut() };
             if let Some(cmd) = system.command_buffer_mut(world.id()) {
-                cmd.flush(world);
+                cmd.flush(world, resources);
             }
         });
     }
@@ -554,8 +554,8 @@ impl Schedule {
                 }
                 Step::FlushCmdBuffers => {
                     waiting_flush.drain(..).for_each(|e| match e {
-                        ToFlush::Executor(exec) => exec.flush_command_buffers(world),
-                        ToFlush::System(cmd) => cmd.flush(world),
+                        ToFlush::Executor(exec) => exec.flush_command_buffers(world, resources),
+                        ToFlush::System(cmd) => cmd.flush(world, resources),
                     });
                 }
                 Step::ThreadLocalFn(function) => function(world, resources),
