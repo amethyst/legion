@@ -215,13 +215,14 @@ enum Command {
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Rotation(f32);
 /// # let mut world = World::default();
+/// # let mut resources = Resources::default();
 /// let mut command_buffer = CommandBuffer::new(&world);
 /// let entity = command_buffer.push(());
 ///
 /// command_buffer.add_component(entity, Position(123.0));
 /// command_buffer.remove(entity);
 ///
-/// command_buffer.flush(&mut world);
+/// command_buffer.flush(&mut world, &mut resources);
 /// ```
 pub struct CommandBuffer {
     world_id: WorldId,
