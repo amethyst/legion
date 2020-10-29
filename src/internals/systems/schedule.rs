@@ -24,6 +24,7 @@ use crate::internals::{
     subworld::ArchetypeAccess,
     world::{World, WorldId},
 };
+use std::fmt::{Debug, Formatter};
 #[cfg(feature = "parallel")]
 use std::iter::repeat;
 
@@ -31,6 +32,12 @@ use std::iter::repeat;
 pub trait ParallelRunnable: Runnable + Send + Sync {}
 
 impl<T: Runnable + Send + Sync> ParallelRunnable for T {}
+
+impl Debug for dyn ParallelRunnable {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        Debug::fmt(&self.name(), f)
+    }
+}
 
 /// Trait describing a schedulable type. This is implemented by `System`
 pub trait Runnable {
@@ -70,11 +77,18 @@ pub trait Runnable {
     }
 }
 
+impl Debug for dyn Runnable {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        Debug::fmt(&self.name(), f)
+    }
+}
+
 /// Executes a sequence of systems, potentially in parallel, and then commits their command buffers.
 ///
 /// Systems are provided in execution order. When the `parallel` feature is enabled, the `Executor`
 /// may run some systems in parallel. The order in which side-effects (e.g. writes to resources
 /// or entities) are observed is maintained.
+#[derive(Debug)]
 pub struct Executor {
     systems: Vec<SystemBox>,
     #[cfg(feature = "parallel")]
@@ -96,7 +110,6 @@ unsafe impl Send for SystemBox {}
 unsafe impl Sync for SystemBox {}
 
 impl SystemBox {
-    #[cfg(feature = "parallel")]
     unsafe fn get(&self) -> &dyn ParallelRunnable {
         std::ops::Deref::deref(&*self.0.get())
     }
@@ -104,6 +117,13 @@ impl SystemBox {
     #[allow(clippy::mut_from_ref)]
     unsafe fn get_mut(&self) -> &mut dyn ParallelRunnable {
         std::ops::DerefMut::deref_mut(&mut *self.0.get())
+    }
+}
+
+impl Debug for SystemBox {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        // Safety: ???
+        unsafe { Debug::fmt(&self.get().name(), f) }
     }
 }
 
@@ -472,6 +492,20 @@ pub enum Step {
     ThreadLocalSystem(Box<dyn Runnable>),
 }
 
+impl Debug for Step {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Step::Systems(x) => f.debug_tuple("Systems").field(&x).finish(),
+            Step::FlushCmdBuffers => f.debug_tuple("FlushCmdBuffers").finish(),
+            Step::ThreadLocalFn(_) => f
+                .debug_tuple("ThreadLocalFn")
+                .field(&"dyn FnMut(&mut World, &mut Resources)")
+                .finish(),
+            Step::ThreadLocalSystem(x) => f.debug_tuple("ThreadLocalSystem").field(&x).finish(),
+        }
+    }
+}
+
 /// A schedule of systems for execution.
 ///
 /// # Examples
@@ -492,6 +526,7 @@ pub enum Step {
 ///
 /// schedule.execute(&mut world, &mut resources);
 /// ```
+#[derive(Debug)]
 pub struct Schedule {
     steps: Vec<Step>,
 }
