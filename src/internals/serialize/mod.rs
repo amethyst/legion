@@ -16,7 +16,7 @@ use de::{WorldDeserializer, WorldVisitor};
 use id::{Canon, EntitySerializer};
 use ser::WorldSerializer;
 use serde::{de::DeserializeSeed, Serializer};
-use std::{collections::HashMap, hash::Hash, marker::PhantomData};
+use std::{collections::HashMap, hash::Hash, marker::PhantomData, sync::Arc};
 
 pub mod archetypes;
 pub mod de;
@@ -98,7 +98,7 @@ where
         ),
     >,
     constructors: HashMap<T, (ComponentTypeId, fn(&mut EntityLayout))>,
-    canon: parking_lot::Mutex<S>,
+    canon: Arc<parking_lot::RwLock<S>>,
 }
 
 impl<T, S> Registry<T, S>
@@ -107,12 +107,12 @@ where
     S: CustomEntitySerializer + 'static,
 {
     /// Constructs a new registry.
-    pub fn new(entity_serializer: S) -> Self {
+    pub fn new(canon: Arc<parking_lot::RwLock<S>>) -> Self {
         Self {
             missing: UnknownType::Error,
             serialize_fns: HashMap::new(),
             constructors: HashMap::new(),
-            canon: parking_lot::Mutex::new(entity_serializer),
+            canon,
             _phantom_t: PhantomData,
             _phantom_s: PhantomData,
         }
@@ -209,17 +209,17 @@ where
     S: CustomEntitySerializer + Default + 'static,
 {
     fn default() -> Self {
-        Self::new(S::default())
+        Self::new(Arc::new(parking_lot::RwLock::new(S::default())))
     }
 }
 
-impl<S: CustomEntitySerializer + 'static> EntitySerializer for &parking_lot::Mutex<S> {
+impl<S: CustomEntitySerializer + 'static> EntitySerializer for &parking_lot::RwLock<S> {
     fn serialize(
         &self,
         entity: Entity,
         serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
     ) {
-        let mut canon = self.lock();
+        let mut canon = self.write();
         let serialized = canon.to_serialized(entity);
         serialize_fn(&serialized);
     }
@@ -228,7 +228,7 @@ impl<S: CustomEntitySerializer + 'static> EntitySerializer for &parking_lot::Mut
         &self,
         deserializer: &mut dyn erased_serde::Deserializer,
     ) -> Result<Entity, erased_serde::Error> {
-        let mut canon = self.lock();
+        let mut canon = self.write();
         let serialized =
             <<S as CustomEntitySerializer>::SerializedID as serde::Deserialize>::deserialize(
                 deserializer,
@@ -305,7 +305,7 @@ where
         }
     }
     fn with_entity_serializer(&self, callback: &mut dyn FnMut(&dyn EntitySerializer)) {
-        let canon_ref = &self.canon;
+        let canon_ref = &*self.canon;
         callback(&canon_ref);
     }
 }
@@ -362,7 +362,7 @@ where
         }
     }
     fn with_entity_serializer(&self, callback: &mut dyn FnMut(&dyn EntitySerializer)) {
-        let canon_ref = &self.canon;
+        let canon_ref = &*self.canon;
         callback(&canon_ref);
     }
 }
@@ -465,7 +465,7 @@ enum WorldField {
 
 #[cfg(test)]
 mod test {
-    use super::Registry;
+    use super::{Canon, Registry};
     use crate::internals::{
         entity::Entity,
         query::filter::filter_fns::any,
@@ -579,5 +579,61 @@ mod test {
 
         // run the serialize_bincode test again
         serialize_bincode();
+    }
+
+    #[test]
+    fn serialize_json_external_canon() {
+        let mut world1 = World::default();
+
+        let entity = world1.extend(vec![
+            (1usize, false, 1isize),
+            (2usize, false, 2isize),
+            (3usize, false, 3isize),
+            (4usize, false, 4isize),
+        ])[0];
+
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct EntityRef(Entity);
+
+        let with_ref = world1.extend(vec![
+            (5usize, 5isize, EntityRef(entity)),
+            (6usize, 6isize, EntityRef(entity)),
+            (7usize, 7isize, EntityRef(entity)),
+            (8usize, 8isize, EntityRef(entity)),
+        ])[0];
+
+        let locked_canon_ref = std::sync::Arc::new(parking_lot::RwLock::new(Canon::default()));
+        let mut registry = Registry::<String>::new(locked_canon_ref.clone());
+        registry.register::<usize>("usize".to_string());
+        registry.register::<bool>("bool".to_string());
+        registry.register::<isize>("isize".to_string());
+        registry.register::<EntityRef>("entity_ref".to_string());
+
+        let json = serde_json::to_value(&world1.as_serializable(any(), &registry)).unwrap();
+        println!("{:#}", json);
+        // Need to drop our read access to the canon before registry.as_deserialize will work,
+        // otherwise it will hang trying to acquire write access to the canon.
+        {
+            let canon = locked_canon_ref.read();
+            let entityname = canon.get_name(entity).unwrap();
+            assert_eq!(canon.get_id(&entityname).unwrap(), entity);
+        }
+        use serde::de::DeserializeSeed;
+        let world2: World = registry.as_deserialize().deserialize(json).unwrap();
+        let entry = world2.entry_ref(entity).unwrap();
+        assert_eq!(entry.get_component::<usize>().unwrap(), &1usize);
+        assert_eq!(entry.get_component::<bool>().unwrap(), &false);
+        assert_eq!(entry.get_component::<isize>().unwrap(), &1isize);
+        assert_eq!(
+            world2
+                .entry_ref(with_ref)
+                .unwrap()
+                .get_component::<EntityRef>()
+                .unwrap()
+                .0,
+            entity
+        );
+
+        assert_eq!(8, world2.len());
     }
 }
