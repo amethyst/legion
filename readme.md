@@ -1,4 +1,4 @@
-<img src="book/splash.png" alt="Legion ECS" />
+<img src="docs/book/splash.png" alt="Legion ECS" />
 
 [![Build Status][build_img]][build_lnk] [![Crates.io][crates_img]][crates_lnk] [![Docs.rs][doc_img]][doc_lnk]
 
