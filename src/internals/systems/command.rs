@@ -12,6 +12,7 @@ use crate::{
             ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource, KnownLength,
         },
         storage::{archetype::EntityLayout, component::Component},
+        systems::resources::Resources,
         world::{World, WorldId},
     },
     world::Allocate,
@@ -195,7 +196,7 @@ where
 #[allow(clippy::enum_variant_names)]
 enum Command {
     WriteWorld(Arc<dyn WorldWritable>),
-    ExecMutWorld(Arc<dyn Fn(&mut World) + Send + Sync>),
+    ExecMutWorld(Arc<dyn Fn(&mut World, &mut Resources) + Send + Sync>),
 }
 
 /// A command buffer used to queue mutable changes to the world from a system. This buffer is automatically
@@ -214,13 +215,14 @@ enum Command {
 /// # #[derive(Copy, Clone, Debug, PartialEq)]
 /// # struct Rotation(f32);
 /// # let mut world = World::default();
+/// # let mut resources = Resources::default();
 /// let mut command_buffer = CommandBuffer::new(&world);
 /// let entity = command_buffer.push(());
 ///
 /// command_buffer.add_component(entity, Position(123.0));
 /// command_buffer.remove(entity);
 ///
-/// command_buffer.flush(&mut world);
+/// command_buffer.flush(&mut world, &mut resources);
 /// ```
 pub struct CommandBuffer {
     world_id: WorldId,
@@ -249,7 +251,7 @@ impl CommandBuffer {
     ///
     /// Command flushes are performed in a FIFO manner, allowing for reliable, linear commands being
     /// executed in the order they were provided.
-    pub fn flush(&mut self, world: &mut World) {
+    pub fn flush(&mut self, world: &mut World, resources: &mut Resources) {
         if self.world_id != world.id() {
             panic!("command buffers may only write into their parent world");
         }
@@ -257,7 +259,7 @@ impl CommandBuffer {
         while let Some(command) = self.commands.pop_back() {
             match command {
                 Command::WriteWorld(ptr) => ptr.write(world, self),
-                Command::ExecMutWorld(closure) => closure(world),
+                Command::ExecMutWorld(closure) => closure(world, resources),
             }
         }
 
@@ -268,7 +270,7 @@ impl CommandBuffer {
     /// access to the world.
     pub fn exec_mut<F>(&mut self, f: F)
     where
-        F: 'static + Fn(&mut World) + Send + Sync,
+        F: 'static + Fn(&mut World, &mut Resources) + Send + Sync,
     {
         self.commands.push_front(Command::ExecMutWorld(Arc::new(f)));
     }
@@ -366,6 +368,7 @@ mod tests {
     #[test]
     fn simple_write_test() {
         let mut world = World::default();
+        let mut resources = Resources::default();
 
         let components = vec![
             (Pos(1., 2., 3.), Vel(0.1, 0.2, 0.3)),
@@ -383,7 +386,7 @@ mod tests {
         //    command.write_components()
         //);
 
-        command.flush(&mut world);
+        command.flush(&mut world, &mut resources);
 
         let mut query = Read::<Pos>::query();
 
