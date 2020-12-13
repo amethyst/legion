@@ -91,7 +91,7 @@ pub use crate::internals::query::{
         or::Or,
         passthrough::Passthrough,
         try_component::TryComponentFilter,
-        DynamicFilter, EntityFilter, FilterResult, GroupMatcher, LayoutFilter,
+        DynamicFilter, EntityFilter, EntityFilterTuple, FilterResult, GroupMatcher, LayoutFilter,
     },
     view::{
         read::Read, try_read::TryRead, try_write::TryWrite, write::Write, DefaultFilter, Fetch,
