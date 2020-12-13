@@ -122,7 +122,7 @@ impl SystemBox {
 
 impl Debug for SystemBox {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        // Safety: ???
+        // Safety: we have &self access, and if anyone else is mutably accessing this data concurrently via another &self, it is their responsibility to ensure that they are not beaking aliasing rules
         unsafe { Debug::fmt(&self.get().name(), f) }
     }
 }
