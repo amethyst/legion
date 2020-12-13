@@ -63,6 +63,10 @@ pub enum UnknownType {
 
 /// Describes how to serialize and deserialize a runtime `Entity` ID.
 pub trait CustomEntitySerializer {
+    /// The type used for serialized Entity IDs. Developers should be aware of their
+    /// serialization/deserialization use-cases as well as world-merge use cases when picking a
+    /// SerializedID, as the SerializedId type must identify unique entities across world
+    /// serialization/deserialization cycles as well as across world merges.
     type SerializedID: serde::Serialize + for<'a> serde::Deserialize<'a>;
     /// Constructs the serializable representation of `Entity`
     fn to_serialized(&mut self, entity: Entity) -> Self::SerializedID;
