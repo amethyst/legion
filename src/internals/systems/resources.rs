@@ -3,10 +3,12 @@
 //! Use resources to share persistent data between systems or to provide a system with state
 //! external to entities.
 
+use crate::internals::query::view::system_resources_view::SystemResourcesView;
 use crate::internals::{
     hash::ComponentTypeIdHasher,
     query::view::{read::Read, write::Write, ReadOnly},
 };
+use crate::system_data::SystemResources;
 use downcast_rs::{impl_downcast, Downcast};
 use std::{
     any::TypeId,
@@ -146,6 +148,14 @@ impl<'a, T: Resource> ResourceSet<'a> for Write<T> {
             .get(&type_id)
             .and_then(|x| x.get_mut::<T>())
             .expect("resource does not exist")
+    }
+}
+
+impl<'a, S: 'a + SystemResources<'a>> ResourceSet<'a> for SystemResourcesView<S> {
+    type Result = S;
+
+    unsafe fn fetch_unchecked(resources: &'a UnsafeResources) -> Self::Result {
+        S::fetch_unchecked(resources)
     }
 }
 
@@ -364,7 +374,8 @@ impl UnsafeResources {
         self.map.remove(type_id).map(|cell| cell.into_inner())
     }
 
-    fn get(&self, type_id: &ResourceTypeId) -> Option<&ResourceCell> {
+    /// TODO
+    pub fn get(&self, type_id: &ResourceTypeId) -> Option<&ResourceCell> {
         self.map.get(type_id)
     }
 

@@ -188,11 +188,18 @@ mod internals;
 // public API organized into logical modules
 pub mod query;
 pub mod storage;
+pub mod system_data;
 pub mod systems;
 pub mod world;
 
 #[cfg(feature = "serialize")]
 pub mod serialize;
+
+// useful for users who want to construct their wrappers around SystemBuilder
+/// TODO: this is probably a bit weird way to re-export these
+pub mod cons {
+    pub use super::internals::cons::{ConsAppend, ConsFlatten, ConsPrepend};
+}
 
 // re-export most common types into the root
 pub use crate::{
@@ -206,7 +213,7 @@ pub use crate::{
 };
 
 #[cfg(feature = "codegen")]
-pub use legion_codegen::system;
+pub use legion_codegen::{system, SystemResources};
 
 #[cfg(feature = "serialize")]
 pub use crate::serialize::Registry;

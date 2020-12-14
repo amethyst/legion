@@ -71,6 +71,29 @@ impl<T, A, B: ConsAppend<T>> ConsAppend<T> for (A, B) {
     }
 }
 
+/// Concat a cons list with another one.
+pub trait ConsConcat<T> {
+    /// Result of concat
+    type Output;
+    /// Concat to runtime cons value
+    fn concat(self, t: T) -> Self::Output;
+}
+
+impl<T> ConsConcat<T> for () {
+    type Output = T;
+    fn concat(self, t: T) -> Self::Output {
+        t
+    }
+}
+
+impl<T, A, B: ConsConcat<T>> ConsConcat<T> for (A, B) {
+    type Output = (A, <B as ConsConcat<T>>::Output);
+    fn concat(self, t: T) -> Self::Output {
+        let (a, b) = self;
+        (a, b.concat(t))
+    }
+}
+
 /// transform cons list into a flat tuple
 pub trait ConsFlatten {
     /// Flattened tuple
