@@ -70,7 +70,7 @@ Entries are not the most convenient or performant way to search or bulk-access a
 
 ```rust
 // you define a query be declaring what components you want to find, and how you will access them
-let mut query = <&Position>::query();
+let mut query = Read::<&Position>::query();
 
 // you can then iterate through the components found in the world
 for position in query.iter(&world) {
