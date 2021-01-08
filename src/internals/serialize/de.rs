@@ -2,7 +2,7 @@
 
 use super::{
     archetypes::de::ArchetypeLayoutDeserializer, entities::de::EntitiesLayoutDeserializer,
-    id::run_as_context, EntitySerializer, UnknownType, WorldField,
+    id::ENTITY_SERIALIZER, EntitySerializer, UnknownType, WorldField,
 };
 use crate::{
     internals::{
@@ -93,7 +93,7 @@ impl<'a, 'de, W: WorldDeserializer, E: EntitySerializer> Visitor<'de> for WorldV
         let world_deserializer = self.world_deserializer;
         let world_inner = &mut world;
         let hoist_ref_inner = &hoist_ref;
-        run_as_context(self.entity_serializer, || {
+        ENTITY_SERIALIZER.set(self.entity_serializer, || {
             let map = map_hoist.take().unwrap();
             hoist_ref_inner.set(Some(run(world_deserializer, *world_inner, map)));
         });

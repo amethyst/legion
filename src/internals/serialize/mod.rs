@@ -562,7 +562,7 @@ mod test {
     fn run_as_context_panic() {
         std::panic::catch_unwind(|| {
             let entity_serializer = Canon::default();
-            super::id::run_as_context(&entity_serializer, || panic!());
+            super::id::ENTITY_SERIALIZER.set(&entity_serializer, || panic!());
         })
         .unwrap_err();
 

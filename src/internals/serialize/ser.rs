@@ -2,7 +2,7 @@
 
 use super::{
     archetypes::ser::ArchetypeLayoutSerializer, entities::ser::EntitiesLayoutSerializer,
-    id::run_as_context, EntitySerializer, UnknownType, WorldField,
+    id::ENTITY_SERIALIZER, EntitySerializer, UnknownType, WorldField,
 };
 use crate::{
     internals::{query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World},
@@ -105,7 +105,7 @@ where
     let hoist_ref = &mut hoist;
     let root_ref = &mut root;
 
-    run_as_context(entity_serializer, || {
+    ENTITY_SERIALIZER.set(entity_serializer, || {
         let result = if human_readable {
             // serialize per-entity representation
             root_ref.serialize_entry(
