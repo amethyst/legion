@@ -10,7 +10,6 @@ use crate::{
         world::World,
     },
     storage::UnknownComponentWriter,
-    Entity,
 };
 use de::{WorldDeserializer, WorldVisitor};
 use id::EntitySerializer;
@@ -59,20 +58,6 @@ pub enum UnknownType {
     Ignore,
     /// Abort (de)serialization wwith an error.
     Error,
-}
-
-/// Describes how to serialize and deserialize a runtime `Entity` ID.
-pub trait CustomEntitySerializer {
-    /// The type used for serialized Entity IDs. Developers should be aware of their
-    /// serialization/deserialization use-cases as well as world-merge use cases when picking a
-    /// SerializedID, as the SerializedId type must identify unique entities across world
-    /// serialization/deserialization cycles as well as across world merges.
-    type SerializedID: serde::Serialize + for<'a> serde::Deserialize<'a>;
-    /// Constructs the serializable representation of `Entity`
-    fn to_serialized(&mut self, entity: Entity) -> Self::SerializedID;
-
-    /// Convert a `SerializedEntity` to an `Entity`.
-    fn from_serialized(&mut self, serialized: Self::SerializedID) -> Entity;
 }
 
 /// A world (de)serializer which describes how to (de)serialize the component types in a world.
@@ -219,30 +204,6 @@ where
     #[inline]
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl<S: CustomEntitySerializer + 'static> EntitySerializer for parking_lot::RwLock<S> {
-    fn serialize(
-        &self,
-        entity: Entity,
-        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
-    ) {
-        let mut canon = self.write();
-        let serialized = canon.to_serialized(entity);
-        serialize_fn(&serialized);
-    }
-
-    fn deserialize(
-        &self,
-        deserializer: &mut dyn erased_serde::Deserializer,
-    ) -> Result<Entity, erased_serde::Error> {
-        let mut canon = self.write();
-        let serialized =
-            <<S as CustomEntitySerializer>::SerializedID as serde::Deserialize>::deserialize(
-                deserializer,
-            )?;
-        Ok(canon.from_serialized(serialized))
     }
 }
 
@@ -515,7 +476,7 @@ mod test {
             (8usize, 8isize, EntityRef(entity)),
         ])[0];
 
-        let entity_serializer = parking_lot::RwLock::new(Canon::default());
+        let entity_serializer = Canon::default();
         let mut registry = Registry::<String>::default();
         registry.register::<usize>("usize".to_string());
         registry.register::<bool>("bool".to_string());
@@ -567,7 +528,7 @@ mod test {
             (8usize, 8isize),
         ]);
 
-        let entity_serializer = parking_lot::RwLock::new(Canon::default());
+        let entity_serializer = Canon::default();
         let mut registry = Registry::<i32>::default();
         registry.register::<usize>(1);
         registry.register::<bool>(2);
@@ -600,7 +561,7 @@ mod test {
     #[test]
     fn run_as_context_panic() {
         std::panic::catch_unwind(|| {
-            let entity_serializer = parking_lot::RwLock::new(Canon::default());
+            let entity_serializer = Canon::default();
             super::id::run_as_context(&entity_serializer, || panic!());
         })
         .unwrap_err();
@@ -630,7 +591,7 @@ mod test {
             (8usize, 8isize, EntityRef(entity)),
         ])[0];
 
-        let entity_serializer = parking_lot::RwLock::new(Canon::default());
+        let entity_serializer = Canon::default();
         let mut registry = Registry::<String>::new();
         registry.register::<usize>("usize".to_string());
         registry.register::<bool>("bool".to_string());
@@ -641,13 +602,10 @@ mod test {
             serde_json::to_value(&world1.as_serializable(any(), &registry, &entity_serializer))
                 .unwrap();
         println!("{:#}", json);
-        // Need to drop our read access to the canon before registry.as_deserialize will work,
-        // otherwise it will hang trying to acquire write access to the canon.
-        {
-            let canon = entity_serializer.read();
-            let entityname = canon.get_name(entity).unwrap();
-            assert_eq!(canon.get_id(&entityname).unwrap(), entity);
-        }
+
+        let entityname = entity_serializer.get_name(entity).unwrap();
+        assert_eq!(entity_serializer.get_id(&entityname).unwrap(), entity);
+
         use serde::de::DeserializeSeed;
         let world2: World = registry
             .as_deserialize(&entity_serializer)

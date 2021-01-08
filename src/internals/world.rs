@@ -806,7 +806,7 @@ impl World {
     /// registry.register::<bool>("bool".to_string());
     ///
     /// // serialize entities with the `Position` component
-    /// let entity_serializer = parking_lot::RwLock::new(Canon::default());
+    /// let entity_serializer = Canon::default();
     /// let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry, &entity_serializer)).unwrap();
     /// println!("{:#}", json);
     ///

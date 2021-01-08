@@ -25,7 +25,7 @@
 //! registry.register::<bool>("bool".to_string());
 //!
 //! // serialize entities with the `Position` component
-//! let entity_serializer = parking_lot::RwLock::new(Canon::default());
+//! let entity_serializer = Canon::default();
 //! let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry, &entity_serializer)).unwrap();
 //! println!("{:#}", json);
 //!
@@ -36,10 +36,9 @@
 
 pub use crate::internals::serialize::{
     de::WorldDeserializer,
-    id::{Canon, EntityName, EntitySerializer},
+    id::{Canon, CustomEntitySerializer, EntityName, EntitySerializer},
     ser::{SerializableWorld, WorldSerializer},
-    AutoTypeKey, CustomEntitySerializer, DeserializeIntoWorld, DeserializeNewWorld, Registry,
-    TypeKey, UnknownType,
+    AutoTypeKey, DeserializeIntoWorld, DeserializeNewWorld, Registry, TypeKey, UnknownType,
 };
 
 #[cfg(feature = "type-uuid")]
