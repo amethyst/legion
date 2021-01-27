@@ -133,7 +133,7 @@ impl<'a, T: Resource> ResourceSet<'a> for Read<T> {
         resources
             .get(&type_id)
             .and_then(|x| x.get::<T>())
-            .expect("resource does not exist")
+            .unwrap_or_else(|| panic!("resource {} does not exist", type_id.name))
     }
 }
 
@@ -145,7 +145,7 @@ impl<'a, T: Resource> ResourceSet<'a> for Write<T> {
         resources
             .get(&type_id)
             .and_then(|x| x.get_mut::<T>())
-            .expect("resource does not exist")
+            .unwrap_or_else(|| panic!("resource {} does not exist", type_id.name))
     }
 }
 
