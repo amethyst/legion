@@ -1,99 +1,66 @@
 name: CI
 
-on: 
+on:
   push:
     branches:
+      - main
       - master
+      # bors needs CI to trigger for pushes to its staging/trying branches
+      - staging
+      - trying
   pull_request:
 
+env:
+  RUSTFLAGS: -Cdebuginfo=0
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
 jobs:
-  check:
-    name: Compile
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: generate-lockfile
-      - uses: actions/cache@v1.0.1
-        with:
-          path: target
-          key: ${{ runner.OS }}-build-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.OS }}-build-
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all
-  
-  check-features:
-    name: Features
-    runs-on: ubuntu-latest
-    needs: [check]
+  tests:
+    name: Tests
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.toolchain == 'nightly' }}
     strategy:
+      fail-fast: true
       matrix:
-        features:
-          - --all-features --release
-          - --no-default-features --release
-          - --all-features
-          - --no-default-features
-          - --no-default-features --features parallel
-          - --no-default-features --features extended-tuple-impls
-          - --no-default-features --features serialize
+        os: [macos-latest, windows-latest, ubuntu-latest]
+        toolchain: [stable, beta, nightly]
     steps:
-      - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
-      - uses: actions-rs/cargo@v1
-        with:
-          command: generate-lockfile
-      - uses: actions/cache@v1.0.1
-        with:
-          path: target
-          key: ${{ runner.OS }}-build-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.OS }}-build-
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all ${{ matrix.features }}
+      - uses: actions/checkout@v2
 
-  fmt:
-    name: Rustfmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
+      - name: install ${{ matrix.toolchain }} toolchain
+        id: install_toolchain
+        uses: actions-rs/toolchain@v1
         with:
+          toolchain: ${{ matrix.toolchain }}
           profile: minimal
-          toolchain: nightly
           override: true
-          components: rustfmt
-      - uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
 
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v1
-      - uses: actions-rs/toolchain@v1
-        with:
-          profile: minimal
-          toolchain: stable
-          override: true
+      - run: rustup component add rustfmt
+        if: matrix.toolchain == 'nightly' && matrix.os == 'ubuntu-latest'
+
+      - run: cargo +nightly fmt --all -- --check
+        if: matrix.toolchain == 'nightly' && matrix.os == 'ubuntu-latest'
+        
       - run: rustup component add clippy
-      - uses: actions-rs/cargo@v1
+        if: matrix.toolchain == 'nightly'
+
+      - run: cargo +nightly clippy -Z unstable-options --workspace --all-targets --all-features
+        if: matrix.toolchain == 'nightly'
+
+      - run: cargo test --workspace --all-features
+
+      - uses: peaceiris/actions-mdbook@v1
         with:
-          command: clippy
-          args: --all -- -D warnings
+          mdbook-version: 'latest'
+        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
+
+      - run: cargo install mdbook-linkcheck
+        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
+
+      - run: mdbook build book
+        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
+
+      - run: mdbook test -L ./target/debug/deps book
+        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
