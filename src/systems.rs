@@ -3,7 +3,7 @@
 pub use crate::internals::systems::{
     command::{CommandBuffer, WorldWritable},
     resources::{
-        Fetch, FetchMut, Resource, ResourceSet, ResourceTypeId, Resources, SyncResources,
+        Resource, ResourceSet, ResourceTypeId, Resources, SyncResources,
         UnsafeResources,
     },
     schedule::{Builder, Executor, ParallelRunnable, Runnable, Schedule, Step},
