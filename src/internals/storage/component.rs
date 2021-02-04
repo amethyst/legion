@@ -1,11 +1,12 @@
 //! Contains types related to entity components.
 
-use super::{packed::PackedStorage, ComponentStorage};
 use std::{
     any::TypeId,
     fmt::{Display, Formatter},
     hash::Hasher,
 };
+
+use super::{packed::PackedStorage, ComponentStorage};
 
 /// A unique ID for a component type.
 #[derive(Copy, Clone, Debug, Eq, PartialOrd, Ord)]

@@ -55,7 +55,8 @@
 //!         vec![1usize, 2usize, 3usize],
 //!         vec![false, true, false],
 //!         vec![5.3f32, 5.3f32, 5.2f32],
-//!     ).into_soa()
+//!     )
+//!         .into_soa(),
 //! );
 //! ```
 //!
@@ -96,7 +97,11 @@
 //! // entries return `None` if the entity does not exist
 //! if let Some(mut entry) = world.entry(entity) {
 //!     // access information about the entity's archetype
-//!     println!("{:?} has {:?}", entity, entry.archetype().layout().component_types());
+//!     println!(
+//!         "{:?} has {:?}",
+//!         entity,
+//!         entry.archetype().layout().component_types()
+//!     );
 //!
 //!     // access the entity's components, returns `None` if the entity does not have the component
 //!     assert_eq!(entry.get_component::<f32>().unwrap(), &12f32);
@@ -134,11 +139,23 @@
 //! let (mut left, mut right) = world.split::<(Read<A>, Write<B>)>();
 //!
 //! // left only has permission to read A and read/write B.
-//! let b: &mut B = left.entry_mut(entity).unwrap().get_component_mut::<B>().unwrap();
+//! let b: &mut B = left
+//!     .entry_mut(entity)
+//!     .unwrap()
+//!     .get_component_mut::<B>()
+//!     .unwrap();
 //!
 //! // right can access anything _but_ writes to A and read/write to B.
-//! let a: &A = right.entry_ref(entity).unwrap().get_component::<A>().unwrap();
-//! let c: &C = right.entry_ref(entity).unwrap().get_component::<C>().unwrap();
+//! let a: &A = right
+//!     .entry_ref(entity)
+//!     .unwrap()
+//!     .get_component::<A>()
+//!     .unwrap();
+//! let c: &C = right
+//!     .entry_ref(entity)
+//!     .unwrap()
+//!     .get_component::<C>()
+//!     .unwrap();
 //! ```
 
 pub use crate::internals::{

@@ -1,11 +1,13 @@
-use super::entity::Entity;
-use super::query::filter::LayoutFilter;
-use super::storage::{
-    archetype::{Archetype, ArchetypeIndex},
-    component::ComponentTypeId,
+use std::{fmt::Debug, iter::Iterator, sync::Arc};
+
+use super::{
+    entity::Entity,
+    query::filter::LayoutFilter,
+    storage::{
+        archetype::{Archetype, ArchetypeIndex},
+        component::ComponentTypeId,
+    },
 };
-use std::iter::Iterator;
-use std::{fmt::Debug, sync::Arc};
 
 /// Events emitted by a world to subscribers. See `World.subscribe(Sender, EntityFilter)`.
 #[derive(Debug, Clone)]

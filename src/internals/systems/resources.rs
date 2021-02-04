@@ -3,12 +3,21 @@
 //! Use resources to share persistent data between systems or to provide a system with state
 //! external to entities.
 
+use std::{
+    any::TypeId,
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    fmt::{Display, Formatter},
+    hash::{BuildHasherDefault, Hasher},
+    marker::PhantomData,
+};
+
+use downcast_rs::{impl_downcast, Downcast};
+
 use crate::internals::{
     hash::ComponentTypeIdHasher,
     query::view::{read::Read, write::Write, ReadOnly},
 };
-use downcast_rs::{impl_downcast, Downcast};
-use std::{any::TypeId, cell::{RefCell}, collections::{hash_map::Entry, HashMap}, fmt::{Display, Formatter}, hash::{BuildHasherDefault, Hasher}, marker::PhantomData};
 
 /// Unique ID for a resource.
 #[derive(Copy, Clone, Debug, Eq, PartialOrd, Ord)]
@@ -63,7 +72,6 @@ impl_downcast!(Resource);
 ///
 /// # Example:
 /// ```
-///
 /// struct TypeA(usize);
 /// struct TypeB(usize);
 ///
@@ -83,7 +91,6 @@ impl_downcast!(Resource);
 ///     let (a, b) = <(Read<TypeA>, Read<TypeB>)>::fetch(&resources);
 ///     assert_eq!(a.0, b.0);
 /// }
-///
 /// ```
 pub trait ResourceSet<'a> {
     /// The resource reference returned during a fetch.
@@ -189,7 +196,11 @@ impl ResourceCell {
     /// Types which are !Sync should only be retrieved on the thread which owns the resource
     /// collection.
     pub unsafe fn get<T: Resource>(&self) -> Option<&'_ T> {
-        self.data.try_borrow_unguarded().ok().map(|b| b.downcast_ref::<T>()).flatten()
+        self.data
+            .try_borrow_unguarded()
+            .ok()
+            .map(|b| b.downcast_ref::<T>())
+            .flatten()
     }
 
     /// # Safety
@@ -348,10 +359,7 @@ impl Resources {
 
     /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
     /// the closure `f` is called to construct the object and it is then inserted into the store.
-    pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(
-        &mut self,
-        f: F,
-    ) -> &'_ mut T {
+    pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(&mut self, f: F) -> &'_ mut T {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection

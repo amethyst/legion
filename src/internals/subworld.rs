@@ -50,7 +50,7 @@ impl ArchetypeAccess {
 }
 
 /// Describes which components are available for access.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ComponentAccess<'a> {
     /// All component types are allowed.
     All,
@@ -61,7 +61,7 @@ pub enum ComponentAccess<'a> {
 }
 
 impl<'a> ComponentAccess<'a> {
-    /// Returns `truw` if the given component is accessible for reads.
+    /// Returns `true` if the given component is accessible for reads.
     pub fn allows_read(&self, component: ComponentTypeId) -> bool {
         match self {
             Self::All => true,
@@ -70,7 +70,7 @@ impl<'a> ComponentAccess<'a> {
         }
     }
 
-    /// Returns `truw` if the given component is accessible for writes.
+    /// Returns `true` if the given component is accessible for writes.
     pub fn allows_write(&self, component: ComponentTypeId) -> bool {
         match self {
             Self::All => true,
@@ -192,7 +192,6 @@ impl<'a> SubWorld<'a> {
     /// # use legion::*;
     /// # struct Position;
     /// # let mut world = World::default();
-    /// # let (_, mut world) = world.split::<&u8>();
     /// let (left, right) = world.split::<&mut Position>();
     /// ```
     ///
@@ -203,7 +202,6 @@ impl<'a> SubWorld<'a> {
     /// # use legion::*;
     /// # struct Position;
     /// # let mut world = World::default();
-    /// # let (_, mut world) = world.split::<&u8>();
     /// let (left, right) = world.split::<&Position>();
     /// ```
     ///

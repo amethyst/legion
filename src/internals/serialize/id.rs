@@ -1,12 +1,17 @@
-use crate::{
-    internals::entity::EntityHasher, internals::serialize::CustomEntitySerializer, world::Allocate,
-    Entity,
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
 };
+
 use serde::{Deserialize, Serialize, Serializer};
-use std::cell::RefCell;
-use std::collections::{hash_map::Entry, HashMap};
 use thiserror::Error;
 use uuid::Uuid;
+
+use crate::{
+    internals::{entity::EntityHasher, serialize::CustomEntitySerializer},
+    world::Allocate,
+    Entity,
+};
 
 /// Describes how to serialize and deserialize a runtime `Entity` ID.
 pub trait EntitySerializer {

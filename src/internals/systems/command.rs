@@ -5,6 +5,17 @@
 //! Command buffers are flushed at the end of the schedule, or by adding a
 //! `flush_command_buffers` step to the schedule.
 
+use std::{
+    collections::VecDeque,
+    iter::{Fuse, FusedIterator},
+    marker::PhantomData,
+    ops::Range,
+    sync::Arc,
+};
+
+use derivative::Derivative;
+use smallvec::SmallVec;
+
 use crate::{
     internals::{
         entity::Entity,
@@ -16,15 +27,6 @@ use crate::{
         world::{World, WorldId},
     },
     world::Allocate,
-};
-use derivative::Derivative;
-use smallvec::SmallVec;
-use std::ops::Range;
-use std::{
-    collections::VecDeque,
-    iter::{Fuse, FusedIterator},
-    marker::PhantomData,
-    sync::Arc,
 };
 
 /// This trait can be used to implement custom world writer types that can be directly

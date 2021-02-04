@@ -1,9 +1,10 @@
 #[cfg(feature = "codegen")]
 mod tests {
+    use std::fmt::Debug;
+
     use legion::{
         storage::Component, system, systems::CommandBuffer, world::SubWorld, Entity, Schedule,
     };
-    use std::fmt::Debug;
 
     #[test]
     fn empty() {

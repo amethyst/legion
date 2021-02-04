@@ -1,7 +1,8 @@
 //! A vector of slices.
 
-use derivative::Derivative;
 use std::iter::{FusedIterator, IntoIterator};
+
+use derivative::Derivative;
 
 /// A vector of slices.
 ///

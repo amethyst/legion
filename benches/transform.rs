@@ -1,7 +1,5 @@
+use cgmath::{prelude::*, vec3, Matrix4, Quaternion, Vector3};
 use criterion::*;
-
-use cgmath::prelude::*;
-use cgmath::{vec3, Matrix4, Quaternion, Vector3};
 use legion::*;
 use rayon::join;
 

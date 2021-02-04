@@ -70,7 +70,9 @@
 //! // create a world optimized for cases where (A, B) and/or
 //! // (A, B, C) are significant queries.
 //! let group = <(A, B, C)>::to_group();
-//! let options = WorldOptions { groups: vec![group] };
+//! let options = WorldOptions {
+//!     groups: vec![group],
+//! };
 //! let world = World::new(options);
 //! ```
 

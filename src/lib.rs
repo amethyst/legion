@@ -55,7 +55,11 @@
 //! // entries return `None` if the entity does not exist
 //! if let Some(mut entry) = world.entry(entity) {
 //!     // access information about the entity's archetype
-//!     println!("{:?} has {:?}", entity, entry.archetype().layout().component_types());
+//!     println!(
+//!         "{:?} has {:?}",
+//!         entity,
+//!         entry.archetype().layout().component_types()
+//!     );
 //!
 //!     // add an extra component
 //!     entry.add_component(12f32);
@@ -195,6 +199,11 @@ pub mod world;
 pub mod serialize;
 
 // re-export most common types into the root
+#[cfg(feature = "codegen")]
+pub use legion_codegen::system;
+
+#[cfg(feature = "serialize")]
+pub use crate::serialize::Registry;
 pub use crate::{
     query::{
         any, component, maybe_changed, passthrough, Fetch, IntoQuery, Read, TryRead, TryWrite,
@@ -204,9 +213,3 @@ pub use crate::{
     systems::{Resources, Schedule, SystemBuilder},
     world::{Entity, EntityStore, World, WorldOptions},
 };
-
-#[cfg(feature = "codegen")]
-pub use legion_codegen::system;
-
-#[cfg(feature = "serialize")]
-pub use crate::serialize::Registry;

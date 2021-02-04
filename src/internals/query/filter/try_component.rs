@@ -1,9 +1,10 @@
+use std::marker::PhantomData;
+
 use super::{
     and::And, not::Not, or::Or, passthrough::Passthrough, ActiveFilter, FilterResult, GroupMatcher,
     LayoutFilter,
 };
 use crate::internals::storage::component::{Component, ComponentTypeId};
-use std::marker::PhantomData;
 
 /// A filter which matches `true` if the entity has the given component,
 /// else it will defer.

@@ -1,13 +1,15 @@
-use crate::internals::hash::ComponentTypeIdHasher;
-use archetype::ArchetypeIndex;
-use component::{Component, ComponentTypeId};
-use downcast_rs::{impl_downcast, Downcast};
 use std::{
     collections::{HashMap, HashSet},
     hash::BuildHasherDefault,
     ops::{Deref, DerefMut, Index, IndexMut},
     sync::atomic::{AtomicU64, Ordering},
 };
+
+use archetype::ArchetypeIndex;
+use component::{Component, ComponentTypeId};
+use downcast_rs::{impl_downcast, Downcast};
+
+use crate::internals::hash::ComponentTypeIdHasher;
 
 pub mod archetype;
 pub mod component;

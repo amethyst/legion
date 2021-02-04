@@ -1,13 +1,16 @@
 //! Contains types related to inserting new entities into a [World](../world/struct.World.html)
 
-use super::entity::Entity;
-use super::query::filter::{FilterResult, LayoutFilter};
-use super::storage::{
-    archetype::{Archetype, ArchetypeIndex, EntityLayout},
-    component::{Component, ComponentTypeId},
-    ComponentIndex, ComponentStorage, MultiMut, UnknownComponentStorage,
-};
 use std::marker::PhantomData;
+
+use super::{
+    entity::Entity,
+    query::filter::{FilterResult, LayoutFilter},
+    storage::{
+        archetype::{Archetype, ArchetypeIndex, EntityLayout},
+        component::{Component, ComponentTypeId},
+        ComponentIndex, ComponentStorage, MultiMut, UnknownComponentStorage,
+    },
+};
 
 /// Provides access to writers for writing new entities into an archetype in a world.
 ///

@@ -1,5 +1,7 @@
 //! Defines all view types. Views are a component of [queries](../index.html).
 
+use std::marker::PhantomData;
+
 use super::{
     filter::{and::And, EntityFilter, EntityFilterTuple},
     QueryResult,
@@ -18,7 +20,6 @@ use crate::internals::{
     },
     subworld::ComponentAccess,
 };
-use std::marker::PhantomData;
 
 pub mod entity;
 pub mod read;

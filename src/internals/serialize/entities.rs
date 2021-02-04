@@ -1,4 +1,9 @@
 pub mod ser {
+    use std::{collections::HashMap, marker::PhantomData};
+
+    use itertools::Itertools;
+    use serde::{ser::SerializeMap, Serialize, Serializer};
+
     use crate::internals::{
         query::filter::LayoutFilter,
         serialize::{ser::WorldSerializer, UnknownType},
@@ -9,9 +14,6 @@ pub mod ser {
         },
         world::World,
     };
-    use itertools::Itertools;
-    use serde::{ser::SerializeMap, Serialize, Serializer};
-    use std::{collections::HashMap, marker::PhantomData};
 
     pub struct EntitiesLayoutSerializer<'a, W: WorldSerializer, F: LayoutFilter> {
         pub world_serializer: &'a W,
@@ -47,15 +49,17 @@ pub mod ser {
                     Ok(type_id) => {
                         type_mappings.insert(*id, type_id);
                     }
-                    Err(error) => match error {
-                        UnknownType::Ignore => {}
-                        UnknownType::Error => {
-                            return Err(serde::ser::Error::custom(format!(
-                                "unknown component type {:?}",
-                                *id
-                            )));
+                    Err(error) => {
+                        match error {
+                            UnknownType::Ignore => {}
+                            UnknownType::Error => {
+                                return Err(serde::ser::Error::custom(format!(
+                                    "unknown component type {:?}",
+                                    *id
+                                )));
+                            }
                         }
-                    },
+                    }
                 }
             }
 
@@ -153,6 +157,13 @@ pub mod ser {
 }
 
 pub mod de {
+    use std::{collections::HashMap, rc::Rc};
+
+    use serde::{
+        de::{DeserializeSeed, IgnoredAny, MapAccess, Visitor},
+        Deserializer,
+    };
+
     use crate::internals::{
         entity::Entity,
         insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource},
@@ -160,11 +171,6 @@ pub mod de {
         storage::{archetype::EntityLayout, component::ComponentTypeId},
         world::World,
     };
-    use serde::{
-        de::{DeserializeSeed, IgnoredAny, MapAccess, Visitor},
-        Deserializer,
-    };
-    use std::{collections::HashMap, rc::Rc};
 
     pub struct EntitiesLayoutDeserializer<'a, W: WorldDeserializer> {
         pub world_deserializer: &'a W,
@@ -259,14 +265,18 @@ pub mod de {
                                     })?,
                                 );
                             }
-                            Err(missing) => match missing {
-                                UnknownType::Ignore => {
-                                    map.next_value::<IgnoredAny>()?;
+                            Err(missing) => {
+                                match missing {
+                                    UnknownType::Ignore => {
+                                        map.next_value::<IgnoredAny>()?;
+                                    }
+                                    UnknownType::Error => {
+                                        return Err(serde::de::Error::custom(
+                                            "unknown component type",
+                                        ));
+                                    }
                                 }
-                                UnknownType::Error => {
-                                    return Err(serde::de::Error::custom("unknown component type"));
-                                }
-                            },
+                            }
                         }
                     }
 

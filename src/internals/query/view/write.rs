@@ -1,5 +1,9 @@
 #![doc(hidden)]
 
+use std::{any::TypeId, marker::PhantomData, slice::Iter};
+
+use derivative::Derivative;
+
 use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, View};
 use crate::internals::{
     iter::indexed::IndexedIter,
@@ -15,8 +19,6 @@ use crate::internals::{
     },
     subworld::ComponentAccess,
 };
-use derivative::Derivative;
-use std::{any::TypeId, marker::PhantomData, slice::Iter};
 
 /// Writes a single mutable entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
@@ -124,9 +126,11 @@ impl<'a, T: Component> Iterator for WriteIter<'a, T> {
             Self::Indexed {
                 components,
                 archetypes,
-            } => archetypes
-                .next()
-                .map(|i| unsafe { components.get_mut(*i).map(|c| c.into()) }),
+            } => {
+                archetypes
+                    .next()
+                    .map(|i| unsafe { components.get_mut(*i).map(|c| c.into()) })
+            }
             Self::Grouped { slices } => slices.next().map(|c| Some(c.into())),
             Self::Empty => None,
         }

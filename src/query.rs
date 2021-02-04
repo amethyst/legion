@@ -80,6 +80,8 @@
 //! }
 //! ```
 
+#[cfg(feature = "parallel")]
+pub use crate::internals::query::par_iter::{Iter, ParChunkIter};
 pub use crate::internals::query::{
     filter::{
         and::And,
@@ -99,6 +101,3 @@ pub use crate::internals::query::{
     },
     ChunkIter, ChunkView, IntoQuery, Query,
 };
-
-#[cfg(feature = "parallel")]
-pub use crate::internals::query::par_iter::{Iter, ParChunkIter};

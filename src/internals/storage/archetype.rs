@@ -8,6 +8,12 @@
 //! Legion performs all entity filtering at the archetype level; decisions are
 //! never made per-entity.
 
+use std::{
+    ops::{Index, IndexMut},
+    rc::Rc,
+    sync::Arc,
+};
+
 use super::{
     component::{Component, ComponentTypeId},
     UnknownComponentStorage,
@@ -16,11 +22,6 @@ use crate::internals::{
     entity::Entity,
     event::{Event, Subscriber, Subscribers},
     query::filter::{FilterResult, LayoutFilter},
-};
-use std::{
-    ops::{Index, IndexMut},
-    rc::Rc,
-    sync::Arc,
 };
 
 /// The index of an archetype in a world.

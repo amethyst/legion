@@ -1,12 +1,19 @@
 //! Contains types related to the [World](struct.World.html) entity collection.
 
-use super::entity::{
-    Allocate, Entity, EntityHasher, EntityLocation, LocationMap, ID_CLONE_MAPPINGS,
+use std::{
+    collections::HashMap,
+    ops::Range,
+    sync::atomic::{AtomicU64, Ordering},
 };
-use super::insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource};
+
+use bit_set::BitSet;
+use itertools::Itertools;
+
 use super::{
+    entity::{Allocate, Entity, EntityHasher, EntityLocation, LocationMap, ID_CLONE_MAPPINGS},
     entry::{Entry, EntryMut, EntryRef},
     event::{EventSender, Subscriber, Subscribers},
+    insert::{ArchetypeSource, ArchetypeWriter, ComponentSource, IntoComponentSource},
     query::{
         filter::{EntityFilter, LayoutFilter},
         view::{IntoView, View},
@@ -20,13 +27,6 @@ use super::{
         ComponentIndex, Components, PackOptions, UnknownComponentStorage,
     },
     subworld::{ComponentAccess, SubWorld},
-};
-use bit_set::BitSet;
-use itertools::Itertools;
-use std::{
-    collections::HashMap,
-    ops::Range,
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 type MapEntry<'a, K, V> = std::collections::hash_map::Entry<'a, K, V>;
@@ -215,7 +215,7 @@ impl World {
     /// let mut world = World::default();
     /// let _entities = world.extend(vec![
     ///     (1usize, false, 5.3f32),
-    ///     (2usize, true,  5.3f32),
+    ///     (2usize, true, 5.3f32),
     ///     (3usize, false, 5.3f32),
     /// ]);
     /// ```
@@ -229,7 +229,8 @@ impl World {
     ///         vec![1usize, 2usize, 3usize],
     ///         vec![false, true, false],
     ///         vec![5.3f32, 5.3f32, 5.2f32],
-    ///     ).into_soa()
+    ///     )
+    ///         .into_soa(),
     /// );
     /// ```
     /// SoA inserts require all vectors to have the same length. These inserts are faster than inserting via an iterator of tuples.
@@ -805,7 +806,8 @@ impl World {
     /// registry.register::<bool>("bool".to_string());
     ///
     /// // serialize entities with the `Position` component
-    /// let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry)).unwrap();
+    /// let json =
+    ///     serde_json::to_value(&world.as_serializable(component::<Position>(), &registry)).unwrap();
     /// println!("{:#}", json);
     ///
     /// // registries can also be used to deserialize

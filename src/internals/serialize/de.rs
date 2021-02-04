@@ -1,5 +1,10 @@
 //! World deserialization types.
 
+use serde::{
+    de::{MapAccess, Visitor},
+    Deserialize, Deserializer,
+};
+
 use super::{
     archetypes::de::ArchetypeLayoutDeserializer, entities::de::EntitiesLayoutDeserializer,
     id::run_as_context, EntitySerializer, UnknownType, WorldField,
@@ -10,10 +15,6 @@ use crate::{
         world::World,
     },
     storage::UnknownComponentWriter,
-};
-use serde::{
-    de::{MapAccess, Visitor},
-    Deserialize, Deserializer,
 };
 
 /// Describes a type which knows how to deserialize the components in a world.

@@ -1,5 +1,12 @@
 //! Contains types required to serialize and deserialize a world via the serde library.
 
+use std::{collections::HashMap, hash::Hash, marker::PhantomData, sync::Arc};
+
+use de::{WorldDeserializer, WorldVisitor};
+use id::{Canon, EntitySerializer};
+use ser::WorldSerializer;
+use serde::{de::DeserializeSeed, Serializer};
+
 use crate::{
     internals::{
         storage::{
@@ -12,11 +19,6 @@ use crate::{
     storage::UnknownComponentWriter,
     Entity,
 };
-use de::{WorldDeserializer, WorldVisitor};
-use id::{Canon, EntitySerializer};
-use ser::WorldSerializer;
-use serde::{de::DeserializeSeed, Serializer};
-use std::{collections::HashMap, hash::Hash, marker::PhantomData, sync::Arc};
 
 pub mod archetypes;
 pub mod de;

@@ -1,7 +1,11 @@
 //! Contains types related to defining system schedules.
 
-use std::cell::UnsafeCell;
-
+#[cfg(feature = "parallel")]
+use std::iter::repeat;
+use std::{
+    cell::UnsafeCell,
+    fmt::{Debug, Formatter},
+};
 #[cfg(feature = "parallel")]
 use std::{
     collections::{HashMap, HashSet},
@@ -9,10 +13,9 @@ use std::{
 };
 
 #[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
-#[cfg(feature = "parallel")]
 use itertools::izip;
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 use super::{
     command::CommandBuffer,
@@ -24,9 +27,6 @@ use crate::internals::{
     subworld::ArchetypeAccess,
     world::{World, WorldId},
 };
-use std::fmt::{Debug, Formatter};
-#[cfg(feature = "parallel")]
-use std::iter::repeat;
 
 /// A `Runnable` which is also `Send` and `Sync`.
 pub trait ParallelRunnable: Runnable + Send + Sync {}
@@ -497,10 +497,11 @@ impl Debug for Step {
         match self {
             Step::Systems(x) => f.debug_tuple("Systems").field(&x).finish(),
             Step::FlushCmdBuffers => f.debug_tuple("FlushCmdBuffers").finish(),
-            Step::ThreadLocalFn(_) => f
-                .debug_tuple("ThreadLocalFn")
-                .field(&"dyn FnMut(&mut World, &mut Resources)")
-                .finish(),
+            Step::ThreadLocalFn(_) => {
+                f.debug_tuple("ThreadLocalFn")
+                    .field(&"dyn FnMut(&mut World, &mut Resources)")
+                    .finish()
+            }
             Step::ThreadLocalSystem(x) => f.debug_tuple("ThreadLocalSystem").field(&x).finish(),
         }
     }
@@ -588,9 +589,11 @@ impl Schedule {
                     waiting_flush.push(ToFlush::Executor(executor));
                 }
                 Step::FlushCmdBuffers => {
-                    waiting_flush.drain(..).for_each(|e| match e {
-                        ToFlush::Executor(exec) => exec.flush_command_buffers(world, resources),
-                        ToFlush::System(cmd) => cmd.flush(world, resources),
+                    waiting_flush.drain(..).for_each(|e| {
+                        match e {
+                            ToFlush::Executor(exec) => exec.flush_command_buffers(world, resources),
+                            ToFlush::System(cmd) => cmd.flush(world, resources),
+                        }
                     });
                 }
                 Step::ThreadLocalFn(function) => function(world, resources),
@@ -625,13 +628,15 @@ impl From<Vec<Step>> for Schedule {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use itertools::sorted;
+
     use super::*;
     use crate::internals::{
         query::{view::write::Write, IntoQuery},
         systems::system::SystemBuilder,
     };
-    use itertools::sorted;
-    use std::sync::{Arc, Mutex};
 
     #[test]
     fn execute_in_order() {

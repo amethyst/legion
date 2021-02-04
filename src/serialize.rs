@@ -24,7 +24,8 @@
 //! registry.register::<bool>("bool".to_string());
 //!
 //! // serialize entities with the `Position` component
-//! let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry)).unwrap();
+//! let json =
+//!     serde_json::to_value(&world.as_serializable(component::<Position>(), &registry)).unwrap();
 //! println!("{:#}", json);
 //!
 //! // registries are also serde deserializers
@@ -32,6 +33,8 @@
 //! let world: World = registry.as_deserialize().deserialize(json).unwrap();
 //! ```
 
+#[cfg(feature = "type-uuid")]
+pub use crate::internals::serialize::SerializableTypeUuid;
 pub use crate::internals::serialize::{
     de::WorldDeserializer,
     id::{Canon, EntityName, EntitySerializer},
@@ -39,6 +42,3 @@ pub use crate::internals::serialize::{
     AutoTypeKey, CustomEntitySerializer, DeserializeIntoWorld, DeserializeNewWorld, Registry,
     TypeKey, UnknownType,
 };
-
-#[cfg(feature = "type-uuid")]
-pub use crate::internals::serialize::SerializableTypeUuid;

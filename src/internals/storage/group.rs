@@ -1,9 +1,11 @@
+use std::{collections::HashSet, ops::Index};
+
+use smallvec::SmallVec;
+
 use super::{
     archetype::{Archetype, ArchetypeIndex},
     component::{Component, ComponentTypeId},
 };
-use smallvec::SmallVec;
-use std::{collections::HashSet, ops::Index};
 
 /// Describes the components in a component group.
 #[derive(Default)]

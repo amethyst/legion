@@ -1,3 +1,9 @@
+use std::{collections::HashMap, marker::PhantomData, ops::Range, slice::Iter};
+
+use filter::{DynamicFilter, EntityFilter, GroupMatcher};
+use parking_lot::Mutex;
+use view::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnlyFetch, View};
+
 use super::world::EntityAccessError;
 use crate::internals::{
     entity::Entity,
@@ -8,10 +14,6 @@ use crate::internals::{
     },
     world::{EntityStore, StorageAccessor, WorldId},
 };
-use filter::{DynamicFilter, EntityFilter, GroupMatcher};
-use parking_lot::Mutex;
-use std::{collections::HashMap, marker::PhantomData, ops::Range, slice::Iter};
-use view::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnlyFetch, View};
 
 pub mod filter;
 pub mod view;
@@ -195,9 +197,11 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
             };
 
             // else use an unordered result
-            cache.unwrap_or_else(|| Cache::Unordered {
-                archetypes: Vec::new(),
-                seen: 0,
+            cache.unwrap_or_else(|| {
+                Cache::Unordered {
+                    archetypes: Vec::new(),
+                    seen: 0,
+                }
             })
         });
 
@@ -800,7 +804,8 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
     /// # let mut world = World::default();
     /// let mut query = <(Entity, Read<A>, Write<B>, TryRead<C>, TryWrite<D>)>::query();
     /// for chunk in query.iter_chunks_mut(&mut world) {
-    ///     let slices: (&[Entity], &[A], &mut [B], Option<&[C]>, Option<&mut [D]>) = chunk.into_components();       
+    ///     let slices: (&[Entity], &[A], &mut [B], Option<&[C]>, Option<&mut [D]>) =
+    ///         chunk.into_components();
     /// }
     /// ```
     pub fn into_components(self) -> F::Data {
@@ -820,7 +825,7 @@ impl<'a, F: Fetch> ChunkView<'a, F> {
     /// # let mut world = World::default();
     /// let mut query = <(Entity, Read<A>, TryRead<B>)>::query();
     /// for chunk in query.iter_chunks_mut(&mut world) {
-    ///     let slices: (&[Entity], &[A], Option<&[B]>) = chunk.get_components();       
+    ///     let slices: (&[Entity], &[A], Option<&[B]>) = chunk.get_components();
     /// }
     /// ```
     pub fn get_components(&self) -> F::Data
@@ -926,10 +931,14 @@ where
 
 #[cfg(feature = "parallel")]
 pub mod par_iter {
-    use super::*;
-    use rayon::iter::plumbing::{bridge_unindexed, Folder, UnindexedConsumer, UnindexedProducer};
-    use rayon::iter::ParallelIterator;
     use std::marker::PhantomData;
+
+    use rayon::iter::{
+        plumbing::{bridge_unindexed, Folder, UnindexedConsumer, UnindexedProducer},
+        ParallelIterator,
+    };
+
+    use super::*;
 
     /// An entity chunk iterator which internally locks its filter during iteration.
     #[must_use = "iterator adaptors are lazy and do nothing unless consumed"]
@@ -1087,8 +1096,10 @@ pub mod par_iter {
 
 #[cfg(test)]
 mod test {
-    use super::view::{read::Read, write::Write};
-    use super::IntoQuery;
+    use super::{
+        view::{read::Read, write::Write},
+        IntoQuery,
+    };
     use crate::internals::world::World;
 
     #[test]
@@ -1119,6 +1130,33 @@ mod test {
 
         let single = query.get_mut(&mut world, entity);
         assert_eq!(single, Ok((&10usize, &mut false)));
+    }
+
+    #[test]
+    fn complex_query_split() {
+        #[derive(Debug)]
+        struct A;
+        #[derive(Debug)]
+        struct B;
+        #[derive(Debug)]
+        struct C;
+
+        let mut world = World::default();
+        world.push((A, B));
+        world.push((A, C));
+
+        let mut query_a = <(&A, &B)>::query();
+        let mut query_b = <(&A, &mut C)>::query();
+
+        let (mut left, right) = world.split_for_query(&query_b);
+
+        for (a, c) in query_b.iter_mut(&mut left) {
+            println!("{:?} {:?}", a, c);
+
+            for (a, b) in query_a.iter(&right) {
+                println!("{:?} {:?}", a, b);
+            }
+        }
     }
 
     #[test]

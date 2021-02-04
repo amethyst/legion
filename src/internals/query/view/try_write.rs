@@ -1,5 +1,9 @@
 #![doc(hidden)]
 
+use std::{any::TypeId, marker::PhantomData};
+
+use derivative::Derivative;
+
 use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, View};
 use crate::internals::{
     iter::indexed::{IndexedIter, TrustedRandomAccess},
@@ -15,8 +19,6 @@ use crate::internals::{
     },
     subworld::ComponentAccess,
 };
-use derivative::Derivative;
-use std::{any::TypeId, marker::PhantomData};
 
 /// Writes a single entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
@@ -174,9 +176,14 @@ impl<'a, T: Component> Fetch for Slice<'a, T> {
         if TypeId::of::<C>() == TypeId::of::<T>() {
             // safety: C and T are the same type
             match self {
-                Self::Occupied { components, .. } => Some(unsafe {
-                    std::slice::from_raw_parts(components.as_ptr() as *const C, components.len())
-                }),
+                Self::Occupied { components, .. } => {
+                    Some(unsafe {
+                        std::slice::from_raw_parts(
+                            components.as_ptr() as *const C,
+                            components.len(),
+                        )
+                    })
+                }
                 Self::Empty(_) => None,
             }
         } else {
@@ -189,12 +196,14 @@ impl<'a, T: Component> Fetch for Slice<'a, T> {
         if TypeId::of::<C>() == TypeId::of::<T>() {
             // safety: C and T are the same type
             match self {
-                Self::Occupied { components, .. } => Some(unsafe {
-                    std::slice::from_raw_parts_mut(
-                        components.as_mut_ptr() as *mut C,
-                        components.len(),
-                    )
-                }),
+                Self::Occupied { components, .. } => {
+                    Some(unsafe {
+                        std::slice::from_raw_parts_mut(
+                            components.as_mut_ptr() as *mut C,
+                            components.len(),
+                        )
+                    })
+                }
                 Self::Empty(_) => None,
             }
         } else {

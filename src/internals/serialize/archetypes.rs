@@ -1,4 +1,12 @@
 pub mod ser {
+    use std::collections::HashMap;
+
+    use itertools::Itertools;
+    use serde::{
+        ser::{SerializeMap, SerializeSeq, SerializeStruct},
+        Serialize, Serializer,
+    };
+
     use crate::internals::{
         query::filter::LayoutFilter,
         serialize::{ser::WorldSerializer, UnknownType},
@@ -9,12 +17,6 @@ pub mod ser {
         },
         world::World,
     };
-    use itertools::Itertools;
-    use serde::{
-        ser::{SerializeMap, SerializeSeq, SerializeStruct},
-        Serialize, Serializer,
-    };
-    use std::collections::HashMap;
 
     pub struct ArchetypeLayoutSerializer<'a, W: WorldSerializer, F: LayoutFilter> {
         pub world_serializer: &'a W,
@@ -48,15 +50,17 @@ pub mod ser {
                     Ok(type_id) => {
                         type_mappings.insert(*id, type_id);
                     }
-                    Err(error) => match error {
-                        UnknownType::Ignore => {}
-                        UnknownType::Error => {
-                            return Err(serde::ser::Error::custom(format!(
-                                "unknown component type {:?}",
-                                *id
-                            )));
+                    Err(error) => {
+                        match error {
+                            UnknownType::Ignore => {}
+                            UnknownType::Error => {
+                                return Err(serde::ser::Error::custom(format!(
+                                    "unknown component type {:?}",
+                                    *id
+                                )));
+                            }
                         }
-                    },
+                    }
                 }
             }
 
@@ -174,6 +178,13 @@ pub mod ser {
 }
 
 pub mod de {
+    use std::{marker::PhantomData, rc::Rc};
+
+    use serde::{
+        de::{DeserializeSeed, MapAccess, SeqAccess, Visitor},
+        Deserialize, Deserializer,
+    };
+
     use crate::{
         internals::{
             serialize::de::WorldDeserializer,
@@ -182,11 +193,6 @@ pub mod de {
         },
         storage::{ArchetypeSource, ComponentSource, IntoComponentSource, UnknownComponentWriter},
     };
-    use serde::{
-        de::{DeserializeSeed, MapAccess, SeqAccess, Visitor},
-        Deserialize, Deserializer,
-    };
-    use std::{marker::PhantomData, rc::Rc};
 
     pub struct ArchetypeLayoutDeserializer<'a, W: WorldDeserializer> {
         pub world_deserializer: &'a W,
@@ -461,10 +467,12 @@ pub mod de {
             while let Some(key) = self.map.next_key()? {
                 match key {
                     ArchetypeField::Entities => self.map.next_value_seed(EntitySeq { writer })?,
-                    ArchetypeField::Components => self.map.next_value_seed(ComponentMap {
-                        writer,
-                        world_deserializer: self.world_deserializer,
-                    })?,
+                    ArchetypeField::Components => {
+                        self.map.next_value_seed(ComponentMap {
+                            writer,
+                            world_deserializer: self.world_deserializer,
+                        })?
+                    }
                     _ => return Err(V::Error::custom("unexpected field")),
                 }
             }

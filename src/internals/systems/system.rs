@@ -1,5 +1,9 @@
 //! Contains types related to the definition of systems.
 
+use std::{any::TypeId, borrow::Cow, collections::HashMap, marker::PhantomData};
+
+use bit_set::BitSet;
+
 use super::{
     command::CommandBuffer,
     resources::{Resource, ResourceSet, ResourceTypeId, UnsafeResources},
@@ -20,8 +24,6 @@ use crate::internals::{
     subworld::{ArchetypeAccess, ComponentAccess, SubWorld},
     world::{World, WorldId},
 };
-use bit_set::BitSet;
-use std::{any::TypeId, borrow::Cow, collections::HashMap, marker::PhantomData};
 
 /// Provides an abstraction across tuples of queries for system closures.
 pub trait QuerySet: Send + Sync {
@@ -240,15 +242,17 @@ where
 /// #[derive(Debug)]
 /// struct TestResource {}
 ///
-///  let mut system_one = SystemBuilder::new("TestSystem")
-///            .read_resource::<TestResource>()
-///            .with_query(<(Entity, Read<Position>, Read<Model>)>::query()
-///                         .filter(!component::<Static>() | maybe_changed::<Position>()))
-///            .build(move |commands, world, resource, queries| {
-///                for (entity, pos, model) in queries.iter_mut(world) {
-///
-///                }
-///            });
+/// let mut system_one = SystemBuilder::new("TestSystem")
+///     .read_resource::<TestResource>()
+///     .with_query(
+///         <(Entity, Read<Position>, Read<Model>)>::query()
+///             .filter(!component::<Static>() | maybe_changed::<Position>()),
+///     )
+///     .build(
+///         move |commands, world, resource, queries| {
+///             for (entity, pos, model) in queries.iter_mut(world) {}
+///         },
+///     );
 /// ```
 pub struct SystemBuilder<Q = (), R = ()> {
     name: Option<SystemId>,

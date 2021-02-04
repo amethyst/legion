@@ -1,11 +1,11 @@
 #![allow(clippy::map_clone)]
 
-use legion::*;
 use std::collections::HashMap;
-
-use query::Query;
 #[cfg(feature = "parallel")]
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+use legion::*;
+use query::Query;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Pos(f32, f32, f32);

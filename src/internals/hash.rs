@@ -51,8 +51,7 @@ impl Hasher for U64Hasher {
 #[test]
 fn hasher() {
     fn verify<T: 'static + ?Sized>() {
-        use core::any::TypeId;
-        use core::hash::Hash;
+        use core::{any::TypeId, hash::Hash};
 
         let mut hasher = ComponentTypeIdHasher::default();
         let type_id = TypeId::of::<T>();

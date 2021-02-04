@@ -1,5 +1,7 @@
 //! World serialization types.
 
+use serde::ser::{Serialize, SerializeMap, Serializer};
+
 use super::{
     archetypes::ser::ArchetypeLayoutSerializer, entities::ser::EntitiesLayoutSerializer,
     id::run_as_context, EntitySerializer, UnknownType, WorldField,
@@ -8,7 +10,6 @@ use crate::{
     internals::{query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World},
     storage::{ArchetypeIndex, UnknownComponentStorage},
 };
-use serde::ser::{Serialize, SerializeMap, Serializer};
 
 /// Describes a type which knows how to deserialize the components in a world.
 pub trait WorldSerializer {

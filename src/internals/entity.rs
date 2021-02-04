@@ -1,13 +1,14 @@
-use super::{
-    hash::U64Hasher,
-    storage::{archetype::ArchetypeIndex, ComponentIndex},
-};
 use std::{
     cell::RefCell,
     collections::HashMap,
     fmt::Debug,
     hash::BuildHasherDefault,
     sync::atomic::{AtomicU64, Ordering},
+};
+
+use super::{
+    hash::U64Hasher,
+    storage::{archetype::ArchetypeIndex, ComponentIndex},
 };
 
 /// An opaque identifier for an entity.

@@ -1,5 +1,4 @@
 use criterion::*;
-
 use legion::*;
 
 fn bench_insert_zero_baseline(c: &mut Criterion) {

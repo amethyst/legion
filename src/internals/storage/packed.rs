@@ -1,10 +1,5 @@
 //! Component storage which can pack archetypes into contiguous memory.
 
-use super::{
-    archetype::ArchetypeIndex, component::Component, next_component_version, ComponentIndex,
-    ComponentMeta, ComponentSlice, ComponentSliceMut, ComponentStorage, Epoch,
-    UnknownComponentStorage,
-};
 use std::{
     alloc::Layout,
     cell::UnsafeCell,
@@ -14,6 +9,12 @@ use std::{
     ptr::NonNull,
     rc::Rc,
     slice::Iter,
+};
+
+use super::{
+    archetype::ArchetypeIndex, component::Component, next_component_version, ComponentIndex,
+    ComponentMeta, ComponentSlice, ComponentSliceMut, ComponentStorage, Epoch,
+    UnknownComponentStorage,
 };
 
 /// A memory allocation for an array of `T`.
@@ -126,10 +127,12 @@ impl<T> ComponentVec<T> {
         match self {
             Self::Packed {
                 raw, offset, len, ..
-            } => (
-                unsafe { NonNull::new_unchecked(raw.ptr.as_ptr().add(*offset)) },
-                *len,
-            ),
+            } => {
+                (
+                    unsafe { NonNull::new_unchecked(raw.ptr.as_ptr().add(*offset)) },
+                    *len,
+                )
+            }
             Self::Loose { raw, len, .. } => {
                 (unsafe { NonNull::new_unchecked(raw.ptr.as_ptr()) }, *len)
             }

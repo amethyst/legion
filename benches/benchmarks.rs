@@ -1,6 +1,5 @@
 use criterion::*;
 use itertools::*;
-
 use legion::*;
 
 #[derive(Copy, Clone, Debug, PartialEq)]

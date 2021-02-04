@@ -1,5 +1,9 @@
 #![doc(hidden)]
 
+use std::{any::TypeId, marker::PhantomData, slice::Iter};
+
+use derivative::Derivative;
+
 use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnly, ReadOnlyFetch, View};
 use crate::internals::{
     iter::indexed::IndexedIter,
@@ -15,8 +19,6 @@ use crate::internals::{
     },
     subworld::ComponentAccess,
 };
-use derivative::Derivative;
-use std::{any::TypeId, marker::PhantomData, slice::Iter};
 
 /// Reads a single entity data component type from a chunk.
 #[derive(Derivative, Debug, Copy, Clone)]
@@ -125,9 +127,11 @@ impl<'a, T: Component> Iterator for ReadIter<'a, T> {
             Self::Indexed {
                 components,
                 archetypes,
-            } => archetypes
-                .next()
-                .map(|i| components.get(*i).map(|c| c.into())),
+            } => {
+                archetypes
+                    .next()
+                    .map(|i| components.get(*i).map(|c| c.into()))
+            }
             Self::Grouped { slices } => slices.next().map(|c| Some(c.into())),
             Self::Empty => None,
         }

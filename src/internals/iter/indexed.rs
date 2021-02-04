@@ -226,12 +226,15 @@ zip_slices!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W,
 
 #[cfg(feature = "parallel")]
 pub mod par_iter {
-    use super::{IndexedIter, TrustedRandomAccess};
-    use rayon::iter::plumbing::{
-        bridge, bridge_unindexed, Consumer, Folder, Producer, ProducerCallback, UnindexedConsumer,
-        UnindexedProducer,
+    use rayon::iter::{
+        plumbing::{
+            bridge, bridge_unindexed, Consumer, Folder, Producer, ProducerCallback,
+            UnindexedConsumer, UnindexedProducer,
+        },
+        IndexedParallelIterator, ParallelIterator,
     };
-    use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+
+    use super::{IndexedIter, TrustedRandomAccess};
 
     pub struct Par<T: TrustedRandomAccess> {
         iter: IndexedIter<T>,
