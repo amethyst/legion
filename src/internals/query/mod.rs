@@ -1142,7 +1142,7 @@ mod test {
 
     #[test]
     #[should_panic]
-    fn query_split_disallowd_component_left() {
+    fn query_split_disallow_component_left() {
         let mut world = World::default();
         world.extend(vec![(1usize, true), (2usize, true), (3usize, false)]);
 
@@ -1162,7 +1162,7 @@ mod test {
 
     #[test]
     #[should_panic]
-    fn query_split_disallowd_component_right() {
+    fn query_split_disallow_component_right() {
         let mut world = World::default();
         world.extend(vec![(1usize, true), (2usize, true), (3usize, false)]);
 
