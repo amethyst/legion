@@ -49,7 +49,8 @@ jobs:
       - run: cargo +nightly clippy -Z unstable-options --workspace --all-targets --all-features
         if: matrix.toolchain == 'nightly'
 
-      - run: cargo test --workspace --all-features
+      - run: cargo install cargo-hack
+      - run: cargo hack test --workspace --feature-powerset
 
       - uses: peaceiris/actions-mdbook@v1
         with:
