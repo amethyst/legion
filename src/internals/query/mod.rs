@@ -92,6 +92,7 @@ impl<'a> QueryResult<'a> {
         self.index().is_empty()
     }
 
+    #[cfg(feature = "parallel")]
     pub(crate) fn split_at(self, index: usize) -> (Self, Self) {
         let index = self.range.start + index;
         (

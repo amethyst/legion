@@ -574,8 +574,8 @@ mod test {
         let entities = world.extend(vec![(1usize, true), (2usize, false)]).to_vec();
 
         let mut query = Read::<f32>::query();
-        let before = query.iter(&world).collect::<Vec<_>>();
-        assert_eq!(before.len(), 0);
+
+        assert_eq!(query.iter(&world).count(), 0);
 
         {
             let mut entry = world.entry(entities[0]).unwrap();

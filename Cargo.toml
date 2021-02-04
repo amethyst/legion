@@ -50,11 +50,17 @@ harness = false
 [[bench]]
 name = "parallel_query"
 harness = false
+required-features = ["parallel"]
 
 [[bench]]
 name = "transform"
 harness = false
+required-features = ["parallel"]
 
 [[bench]]
 name = "insertion"
 harness = false
+
+[[test]]
+name = "codegen"
+required-features = ["codegen"]

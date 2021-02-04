@@ -1,0 +1,14 @@
+{
+    "rust-analyzer.lens.enable": false,
+    "rust-analyzer.checkOnSave.overrideCommand": [
+        "cargo",
+        "+nightly",
+        "clippy",
+        "-Z",
+        "unstable-options",
+        "--message-format=json",
+        "--workspace",
+        "--no-default-features",
+        "--all-targets"
+    ],
+}
