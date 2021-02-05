@@ -50,7 +50,7 @@ jobs:
         if: matrix.toolchain == 'nightly'
 
       - run: cargo install cargo-hack
-      - run: cargo hack test --workspace --feature-powerset
+      - run: cargo hack test --workspace --each-feature
 
       - uses: peaceiris/actions-mdbook@v1
         with:
