@@ -1,6 +1,10 @@
 //! Contains types related to the [SubWorld](struct.SubWorld.html) which
 //! can split a world by component type access.
 
+use std::borrow::Cow;
+
+use bit_set::BitSet;
+
 use super::{
     entity::Entity,
     entry::{EntryMut, EntryRef},
@@ -13,8 +17,6 @@ use super::{
     storage::{archetype::ArchetypeIndex, component::ComponentTypeId},
     world::{EntityAccessError, EntityStore, StorageAccessor, World, WorldId},
 };
-use bit_set::BitSet;
-use std::borrow::Cow;
 
 /// Describes which archetypes are available for access.
 pub enum ArchetypeAccess {
@@ -29,10 +31,12 @@ impl ArchetypeAccess {
     pub fn is_disjoint(&self, other: &ArchetypeAccess) -> bool {
         match self {
             Self::All => false,
-            Self::Some(mine) => match other {
-                Self::All => false,
-                Self::Some(theirs) => mine.is_disjoint(theirs),
-            },
+            Self::Some(mine) => {
+                match other {
+                    Self::All => false,
+                    Self::Some(theirs) => mine.is_disjoint(theirs),
+                }
+            }
         }
     }
 
@@ -46,7 +50,7 @@ impl ArchetypeAccess {
 }
 
 /// Describes which components are available for access.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ComponentAccess<'a> {
     /// All component types are allowed.
     All,
@@ -57,7 +61,7 @@ pub enum ComponentAccess<'a> {
 }
 
 impl<'a> ComponentAccess<'a> {
-    /// Returns `truw` if the given component is accessible for reads.
+    /// Returns `true` if the given component is accessible for reads.
     pub fn allows_read(&self, component: ComponentTypeId) -> bool {
         match self {
             Self::All => true,
@@ -66,7 +70,7 @@ impl<'a> ComponentAccess<'a> {
         }
     }
 
-    /// Returns `truw` if the given component is accessible for writes.
+    /// Returns `true` if the given component is accessible for writes.
     pub fn allows_write(&self, component: ComponentTypeId) -> bool {
         match self {
             Self::All => true,
@@ -188,8 +192,8 @@ impl<'a> SubWorld<'a> {
     /// # use legion::*;
     /// # struct Position;
     /// # let mut world = World::default();
-    /// # let (_, mut world) = world.split::<&u8>();
-    /// let (left, right) = world.split::<&mut Position>();
+    /// # let (_, mut subworld) = world.split::<&()>();
+    /// let (left, right) = subworld.split::<&mut Position>();
     /// ```
     ///
     /// With the above, 'left' contains a sub-world with access _only_ to `&Position` and `&mut Position`,
@@ -199,8 +203,8 @@ impl<'a> SubWorld<'a> {
     /// # use legion::*;
     /// # struct Position;
     /// # let mut world = World::default();
-    /// # let (_, mut world) = world.split::<&u8>();
-    /// let (left, right) = world.split::<&Position>();
+    /// # let (_, mut subworld) = world.split::<&()>();
+    /// let (left, right) = subworld.split::<&Position>();
     /// ```
     ///
     /// In this second example, `left` is provided access _only_ to `&Position`. `right` is granted permission
@@ -312,200 +316,130 @@ mod tests {
     };
 
     #[test]
-    fn writeread_left_included() {
+    fn split_write_permissions() {
         let mut world = World::default();
         let entity = world.push((1usize, false));
 
-        let (left, _) = world.split::<Write<usize>>();
-        assert!(left
-            .entry_ref(entity)
-            .unwrap()
-            .get_component::<usize>()
-            .is_ok());
+        let (mut left, mut right) = world.split::<Write<usize>>();
+
+        let mut left_entry = left.entry_mut(entity).unwrap();
+        let mut right_entry = right.entry_mut(entity).unwrap();
+
+        assert!(left_entry.get_component::<usize>().is_ok());
+        assert!(left_entry.get_component_mut::<usize>().is_ok());
+
+        assert!(matches!(
+            left_entry.get_component::<bool>(),
+            Err(ComponentError::Denied { .. })
+        ));
+        assert!(matches!(
+            left_entry.get_component_mut::<bool>(),
+            Err(ComponentError::Denied { .. })
+        ));
+
+        assert!(right_entry.get_component::<bool>().is_ok());
+        assert!(right_entry.get_component_mut::<bool>().is_ok());
+
+        assert!(matches!(
+            right_entry.get_component::<usize>(),
+            Err(ComponentError::Denied { .. })
+        ));
+        assert!(matches!(
+            right_entry.get_component_mut::<usize>(),
+            Err(ComponentError::Denied { .. })
+        ));
     }
 
     #[test]
-    fn writeread_left_excluded() {
+    fn split_read_permissions() {
         let mut world = World::default();
         let entity = world.push((1usize, false));
 
-        let (left, _) = world.split::<Write<usize>>();
-        let entry = left.entry_ref(entity).unwrap();
-        let result = entry.get_component::<bool>();
-        assert!(matches!(result, Err(ComponentError::Denied { .. })));
+        let (mut left, mut right) = world.split::<Read<usize>>();
+
+        let mut left_entry = left.entry_mut(entity).unwrap();
+        let mut right_entry = right.entry_mut(entity).unwrap();
+
+        assert!(left_entry.get_component::<usize>().is_ok());
+        assert!(matches!(
+            left_entry.get_component_mut::<usize>(),
+            Err(ComponentError::Denied { .. })
+        ));
+
+        assert!(matches!(
+            left_entry.get_component::<bool>(),
+            Err(ComponentError::Denied { .. })
+        ));
+        assert!(matches!(
+            left_entry.get_component_mut::<bool>(),
+            Err(ComponentError::Denied { .. })
+        ));
+
+        assert!(right_entry.get_component::<bool>().is_ok());
+        assert!(right_entry.get_component_mut::<bool>().is_ok());
+
+        assert!(right_entry.get_component::<usize>().is_ok());
+        assert!(matches!(
+            right_entry.get_component_mut::<usize>(),
+            Err(ComponentError::Denied { .. })
+        ));
     }
 
     #[test]
-    fn writeread_right_included() {
+    fn complex_split() {
+        struct A;
+        struct B;
+        struct C;
+
         let mut world = World::default();
-        let entity = world.push((1usize, false));
+        let entity = world.push((A, B, C));
 
-        let (_, right) = world.split::<Write<usize>>();
-        assert!(right
-            .entry_ref(entity)
-            .unwrap()
-            .get_component::<bool>()
-            .is_ok());
-    }
+        let (_, mut subworld) = world.split::<&u8>();
+        let (mut left, mut right) = subworld.split::<(Read<A>, Write<B>)>();
 
-    #[test]
-    fn writeread_right_excluded() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
+        let mut left_entry = left.entry_mut(entity).unwrap();
+        let mut right_entry = right.entry_mut(entity).unwrap();
 
-        let (_, right) = world.split::<Write<usize>>();
-        let entry = right.entry_ref(entity).unwrap();
-        let result = entry.get_component::<usize>();
-        assert!(matches!(result, Err(ComponentError::Denied { .. })));
-    }
+        // left should read but not write A
+        assert!(left_entry.get_component::<A>().is_ok());
+        assert!(matches!(
+            left_entry.get_component_mut::<A>(),
+            Err(ComponentError::Denied { .. })
+        ));
 
-    // --------
+        // left should read and write B
+        assert!(left_entry.get_component::<B>().is_ok());
+        assert!(left_entry.get_component_mut::<B>().is_ok());
 
-    #[test]
-    fn readread_left_included() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
+        // left should not be able to read or write C
+        assert!(matches!(
+            left_entry.get_component::<C>(),
+            Err(ComponentError::Denied { .. })
+        ));
+        assert!(matches!(
+            left_entry.get_component_mut::<C>(),
+            Err(ComponentError::Denied { .. })
+        ));
 
-        let (left, _) = world.split::<Read<usize>>();
-        assert!(left
-            .entry_ref(entity)
-            .unwrap()
-            .get_component::<usize>()
-            .is_ok());
-    }
+        // right should be able to read but not write A
+        assert!(right_entry.get_component::<A>().is_ok());
+        assert!(matches!(
+            right_entry.get_component_mut::<A>(),
+            Err(ComponentError::Denied { .. })
+        ));
 
-    #[test]
-    fn readread_left_excluded() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
+        // right should not be able to read or write B
+        assert!(matches!(
+            right_entry.get_component::<B>(),
+            Err(ComponentError::Denied { .. })
+        ));
+        assert!(matches!(
+            right_entry.get_component_mut::<B>(),
+            Err(ComponentError::Denied { .. })
+        ));
 
-        let (left, _) = world.split::<Read<usize>>();
-        let entry = left.entry_ref(entity).unwrap();
-        let result = entry.get_component::<bool>();
-        assert!(matches!(result, Err(ComponentError::Denied { .. })));
-    }
-
-    #[test]
-    fn readread_right_included() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (_, right) = world.split::<Read<usize>>();
-        assert!(right
-            .entry_ref(entity)
-            .unwrap()
-            .get_component::<bool>()
-            .is_ok());
-    }
-
-    #[test]
-    fn readread_right_excluded() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (_, right) = world.split::<Read<usize>>();
-        assert!(right
-            .entry_ref(entity)
-            .unwrap()
-            .get_component::<usize>()
-            .is_ok());
-    }
-
-    // --------
-
-    #[test]
-    fn writewrite_left_included() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (mut left, _) = world.split::<Write<usize>>();
-        assert!(left
-            .entry_mut(entity)
-            .unwrap()
-            .get_component_mut::<usize>()
-            .is_ok());
-    }
-
-    #[test]
-    fn writewrite_left_excluded() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (mut left, _) = world.split::<Write<usize>>();
-        let mut entry = left.entry_mut(entity).unwrap();
-        let result = entry.get_component_mut::<bool>();
-        assert!(matches!(result, Err(ComponentError::Denied { .. })));
-    }
-
-    #[test]
-    fn writewrite_right_included() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (_, mut right) = world.split::<Write<usize>>();
-        assert!(right
-            .entry_mut(entity)
-            .unwrap()
-            .get_component_mut::<bool>()
-            .is_ok());
-    }
-
-    #[test]
-    fn writewrite_right_excluded() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (_, mut right) = world.split::<Write<usize>>();
-        let mut entry = right.entry_mut(entity).unwrap();
-        let result = entry.get_component_mut::<usize>();
-        assert!(matches!(result, Err(ComponentError::Denied { .. })));
-    }
-
-    // --------
-
-    #[test]
-    fn readwrite_left_included() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (mut left, _) = world.split::<Read<usize>>();
-        let mut entry = left.entry_mut(entity).unwrap();
-        let result = entry.get_component_mut::<usize>();
-        assert!(matches!(result, Err(ComponentError::Denied { .. })));
-    }
-
-    #[test]
-    fn readwrite_left_excluded() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (mut left, _) = world.split::<Read<usize>>();
-        let mut entry = left.entry_mut(entity).unwrap();
-        let result = entry.get_component_mut::<bool>();
-        assert!(matches!(result, Err(ComponentError::Denied { .. })));
-    }
-
-    #[test]
-    fn readwrite_right_included() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (_, mut right) = world.split::<Read<usize>>();
-        assert!(right
-            .entry_mut(entity)
-            .unwrap()
-            .get_component_mut::<bool>()
-            .is_ok());
-    }
-
-    #[test]
-    fn readwrite_right_excluded() {
-        let mut world = World::default();
-        let entity = world.push((1usize, false));
-
-        let (_, mut right) = world.split::<Read<usize>>();
-        let mut entry = right.entry_mut(entity).unwrap();
-        let result = entry.get_component_mut::<usize>();
-        assert!(matches!(result, Err(ComponentError::Denied { .. })));
+        // right should read and write C
+        assert!(right_entry.get_component::<C>().is_ok());
+        assert!(right_entry.get_component_mut::<C>().is_ok());
     }
 }
