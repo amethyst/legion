@@ -3,15 +3,8 @@
 //! Use resources to share persistent data between systems or to provide a system with state
 //! external to entities.
 
-use std::{
-    any::TypeId,
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
-    fmt::{Display, Formatter},
-    hash::{BuildHasherDefault, Hasher},
-    marker::PhantomData,
-};
-
+use std::{any::TypeId, collections::{hash_map::Entry, HashMap}, fmt::{Display, Formatter}, hash::{BuildHasherDefault, Hasher}, marker::PhantomData};
+use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use downcast_rs::{impl_downcast, Downcast};
 
 use crate::internals::{
@@ -124,25 +117,25 @@ impl<'a> ResourceSet<'a> for () {
 }
 
 impl<'a, T: Resource> ResourceSet<'a> for Read<T> {
-    type Result = &'a T;
+    type Result = AtomicRef<'a, T>;
 
     unsafe fn fetch_unchecked(resources: &'a UnsafeResources) -> Self::Result {
         let type_id = &ResourceTypeId::of::<T>();
         resources
             .get(&type_id)
-            .and_then(|x| x.get::<T>())
+            .map(|x| x.get::<T>())
             .expect("resource does not exist")
     }
 }
 
 impl<'a, T: Resource> ResourceSet<'a> for Write<T> {
-    type Result = &'a mut T;
+    type Result = AtomicRefMut<'a, T>;
 
     unsafe fn fetch_unchecked(resources: &'a UnsafeResources) -> Self::Result {
         let type_id = &ResourceTypeId::of::<T>();
         resources
             .get(&type_id)
-            .and_then(|x| x.get_mut::<T>())
+            .map(|x| x.get_mut::<T>())
             .expect("resource does not exist")
     }
 }
@@ -178,13 +171,13 @@ resource_tuple!(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V
 resource_tuple!(A, B, C, D, E, F, G, H);
 
 pub struct ResourceCell {
-    data: RefCell<Box<dyn Resource>>,
+    data: AtomicRefCell<Box<dyn Resource>>,
 }
 
 impl ResourceCell {
     fn new(resource: Box<dyn Resource>) -> Self {
         Self {
-            data: RefCell::new(resource),
+            data: AtomicRefCell::new(resource),
         }
     }
 
@@ -195,22 +188,23 @@ impl ResourceCell {
     /// # Safety
     /// Types which are !Sync should only be retrieved on the thread which owns the resource
     /// collection.
-    pub unsafe fn get<T: Resource>(&self) -> Option<&'_ T> {
-        self.data
-            .try_borrow_unguarded()
-            .ok()
-            .map(|b| b.downcast_ref::<T>())
-            .flatten()
+    pub fn get<T: Resource>(&self) -> AtomicRef<T> {
+        let borrow = self.data
+            .borrow();
+        AtomicRef::map(borrow, |inner| {
+            inner.downcast_ref::<T>().unwrap()
+        })
     }
 
     /// # Safety
     /// Types which are !Send should only be retrieved on the thread which owns the resource
     /// collection.
-    pub unsafe fn get_mut<T: Resource>(&self) -> Option<&'_ mut T> {
-        self.data.borrow_mut(); // panics if this is borrowed already
+    pub fn get_mut<T: Resource>(&self) -> AtomicRefMut<T> {
+        let borrow = self.data.borrow_mut(); // panics if this is borrowed already
 
-        let ptr = self.data.as_ptr();
-        Some((&mut *ptr).downcast_mut::<T>().unwrap())
+        AtomicRefMut::map(borrow, |inner| {
+            inner.downcast_mut::<T>().unwrap()
+        })
     }
 }
 
@@ -324,26 +318,26 @@ impl Resources {
     ///
     /// # Panics
     /// Panics if the resource is already borrowed mutably.
-    pub fn get<T: Resource>(&self) -> Option<&'_ T> {
+    pub fn get<T: Resource>(&self) -> Option<AtomicRef<T>> {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection
         let type_id = &ResourceTypeId::of::<T>();
-        unsafe { self.internal.get(&type_id)?.get::<T>() }
+        self.internal.get(&type_id).map(|x| x.get::<T>())
     }
 
     /// Retrieve a mutable reference to  `T` from the store if it exists. Otherwise, return `None`.
-    pub fn get_mut<T: Resource>(&self) -> Option<&'_ mut T> {
+    pub fn get_mut<T: Resource>(&self) -> Option<AtomicRefMut<T>> {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection
         let type_id = &ResourceTypeId::of::<T>();
-        unsafe { self.internal.get(&type_id)?.get_mut::<T>() }
+        self.internal.get(&type_id).map(|x| x.get_mut::<T>())
     }
 
     /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
     /// the closure `f` is called to construct the object and it is then inserted into the store.
-    pub fn get_or_insert_with<T: Resource, F: FnOnce() -> T>(&mut self, f: F) -> &'_ T {
+    pub fn get_or_insert_with<T: Resource, F: FnOnce() -> T>(&mut self, f: F) -> AtomicRef<T> {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection
@@ -353,13 +347,12 @@ impl Resources {
                 .entry(type_id)
                 .or_insert_with(|| ResourceCell::new(Box::new((f)())))
                 .get()
-                .unwrap()
         }
     }
 
     /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
     /// the closure `f` is called to construct the object and it is then inserted into the store.
-    pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(&mut self, f: F) -> &'_ mut T {
+    pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(&mut self, f: F) ->AtomicRefMut<T> {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection
@@ -369,19 +362,19 @@ impl Resources {
                 .entry(type_id)
                 .or_insert_with(|| ResourceCell::new(Box::new((f)())))
                 .get_mut()
-                .unwrap()
         }
+        
     }
 
     /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
     /// the provided value is inserted and then a reference to it is returned.
-    pub fn get_or_insert<T: Resource>(&mut self, value: T) -> &'_ T {
+    pub fn get_or_insert<T: Resource>(&mut self, value: T) -> AtomicRef<T> {
         self.get_or_insert_with(|| value)
     }
 
     /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
     /// the provided value is inserted and then a reference to it is returned.
-    pub fn get_mut_or_insert<T: Resource>(&mut self, value: T) -> &'_ mut T {
+    pub fn get_mut_or_insert<T: Resource>(&mut self, value: T) -> AtomicRefMut<T> {
         self.get_mut_or_insert_with(|| value)
     }
 
@@ -389,7 +382,7 @@ impl Resources {
     /// the default constructor for `T` is called.
     ///
     /// `T` must implement `Default` for this method.
-    pub fn get_or_default<T: Resource + Default>(&mut self) -> &'_ T {
+    pub fn get_or_default<T: Resource + Default>(&mut self) -> AtomicRef<T> {
         self.get_or_insert_with(T::default)
     }
 
@@ -397,7 +390,7 @@ impl Resources {
     /// the default constructor for `T` is called.
     ///
     /// `T` must implement `Default` for this method.
-    pub fn get_mut_or_default<T: Resource + Default>(&mut self) -> &'_ mut T {
+    pub fn get_mut_or_default<T: Resource + Default>(&mut self) -> AtomicRefMut<T> {
         self.get_mut_or_insert_with(T::default)
     }
 
@@ -425,19 +418,15 @@ impl<'a> SyncResources<'a> {
     ///
     /// # Panics
     /// Panics if the resource is already borrowed mutably.
-    pub fn get<T: Resource + Sync>(&self) -> Option<&'_ T> {
-        // safety:
-        // only resources which are Sync can be accessed, and so are safe to access from any thread
+    pub fn get<T: Resource + Sync>(&self) -> Option<AtomicRef<T>> {
         let type_id = &ResourceTypeId::of::<T>();
-        unsafe { self.internal.get(&type_id)?.get::<T>() }
+        self.internal.get(&type_id).map(|x| x.get::<T>())
     }
 
     /// Retrieve a mutable reference to  `T` from the store if it exists. Otherwise, return `None`.
-    pub fn get_mut<T: Resource + Send>(&self) -> Option<&'_ mut T> {
-        // safety:
-        // only resources which are Send can be accessed, and so are safe to access from any thread
+    pub fn get_mut<T: Resource + Send>(&self) -> Option<AtomicRefMut<T>> {
         let type_id = &ResourceTypeId::of::<T>();
-        unsafe { self.internal.get(&type_id)?.get_mut::<T>() }
+        self.internal.get(&type_id).map(|x| x.get_mut::<T>())
     }
 }
 
