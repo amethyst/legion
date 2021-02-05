@@ -37,9 +37,6 @@ jobs:
           profile: minimal
           override: true
 
-      - run: cargo +nightly install --force rustfmt-nightly --git https://github.com/rust-lang/rustfmt --tag v1.4.35 --all-features
-        if: matrix.toolchain == 'nightly' && matrix.os == 'ubuntu-latest'
-
       - run: cargo +nightly fmt --all -- --check
         if: matrix.toolchain == 'nightly' && matrix.os == 'ubuntu-latest'
         
