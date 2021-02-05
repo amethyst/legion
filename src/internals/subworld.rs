@@ -31,12 +31,10 @@ impl ArchetypeAccess {
     pub fn is_disjoint(&self, other: &ArchetypeAccess) -> bool {
         match self {
             Self::All => false,
-            Self::Some(mine) => {
-                match other {
-                    Self::All => false,
-                    Self::Some(theirs) => mine.is_disjoint(theirs),
-                }
-            }
+            Self::Some(mine) => match other {
+                Self::All => false,
+                Self::Some(theirs) => mine.is_disjoint(theirs),
+            },
         }
     }
 

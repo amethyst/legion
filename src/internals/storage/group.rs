@@ -104,7 +104,7 @@ impl Group {
         }
     }
 
-    pub(crate) fn components<'a>(&'a self) -> impl Iterator<Item = ComponentTypeId> + 'a {
+    pub(crate) fn components(&'_ self) -> impl Iterator<Item = ComponentTypeId> + '_ {
         self.components.iter().map(|(c, _)| *c)
     }
 

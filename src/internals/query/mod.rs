@@ -1140,7 +1140,6 @@ mod test {
         }
     }
 
-    
     #[test]
     fn complex_query_split() {
         #[derive(Debug)]
