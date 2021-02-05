@@ -3,7 +3,14 @@
 //! Use resources to share persistent data between systems or to provide a system with state
 //! external to entities.
 
-use std::{any::TypeId, collections::{hash_map::Entry, HashMap}, fmt::{Display, Formatter}, hash::{BuildHasherDefault, Hasher}, marker::PhantomData};
+use std::{
+    any::TypeId,
+    collections::{hash_map::Entry, HashMap},
+    fmt::{Display, Formatter},
+    hash::{BuildHasherDefault, Hasher},
+    marker::PhantomData,
+};
+
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 use downcast_rs::{impl_downcast, Downcast};
 
@@ -189,11 +196,8 @@ impl ResourceCell {
     /// Types which are !Sync should only be retrieved on the thread which owns the resource
     /// collection.
     pub fn get<T: Resource>(&self) -> AtomicRef<T> {
-        let borrow = self.data
-            .borrow();
-        AtomicRef::map(borrow, |inner| {
-            inner.downcast_ref::<T>().unwrap()
-        })
+        let borrow = self.data.borrow();
+        AtomicRef::map(borrow, |inner| inner.downcast_ref::<T>().unwrap())
     }
 
     /// # Safety
@@ -202,9 +206,7 @@ impl ResourceCell {
     pub fn get_mut<T: Resource>(&self) -> AtomicRefMut<T> {
         let borrow = self.data.borrow_mut(); // panics if this is borrowed already
 
-        AtomicRefMut::map(borrow, |inner| {
-            inner.downcast_mut::<T>().unwrap()
-        })
+        AtomicRefMut::map(borrow, |inner| inner.downcast_mut::<T>().unwrap())
     }
 }
 
@@ -352,7 +354,10 @@ impl Resources {
 
     /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
     /// the closure `f` is called to construct the object and it is then inserted into the store.
-    pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(&mut self, f: F) ->AtomicRefMut<T> {
+    pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(
+        &mut self,
+        f: F,
+    ) -> AtomicRefMut<T> {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection
@@ -363,7 +368,6 @@ impl Resources {
                 .or_insert_with(|| ResourceCell::new(Box::new((f)())))
                 .get_mut()
         }
-        
     }
 
     /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
