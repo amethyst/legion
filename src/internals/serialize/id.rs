@@ -131,17 +131,17 @@ pub struct Canon {
 }
 
 impl Canon {
-    /// Returns the [Entity] ID associated with the given [EntityName].
+    /// Returns the [`Entity`] ID associated with the given [`EntityName`].
     pub fn get_id(&self, name: &EntityName) -> Option<Entity> {
         self.to_id.get(name).copied()
     }
 
-    /// Returns the [EntityName] associated with the given [Entity] ID.
+    /// Returns the [`EntityName`] associated with the given [`Entity`] ID.
     pub fn get_name(&self, entity: Entity) -> Option<EntityName> {
         self.to_name.get(&entity).copied()
     }
 
-    /// Canonizes a given [EntityName] and returns the associated [Entity] ID.
+    /// Canonizes a given [`EntityName`] and returns the associated [`Entity`] ID.
     pub fn canonize_name(&mut self, name: &EntityName) -> Entity {
         match self.to_id.entry(*name) {
             Entry::Occupied(occupied) => *occupied.get(),
@@ -154,7 +154,7 @@ impl Canon {
         }
     }
 
-    /// Canonizes a given [Entity] ID and returns the associated [EntityName].
+    /// Canonizes a given [`Entity`] ID and returns the associated [`EntityName`].
     pub fn canonize_id(&mut self, entity: Entity) -> EntityName {
         match self.to_name.entry(entity) {
             Entry::Occupied(occupied) => *occupied.get(),

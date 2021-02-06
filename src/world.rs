@@ -1,5 +1,5 @@
 //! Worlds store collections of entities. An entity is a collection of components, identified
-//! by a unique [Entity] ID.
+//! by a unique [`Entity`] ID.
 //!
 //! # Creating a world
 //!
@@ -64,7 +64,7 @@
 //!
 //! # Modifying entities
 //!
-//! Components can be added or removed from an existing entity via the [Entry] API.
+//! Components can be added or removed from an existing entity via the [`Entry`] API.
 //!
 //! ```
 //! # use legion::*;
@@ -106,7 +106,7 @@
 //! # Events
 //!
 //! Notifications about archetype creation and entity insertion/removal from an archetype can be sent
-//! to an [EventSender] by subscribing to the world. A layout filter specifies which archetypes the
+//! to an [`EventSender`] by subscribing to the world. A layout filter specifies which archetypes the
 //! subscriber is interested in.
 //!
 //! ```ignore

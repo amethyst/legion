@@ -1,4 +1,4 @@
-//! Contains types related to inserting new entities into a [World](super::world::World)
+//! Contains types related to inserting new entities into a [`World`](super::world::World)
 
 use super::entity::Entity;
 use super::query::filter::{FilterResult, LayoutFilter};
@@ -220,7 +220,7 @@ pub trait KnownLength {
     fn len(&self) -> usize;
 }
 
-/// Converts a type into a [ComponentSource].
+/// Converts a type into a [`ComponentSource`].
 pub trait IntoComponentSource {
     /// The output component source.
     type Source: ComponentSource;

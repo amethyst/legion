@@ -8,7 +8,8 @@
 //! a query with an initial filter which selects entities with all of the component types
 //! requested by the view.
 //!
-//! View types include [Entity](super::world::Entity), [Read], [Write], [TryRead] and [TryWrite].
+//! View types include [`Entity`](super::world::Entity), [`Read`], [`Write`], [`TryRead`]
+//! and [`TryWrite`].
 //!
 //! ```
 //! # use legion::*;

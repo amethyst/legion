@@ -14,9 +14,9 @@
 //! let world = World::default();
 //! ```
 //!
-//! Entities can be inserted via either `push` (for a single entity) or `extend` (for a collection of entities with
-//! the same component types). The world will create a unique ID for each entity upon insertion that you can use
-//! to refer to that entity later.
+//! Entities can be inserted via either [`World::push`] (for a single entity) or [`World::extend`] (for a collection
+//! of entities with the same component types). The world will create a unique ID for each entity upon insertion
+//! that you can use to refer to that entity later.
 //!
 //! ```
 //! # use legion::*;
@@ -65,7 +65,7 @@
 //! }
 //! ```
 //!
-//! See the [world] module for more information.
+//! See the [`world`] module for more information.
 //!
 //! ## Queries
 //!
@@ -123,21 +123,21 @@
 //! }
 //! ```
 //!
-//! There is much more than can be done with queries. See [query](query::Query) for more information.
+//! There is much more than can be done with queries. See the [module document](query) for more information.
 //!
 //! ## Systems
 //!
 //! You may have noticed that when we wanted to write to a component, we needed to use `iter_mut` to iterate through our query.
 //! But perhaps your application wants to be able to process different components on different entities, perhaps even at the same
-//! time in parallel? While it is possible to do this manually (see [World::split]), this is very difficult to do when the
+//! time in parallel? While it is possible to do this manually (see [`World::split`]), this is very difficult to do when the
 //! different pieces of the application don't know what components each other need, or might or might not even have conflicting
 //! access requirements.
 //!
-//! Systems and the [Schedule] automates this process, and can even schedule work at a more granular level than you
-//! can otherwise do manually.
+//! Systems and the [`Schedule`] automates this process, and can even schedule work at a more granular level than
+//! you can otherwise do manually.
 //!
 //! A system is a unit of work. Each system is defined as a function which is provided access to queries and shared
-//! [resources](Resources). These systems can then be appended to a schedule, which is a linear sequence of systems,
+//! [`Resources`]. These systems can then be appended to a schedule, which is a linear sequence of systems,
 //! ordered by when side effects (such as writes to components) should be observed.
 //!
 //! The schedule will automatically parallelize the execution of all systems whilst maintaining the apparent order of execution from
@@ -170,7 +170,7 @@
 //! # }
 //! ```
 //!
-//! See the [systems] module and the [system] proc macro for more information.
+//! See the [`systems`] module and the [`system`] proc macro for more information.
 //!
 //! # Feature Flags
 //!

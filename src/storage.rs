@@ -1,7 +1,7 @@
 //! A "packed archetype" storage model.
 //!
 //! Any combination of types of components can be attached to each entity
-//! in a [world](super::world::World). Storing the (potentially unique)
+//! in a [`World`](super::world::World). Storing the (potentially unique)
 //! set of component values for each entity in a manner which is efficient
 //! to search and access is the responsibility of the ECS libary.
 //!
@@ -21,7 +21,8 @@
 //! through the components in an archetype is extremely performant as
 //! it offers perfect cache locality. By storing each component type in
 //! its own array, we only need to access the memory containing components
-//! actually reqested by the query's view (see the [query module](crate::query)).
+//! actually reqested by the query's view (see the [`query`](crate::query)
+//! module).
 //!
 //! One of the disadvantages of archetypes is that there are discontinuities
 //! between component arrays of different archetypes. In practise this causes

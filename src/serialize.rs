@@ -1,12 +1,12 @@
 //! Serde (de)serialization of worlds.
 //!
 //! As component types are not known at compile time, the world must be provided with the
-//! means to serialize each component. This is provided by the [WorldSerializer] implementation.
-//! This implementation also describes how [ComponentTypeIDs](super::storage::ComponentTypeId)
+//! means to serialize each component. This is provided by the [`WorldSerializer`] implementation.
+//! This implementation also describes how [`ComponentTypeId`](super::storage::ComponentTypeId)s
 //! (which are not stable between compiles) are mapped to stable type identifiers. Components
 //! that are not known to the serializer will be omitted from the serialized output.
 //!
-//! The [Registry] provides a [WorldSerializer] implementation suitable for most situations.
+//! The [`Registry`] provides a [`WorldSerializer`] implementation suitable for most situations.
 //!
 //! Serializing all entities with a `Position` component to JSON.
 //! ```
