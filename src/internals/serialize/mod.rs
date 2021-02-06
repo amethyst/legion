@@ -36,7 +36,7 @@ impl<T> TypeKey for T where
     T: serde::Serialize + for<'de> serde::Deserialize<'de> + Ord + Clone + Hash
 {
 }
-/// A [TypeKey](trait.TypeKey.html) which can construct itself for a given type T.
+/// A [TypeKey] which can construct itself for a given type T.
 pub trait AutoTypeKey<T: Component>: TypeKey {
     /// Constructs the type key for component type `T`.
     fn new() -> Self;
@@ -425,7 +425,7 @@ impl<'a, 'de, T: Component + for<'b> serde::de::Deserialize<'b>> serde::de::Dese
     }
 }
 
-/// Wraps a [WorldDeserializer](de/trait.WorldDeserializer.html) and a world and implements
+/// Wraps a [WorldDeserializer](de::WorldDeserializer) and a world and implements
 /// `serde::DeserializeSeed` for deserializing into the world.
 pub struct DeserializeIntoWorld<'a, T: WorldDeserializer>(pub &'a T, pub &'a mut World);
 
@@ -443,7 +443,7 @@ impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for DeserializeIntoWorl
     }
 }
 
-/// Wraps a [WorldDeserializer](de/trait.WorldDeserializer.html) and a universe and implements
+/// Wraps a [WorldDeserializer](de::WorldDeserializer) and a universe and implements
 /// `serde::DeserializeSeed` for deserializing into a new world.
 pub struct DeserializeNewWorld<'a, T: WorldDeserializer>(pub &'a T);
 

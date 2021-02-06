@@ -1,4 +1,4 @@
-//! Contains types related to inserting new entities into a [World](../world/struct.World.html)
+//! Contains types related to inserting new entities into a [World](super::world::World)
 
 use super::entity::Entity;
 use super::query::filter::{FilterResult, LayoutFilter};
@@ -220,7 +220,7 @@ pub trait KnownLength {
     fn len(&self) -> usize;
 }
 
-/// Converts a type into a [ComponentSource](trait.ComponentSource.html).
+/// Converts a type into a [ComponentSource].
 pub trait IntoComponentSource {
     /// The output component source.
     type Source: ComponentSource;
@@ -254,8 +254,7 @@ impl<T> Drop for SoaElement<T> {
     }
 }
 
-/// Describes a type which can convert itself into an [SoA](trait.Soa.html)
-/// representation for entity insertion.
+/// Describes a type which can convert itself into an SoA representation for entity insertion.
 pub trait IntoSoa {
     /// The output entity source.
     type Source;
