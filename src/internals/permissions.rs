@@ -164,10 +164,6 @@ impl<T: PartialEq> Permissions<T> {
 
     /// Subtracts all of the permissions contained in the given set from this permission set.
     pub fn subtract(&mut self, other: &Self) {
-        for read in other.reads_only() {
-            self.remove_read(read);
-        }
-
         for shared in other.readwrite() {
             self.remove(shared);
         }

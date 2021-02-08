@@ -1141,6 +1141,35 @@ mod test {
     }
 
     #[test]
+    fn complex_query_split() {
+        #[derive(Debug)]
+        struct A;
+        #[derive(Debug)]
+        struct B;
+        #[derive(Debug)]
+        struct C;
+
+        let mut world = World::default();
+        world.push((A, B));
+        world.push((A, C));
+
+        let (_, mut world) = world.split::<&()>();
+
+        let mut query_a = <(&A, &B)>::query();
+        let mut query_b = <(&A, &mut C)>::query();
+
+        let (mut left, right) = world.split_for_query(&query_b);
+
+        for (a, c) in query_b.iter_mut(&mut left) {
+            println!("{:?} {:?}", a, c);
+
+            for (a, b) in query_a.iter(&right) {
+                println!("{:?} {:?}", a, b);
+            }
+        }
+    }
+
+    #[test]
     #[should_panic]
     fn query_split_disallowd_component_left() {
         let mut world = World::default();
