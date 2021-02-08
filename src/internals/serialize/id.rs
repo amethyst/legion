@@ -150,18 +150,18 @@ struct CanonInner {
 }
 
 impl Canon {
-    /// Returns the [Entity](struct.Entity.html) ID associated with the given [EntityName](struct.EntityName.html).
+    /// Returns the [`Entity`] ID associated with the given [`EntityName`].
     pub fn get_id(&self, name: &EntityName) -> Option<Entity> {
         self.inner.read().to_id.get(name).copied()
     }
 
-    /// Returns the [EntityName](struct.EntityName.html) associated with the given [Entity](struct.Entity.html) ID.
+    /// Returns the [`EntityName`] associated with the given [`Entity`] ID.
     pub fn get_name(&self, entity: Entity) -> Option<EntityName> {
         self.inner.read().to_name.get(&entity).copied()
     }
 
-    /// Canonizes a given [EntityName](struct.EntityName.html) and returns the associated [Entity](struct.Entity.html) ID.
-    pub fn canonize_name(&self, name: &EntityName) -> Entity {
+    /// Canonizes a given [`EntityName`] and returns the associated [`Entity`] ID.
+    pub fn canonize_name(&mut self, name: &EntityName) -> Entity {
         let mut inner = self.inner.write();
         let inner = &mut *inner;
         match inner.to_id.entry(*name) {
@@ -175,8 +175,8 @@ impl Canon {
         }
     }
 
-    /// Canonizes a given [Entity](struct.Entity.html) ID and returns the associated [EntityName](struct.EntityName.html).
-    pub fn canonize_id(&self, entity: Entity) -> EntityName {
+    /// Canonizes a given [`Entity`] ID and returns the associated [`EntityName`].
+    pub fn canonize_id(&mut self, entity: Entity) -> EntityName {
         let mut inner = self.inner.write();
         match inner.to_name.entry(entity) {
             Entry::Occupied(occupied) => *occupied.get(),

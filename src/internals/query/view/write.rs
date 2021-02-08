@@ -15,13 +15,17 @@ use crate::internals::{
     },
     subworld::ComponentAccess,
 };
-use derivative::Derivative;
 use std::{any::TypeId, marker::PhantomData, slice::Iter};
 
 /// Writes a single mutable entity data component type from a chunk.
-#[derive(Derivative, Debug, Copy, Clone)]
-#[derivative(Default(bound = ""))]
+#[derive(Debug, Copy, Clone)]
 pub struct Write<T>(PhantomData<*const T>);
+
+impl<T> Default for Write<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
 unsafe impl<T: Send> Send for Write<T> {}
 unsafe impl<T> Sync for Write<T> {}

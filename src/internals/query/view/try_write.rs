@@ -15,13 +15,17 @@ use crate::internals::{
     },
     subworld::ComponentAccess,
 };
-use derivative::Derivative;
 use std::{any::TypeId, marker::PhantomData};
 
 /// Writes a single entity data component type from a chunk.
-#[derive(Derivative, Debug, Copy, Clone)]
-#[derivative(Default(bound = ""))]
+#[derive(Debug, Copy, Clone)]
 pub struct TryWrite<T>(PhantomData<*const T>);
+
+impl<T> Default for TryWrite<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
 unsafe impl<T: Send> Send for TryWrite<T> {}
 unsafe impl<T> Sync for TryWrite<T> {}
