@@ -64,25 +64,32 @@ where
 }
 
 scoped_thread_local! {
-    /// The [`EntitySerializer`] currently being used to serialize or deserialize [`Entity`] IDs.
-    ///
-    /// This is set automatically when serializing or deserializing a [`World`]. When serializing or
-    /// deserializing values outside a `World`, this needs to be set manually, passing in a reference
-    /// to the `EntitySerializer` and a closure that does the serializing/deserializing.
-    /// ```
-    /// # use legion::*;
-    /// # use legion::serialize::{Canon, ENTITY_SERIALIZER};
-    /// # let mut world = World::default();
-    /// # #[derive(serde::Serialize, serde::Deserialize)]
-    /// # struct ContainsEntity(Entity);
-    /// # let contains_entity = ContainsEntity(world.push(()));
-    ///
-    /// let entity_serializer = Canon::default();
-    /// ENTITY_SERIALIZER.set(&entity_serializer, || {
-    ///     serde_json::to_value(contains_entity).unwrap()
-    /// });
-    /// ```
-    pub static ENTITY_SERIALIZER: dyn EntitySerializer
+    static ENTITY_SERIALIZER: dyn EntitySerializer
+}
+
+/// Sets the [`EntitySerializer`] currently being used to serialize or deserialize [`Entity`] IDs.
+///
+/// This is set automatically when serializing or deserializing a [`World`]. When serializing or
+/// deserializing values outside a `World`, this needs to be set manually, passing in a reference
+/// to the `EntitySerializer` and a closure that does the serializing/deserializing.
+/// ```
+/// # use legion::*;
+/// # use legion::serialize::{Canon, set_entity_serializer};
+/// # let mut world = World::default();
+/// # #[derive(serde::Serialize, serde::Deserialize)]
+/// # struct ContainsEntity(Entity);
+/// # let contains_entity = ContainsEntity(world.push(()));
+///
+/// let entity_serializer = Canon::default();
+/// set_entity_serializer(&entity_serializer, || {
+///     serde_json::to_value(contains_entity).unwrap()
+/// });
+/// ```
+pub fn set_entity_serializer<F, R>(entity_serializer: &dyn EntitySerializer, func: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    ENTITY_SERIALIZER.set(entity_serializer, func)
 }
 
 impl Serialize for Entity {
@@ -161,7 +168,7 @@ impl Canon {
     }
 
     /// Canonizes a given [`EntityName`] and returns the associated [`Entity`] ID.
-    pub fn canonize_name(&mut self, name: &EntityName) -> Entity {
+    pub fn canonize_name(&self, name: &EntityName) -> Entity {
         let mut inner = self.inner.write();
         let inner = &mut *inner;
         match inner.to_id.entry(*name) {
@@ -176,7 +183,7 @@ impl Canon {
     }
 
     /// Canonizes a given [`Entity`] ID and returns the associated [`EntityName`].
-    pub fn canonize_id(&mut self, entity: Entity) -> EntityName {
+    pub fn canonize_id(&self, entity: Entity) -> EntityName {
         let mut inner = self.inner.write();
         match inner.to_name.entry(entity) {
             Entry::Occupied(occupied) => *occupied.get(),

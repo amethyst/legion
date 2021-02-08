@@ -2,13 +2,14 @@
 
 use super::{
     archetypes::de::ArchetypeLayoutDeserializer, entities::de::EntitiesLayoutDeserializer,
-    id::ENTITY_SERIALIZER, EntitySerializer, UnknownType, WorldField,
+    EntitySerializer, UnknownType, WorldField,
 };
 use crate::{
     internals::{
         storage::{archetype::EntityLayout, component::ComponentTypeId},
         world::World,
     },
+    serialize::set_entity_serializer,
     storage::UnknownComponentWriter,
 };
 use serde::{
@@ -93,7 +94,7 @@ impl<'a, 'de, W: WorldDeserializer, E: EntitySerializer> Visitor<'de> for WorldV
         let world_deserializer = self.world_deserializer;
         let world_inner = &mut world;
         let hoist_ref_inner = &hoist_ref;
-        ENTITY_SERIALIZER.set(self.entity_serializer, || {
+        set_entity_serializer(self.entity_serializer, || {
             let map = map_hoist.take().unwrap();
             hoist_ref_inner.set(Some(run(world_deserializer, *world_inner, map)));
         });

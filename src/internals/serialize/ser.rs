@@ -2,10 +2,11 @@
 
 use super::{
     archetypes::ser::ArchetypeLayoutSerializer, entities::ser::EntitiesLayoutSerializer,
-    id::ENTITY_SERIALIZER, EntitySerializer, UnknownType, WorldField,
+    EntitySerializer, UnknownType, WorldField,
 };
 use crate::{
     internals::{query::filter::LayoutFilter, storage::component::ComponentTypeId, world::World},
+    serialize::set_entity_serializer,
     storage::{ArchetypeIndex, UnknownComponentStorage},
 };
 use serde::ser::{Serialize, SerializeMap, Serializer};
@@ -105,7 +106,7 @@ where
     let hoist_ref = &mut hoist;
     let root_ref = &mut root;
 
-    ENTITY_SERIALIZER.set(entity_serializer, || {
+    set_entity_serializer(entity_serializer, || {
         let result = if human_readable {
             // serialize per-entity representation
             root_ref.serialize_entry(

@@ -451,7 +451,7 @@ mod test {
     use crate::internals::{
         entity::Entity,
         query::filter::filter_fns::any,
-        serialize::id::Canon,
+        serialize::id::{set_entity_serializer, Canon},
         world::{EntityStore, World},
     };
 
@@ -562,7 +562,7 @@ mod test {
     fn run_as_context_panic() {
         std::panic::catch_unwind(|| {
             let entity_serializer = Canon::default();
-            super::id::ENTITY_SERIALIZER.set(&entity_serializer, || panic!());
+            set_entity_serializer(&entity_serializer, || panic!());
         })
         .unwrap_err();
 
