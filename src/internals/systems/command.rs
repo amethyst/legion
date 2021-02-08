@@ -17,13 +17,14 @@ use crate::{
     },
     world::Allocate,
 };
-use derivative::Derivative;
 use smallvec::SmallVec;
-use std::ops::Range;
 use std::{
+    any::type_name,
     collections::VecDeque,
+    fmt,
     iter::{Fuse, FusedIterator},
     marker::PhantomData,
+    ops::Range,
     sync::Arc,
 };
 
@@ -36,12 +37,19 @@ pub trait WorldWritable: Send + Sync {
     fn write(self: Arc<Self>, world: &mut World, cmd: &CommandBuffer);
 }
 
-#[derive(Derivative)]
-#[derivative(Debug(bound = ""))]
 struct InsertBufferedCommand<T> {
-    #[derivative(Debug = "ignore")]
     components: T,
     entities: Range<usize>,
+}
+
+impl<T> fmt::Debug for InsertBufferedCommand<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "InsertBufferedCommand<{}>({:?})",
+            type_name::<T>(),
+            self.entities
+        ))
+    }
 }
 
 impl<T> WorldWritable for InsertBufferedCommand<T>
@@ -125,11 +133,14 @@ impl<'a, T, A: Iterator<Item = T> + FusedIterator, B: Iterator<Item = T>> Iterat
     }
 }
 
-#[derive(Derivative)]
-#[derivative(Debug(bound = ""))]
 struct InsertCommand<T> {
-    #[derivative(Debug = "ignore")]
     components: T,
+}
+
+impl<T> fmt::Debug for InsertCommand<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("InsertCommand<{}>", type_name::<T>()))
+    }
 }
 
 impl<T> WorldWritable for InsertCommand<T>
@@ -142,9 +153,13 @@ where
     }
 }
 
-#[derive(Derivative)]
-#[derivative(Debug(bound = ""))]
 struct DeleteEntityCommand(Entity);
+
+impl fmt::Debug for DeleteEntityCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("DeleteEntityCommand({:?})", self.0))
+    }
+}
 
 impl WorldWritable for DeleteEntityCommand {
     fn write(self: Arc<Self>, world: &mut World, _: &CommandBuffer) {
@@ -152,13 +167,19 @@ impl WorldWritable for DeleteEntityCommand {
     }
 }
 
-#[derive(Derivative)]
-#[derivative(Debug(bound = ""))]
 struct AddComponentCommand<C> {
-    #[derivative(Debug = "ignore")]
     entity: Entity,
-    #[derivative(Debug = "ignore")]
     component: C,
+}
+
+impl<T> fmt::Debug for AddComponentCommand<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "AddComponentCommand<{}>({:?})",
+            type_name::<T>(),
+            self.entity
+        ))
+    }
 }
 
 impl<C> WorldWritable for AddComponentCommand<C>
@@ -174,11 +195,19 @@ where
     }
 }
 
-#[derive(Derivative)]
-#[derivative(Debug(bound = ""))]
 struct RemoveComponentCommand<C> {
     entity: Entity,
     _marker: PhantomData<C>,
+}
+
+impl<T> fmt::Debug for RemoveComponentCommand<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!(
+            "RemoveComponentCommand<{}>({:?})",
+            type_name::<T>(),
+            self.entity
+        ))
+    }
 }
 
 impl<C> WorldWritable for RemoveComponentCommand<C>
