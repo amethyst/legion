@@ -8,8 +8,8 @@
 //! a query with an initial filter which selects entities with all of the component types
 //! requested by the view.
 //!
-//! View types include [Entity](../world/struct.Entity.html), [Read](struct.Read.html),
-//! [Write](struct.Write.html), [TryRead](struct.TryRead.html) and [TryWrite](struct.TryWrite.html).
+//! View types include [`Entity`](super::world::Entity), [`Read`], [`Write`], [`TryRead`]
+//! and [`TryWrite`].
 //!
 //! ```
 //! # use legion::*;
@@ -37,10 +37,10 @@
 //! ```
 //!
 //! Once you have a query, you can use it to pull data out of a world. At its core, a query
-//! allows you to iterate over [chunks](struct.ChunkView.html). Each chunk contains a set of
-//! entities which all have exactly the same component types attached, and the chunk provides
-//! access to slices of each component. A single index in each slice in a chunk contains the
-//! component for the same entity.
+//! allows you to iterate over [chunks](ChunkView). Each chunk contains a set of entities which
+//! all have exactly the same component types attached, and the chunk provides access to slices
+//! of each component. A single index in each slice in a chunk contains the component for the
+//! same entity.
 //!
 //! ```
 //! # use legion::*;

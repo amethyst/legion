@@ -1,5 +1,5 @@
 //! Worlds store collections of entities. An entity is a collection of components, identified
-//! by a unique [Entity](struct.Entity.html) ID.
+//! by a unique [`Entity`] ID.
 //!
 //! # Creating a world
 //!
@@ -64,7 +64,7 @@
 //!
 //! # Modifying entities
 //!
-//! Components can be added or removed from an existing entity via the [Entry](struct.Entry.html) API.
+//! Components can be added or removed from an existing entity via the [`Entry`] API.
 //!
 //! ```
 //! # use legion::*;
@@ -85,7 +85,7 @@
 //!
 //! # Accessing components
 //!
-//! The fastest way to access a large number of entities' components is via [queries](../query/index.html).
+//! The fastest way to access a large number of entities' components is via [queries](crate::query).
 //!
 //! The entry API also allows access to an individual entity's components.
 //!
@@ -106,8 +106,8 @@
 //! # Events
 //!
 //! Notifications about archetype creation and entity insertion/removal from an archetype can be sent
-//! to an [EventSender](trait.EventSender.html) by subscribing to the world. A layout filter specifies
-//! which archetypes the subscriber is interested in.
+//! to an [`EventSender`] by subscribing to the world. A layout filter specifies which archetypes the
+//! subscriber is interested in.
 //!
 //! ```ignore
 //! # use legion::*;

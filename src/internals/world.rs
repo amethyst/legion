@@ -1,4 +1,4 @@
-//! Contains types related to the [World](struct.World.html) entity collection.
+//! Contains types related to the [`World`] entity collection.
 
 use super::entity::{
     Allocate, Entity, EntityHasher, EntityLocation, LocationMap, ID_CLONE_MAPPINGS,
@@ -43,7 +43,7 @@ pub enum EntityAccessError {
 }
 
 /// The `EntityStore` trait abstracts access to entity data as required by queries for
-/// both [World](struct.World.html) and [SubWorld](struct.SubWorld.html)
+/// both [`World`] and [`SubWorld`]
 pub trait EntityStore {
     /// Returns the world's unique ID.
     fn id(&self) -> WorldId;
@@ -54,13 +54,13 @@ pub trait EntityStore {
     /// Returns a mutable entity entry which can be used to access entity metadata and components.
     fn entry_mut(&mut self, entity: Entity) -> Result<EntryMut, EntityAccessError>;
 
-    /// Returns a component storage accessor for component types declared in the specified [View](../query/view/trait.View.html).
+    /// Returns a component storage accessor for component types declared in the specified [`View`].
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
     ) -> Result<StorageAccessor, EntityAccessError>;
 }
 
-/// Unique identifier for a [world](struct.World.html).
+/// Unique identifier for a [`World`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WorldId(u64);
 static WORLD_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -77,20 +77,19 @@ impl Default for WorldId {
     }
 }
 
-/// Describes configuration options for the creation of a new [world](struct.World.html).
+/// Describes configuration options for the creation of a new [`World`].
 #[derive(Default)]
 pub struct WorldOptions {
-    /// A vector of component [groups](../storage/struct.Group.html) to provide
-    /// layout hints for query optimization.
+    /// A vector of component [`GroupDef`]s to provide layout hints for query optimization.
     pub groups: Vec<GroupDef>,
 }
 
 /// A container of entities.
 ///
-/// Each entity stored inside a world is uniquely identified by an [Entity](struct.Entity.html) ID
-/// and may have an arbitrary collection of [components](../storage/trait.Component.html) attached.
+/// Each entity stored inside a world is uniquely identified by an [`Entity`] ID and may have an
+/// arbitrary collection of [`Component`]s attached.
 ///
-/// The entities in a world may be efficiently searched and iterated via [queries](../query/index.html).
+/// The entities in a world may be efficiently searched and iterated via [queries](crate::query).
 #[derive(Debug)]
 pub struct World {
     id: WorldId,
@@ -291,8 +290,7 @@ impl World {
         }
     }
 
-    /// Gets an [entry](struct.Entry.html) for an entity, allowing manipulation of the
-    /// entity.
+    /// Gets an [`Entry`] for an entity, allowing manipulation of the entity.
     ///
     /// # Examples
     ///
@@ -328,7 +326,7 @@ impl World {
             .ok_or(EntityAccessError::EntityNotFound)
     }
 
-    /// Subscribes to entity [events](../event/enum.Event.html).
+    /// Subscribes to entity [`Event`](super::event::Event)s.
     pub fn subscribe<T, S>(&mut self, sender: S, filter: T)
     where
         T: LayoutFilter + Send + Sync + 'static,
@@ -344,8 +342,7 @@ impl World {
     }
 
     /// Packs the world's internal component storage to optimise iteration performance for
-    /// [queries](../query/index.html) which match a [group](../storage/struct.Group.html)
-    /// defined when this world was created.
+    /// [queries](crate::query) which match a [`GroupDef`] defined when this world was created.
     pub fn pack(&mut self, options: PackOptions) {
         self.components.pack(&options);
     }
@@ -583,12 +580,13 @@ impl World {
 
     /// Clones the entities from a world into this world.
     ///
-    /// A [filter](../query/trait.LayoutFilter.html) selects which entities to merge.  
-    /// A [merger](trait.Merger.html) describes how to perform the merge operation.  
+    /// A [`LayoutFilter`] selects which entities to merge.
+    /// A [`Merger`] describes how to perform the merge operation.
     ///
     /// If any entity IDs are remapped by the policy, their mappings will be returned in the result.
     ///
-    /// More advanced operations such as component type transformations can be performed with the [Duplicate](struct.Duplicate.html) merger.
+    /// More advanced operations such as component type transformations can be performed with the
+    /// [`Duplicate`] merger.
     ///
     /// # Examples
     ///
@@ -775,19 +773,19 @@ impl World {
 
     /// Creates a serde serializable representation of the world.
     ///
-    /// A [filter](../query/trait.LayoutFilter.html) selects which entities shall be serialized.  
-    /// A [world serializer](../serialize/trait.WorldSerializer.html) describes how components will
-    /// be serialized.  
+    /// A [`LayoutFilter`] selects which entities shall be serialized.
+    /// A [`WorldSerializer`](super::serialize::ser::WorldSerializer) describes how components will
+    /// be serialized.
     ///
     /// As component types are not known at compile time, the world must be provided with the
     /// means to serialize each component. This is provided by the
-    /// [WorldSerializer](../serialize/trait.WorldSerializer.html) implementation. This implementation
-    /// also describes how [ComponentTypeIDs](../storage/struct.ComponentTypeId.html) (which
-    /// are not stable between compiles) are mapped to stable type identifiers. Components that are
-    /// not known to the serializer will be omitted from the serialized output.
+    /// [`WorldSerializer`](super::serialize::ser::WorldSerializer) implementation. This implementation
+    /// also describes how [`ComponentTypeId`]s (which are not stable between compiles) are mapped to
+    /// stable type identifiers. Components that are not known to the serializer will be omitted from
+    /// the serialized output.
     ///
-    /// The [Registry](../serialize/struct.Registry.html) provides a
-    /// [WorldSerializer](../serialize/trait.WorldSerializer.html) implementation suitable for most
+    /// The [`Registry`](super::serialize::Registry) provides a
+    /// [`WorldSerializer`](super::serialize::ser::WorldSerializer) implementation suitable for most
     /// situations.
     ///
     /// # Examples
@@ -948,7 +946,7 @@ impl<'a> StorageAccessor<'a> {
     }
 }
 
-/// Describes how to merge two [worlds](struct.World.html).
+/// Describes how to merge two [World]s.
 pub trait Merger {
     /// Indicates if the merger prefers to merge into a new empty archetype.
     #[inline]
@@ -1000,7 +998,7 @@ impl Default for EntityRewrite {
     }
 }
 
-/// A [merger](trait.Merger.html) which clones entities from the source world into the destination,
+/// A [`Merger`] which clones entities from the source world into the destination,
 /// potentially performing data transformations in the process.
 #[derive(Default)]
 #[allow(clippy::type_complexity)]
