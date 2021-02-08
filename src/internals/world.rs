@@ -793,6 +793,7 @@ impl World {
     /// Serializing all entities with a `Position` component to JSON.
     /// ```
     /// # use legion::*;
+    /// # use legion::serialize::Canon;
     /// # let world = World::default();
     /// # #[derive(serde::Serialize, serde::Deserialize)]
     /// # struct Position;
@@ -803,24 +804,32 @@ impl World {
     /// registry.register::<bool>("bool".to_string());
     ///
     /// // serialize entities with the `Position` component
-    /// let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry)).unwrap();
+    /// let entity_serializer = Canon::default();
+    /// let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry, &entity_serializer)).unwrap();
     /// println!("{:#}", json);
     ///
     /// // registries can also be used to deserialize
     /// use serde::de::DeserializeSeed;
-    /// let world: World = registry.as_deserialize().deserialize(json).unwrap();
+    /// let world: World = registry.as_deserialize(&entity_serializer).deserialize(json).unwrap();
     /// ```
     #[cfg(feature = "serialize")]
     pub fn as_serializable<
         'a,
         F: LayoutFilter,
         W: crate::internals::serialize::ser::WorldSerializer,
+        E: crate::internals::serialize::id::EntitySerializer,
     >(
         &'a self,
         filter: F,
         world_serializer: &'a W,
-    ) -> crate::internals::serialize::ser::SerializableWorld<'a, F, W> {
-        crate::internals::serialize::ser::SerializableWorld::new(&self, filter, world_serializer)
+        entity_serializer: &'a E,
+    ) -> crate::internals::serialize::ser::SerializableWorld<'a, F, W, E> {
+        crate::internals::serialize::ser::SerializableWorld::new(
+            &self,
+            filter,
+            world_serializer,
+            entity_serializer,
+        )
     }
 }
 

@@ -11,6 +11,7 @@
 //! Serializing all entities with a `Position` component to JSON.
 //! ```
 //! # use legion::*;
+//! # use legion::serialize::Canon;
 //! # let world = World::default();
 //! # #[derive(serde::Serialize, serde::Deserialize)]
 //! # struct Position;
@@ -21,20 +22,20 @@
 //! registry.register::<bool>("bool".to_string());
 //!
 //! // serialize entities with the `Position` component
-//! let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry)).unwrap();
+//! let entity_serializer = Canon::default();
+//! let json = serde_json::to_value(&world.as_serializable(component::<Position>(), &registry, &entity_serializer)).unwrap();
 //! println!("{:#}", json);
 //!
 //! // registries are also serde deserializers
 //! use serde::de::DeserializeSeed;
-//! let world: World = registry.as_deserialize().deserialize(json).unwrap();
+//! let world: World = registry.as_deserialize(&entity_serializer).deserialize(json).unwrap();
 //! ```
 
 pub use crate::internals::serialize::{
     de::WorldDeserializer,
-    id::{Canon, EntityName, EntitySerializer},
+    id::{set_entity_serializer, Canon, CustomEntitySerializer, EntityName, EntitySerializer},
     ser::{SerializableWorld, WorldSerializer},
-    AutoTypeKey, CustomEntitySerializer, DeserializeIntoWorld, DeserializeNewWorld, Registry,
-    TypeKey, UnknownType,
+    AutoTypeKey, DeserializeIntoWorld, DeserializeNewWorld, Registry, TypeKey, UnknownType,
 };
 
 #[cfg(feature = "type-uuid")]
