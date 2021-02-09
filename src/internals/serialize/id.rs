@@ -1,20 +1,16 @@
-use std::{
-    cell::RefCell,
-    collections::{hash_map::Entry, HashMap},
-};
+use std::collections::{hash_map::Entry, HashMap};
 
+use scoped_tls_hkt::scoped_thread_local;
 use serde::{Deserialize, Serialize, Serializer};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{
-    internals::{entity::EntityHasher, serialize::CustomEntitySerializer},
-    world::Allocate,
-    Entity,
-};
+use crate::{internals::entity::EntityHasher, world::Allocate, Entity};
 
 /// Describes how to serialize and deserialize a runtime `Entity` ID.
-pub trait EntitySerializer {
+///
+/// This trait is automatically implemented for types that implement [`CustomEntitySerializer`].
+pub trait EntitySerializer: 'static {
     /// Serializes an `Entity` by constructing the serializable representation
     /// and passing it into `serialize_fn`.
     fn serialize(&self, entity: Entity, serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize));
@@ -26,47 +22,76 @@ pub trait EntitySerializer {
     ) -> Result<Entity, erased_serde::Error>;
 }
 
-thread_local! {
-    static SERIALIZER: RefCell<Option<&'static dyn EntitySerializer>> = RefCell::new(None);
+/// Describes a mapping between a runtime `Entity` ID and a serialized equivalent.
+///
+/// Implementing this trait will automatically implement [`EntitySerializer`] for the type.
+///
+/// Developers should be aware of their serialization/deserialization use-cases as well as
+/// world-merge use cases when picking a `SerializedID`, as this type must identify unique entities
+/// across world serialization/deserialization cycles as well as across world merges.
+pub trait CustomEntitySerializer {
+    /// The type used for serialized Entity IDs.
+    type SerializedID: serde::Serialize + for<'a> serde::Deserialize<'a>;
+
+    /// Constructs the serializable representation of `Entity`
+    fn to_serialized(&self, entity: Entity) -> Self::SerializedID;
+
+    /// Convert a `SerializedEntity` to an `Entity`.
+    fn from_serialized(&self, serialized: Self::SerializedID) -> Entity;
 }
 
-/// Runs the provided function with this canon as context for Entity (de)serialization.
-pub fn run_as_context<F: FnOnce() -> R, R>(context: &dyn EntitySerializer, f: F) -> R {
-    struct SerializerGuard<'a> {
-        cell: &'a RefCell<Option<&'static dyn EntitySerializer>>,
-        prev: Option<&'static dyn EntitySerializer>,
+impl<T> EntitySerializer for T
+where
+    T: CustomEntitySerializer + 'static,
+{
+    fn serialize(
+        &self,
+        entity: Entity,
+        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
+    ) {
+        let serialized = self.to_serialized(entity);
+        serialize_fn(&serialized);
     }
 
-    impl Drop for SerializerGuard<'_> {
-        fn drop(&mut self) {
-            // swap context back out of TLS, putting back what we took out.
-            let mut existing = self.cell.borrow_mut();
-            *existing = self.prev;
-        }
+    fn deserialize(
+        &self,
+        deserializer: &mut dyn erased_serde::Deserializer,
+    ) -> Result<Entity, erased_serde::Error> {
+        let serialized =
+            <<Self as CustomEntitySerializer>::SerializedID as serde::Deserialize>::deserialize(
+                deserializer,
+            )?;
+        Ok(self.from_serialized(serialized))
     }
+}
 
-    SERIALIZER.with(|cell| {
-        // swap context into TLS
-        let _serializer_guard = {
-            let mut existing = cell.borrow_mut();
-            // Safety? Hmm
-            // This &'static reference is only stored in the TLS for the duration of this function,
-            // meaning it will be valid for all TLS uses as long as it's not copied anywhere else.
-            // Can't express this lifetime in a TLS-static, so that's why this unsafe block needs to exist.
-            //
-            // If `f` unwinds, the SerializerGuard destructor will restore the previous value of
-            // SERIALIZER, so there's no risk of leaving a dangling reference.
-            let hacked_context = unsafe {
-                core::mem::transmute::<&dyn EntitySerializer, &'static dyn EntitySerializer>(
-                    context,
-                )
-            };
-            let prev = std::mem::replace(&mut *existing, Some(hacked_context));
-            SerializerGuard { cell, prev }
-        };
+scoped_thread_local! {
+    static ENTITY_SERIALIZER: dyn EntitySerializer
+}
 
-        (f)()
-    })
+/// Sets the [`EntitySerializer`] currently being used to serialize or deserialize [`Entity`] IDs.
+///
+/// This is set automatically when serializing or deserializing a [`World`]. When serializing or
+/// deserializing values outside a `World`, this needs to be set manually, passing in a reference
+/// to the `EntitySerializer` and a closure that does the serializing/deserializing.
+/// ```
+/// # use legion::*;
+/// # use legion::serialize::{Canon, set_entity_serializer};
+/// # let mut world = World::default();
+/// # #[derive(serde::Serialize, serde::Deserialize)]
+/// # struct ContainsEntity(Entity);
+/// # let contains_entity = ContainsEntity(world.push(()));
+///
+/// let entity_serializer = Canon::default();
+/// set_entity_serializer(&entity_serializer, || {
+///     serde_json::to_value(contains_entity).unwrap()
+/// });
+/// ```
+pub fn set_entity_serializer<F, R>(entity_serializer: &dyn EntitySerializer, func: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    ENTITY_SERIALIZER.set(entity_serializer, func)
 }
 
 impl Serialize for Entity {
@@ -74,22 +99,18 @@ impl Serialize for Entity {
     where
         S: Serializer,
     {
-        SERIALIZER.with(|cell| {
-            let mut entity_serializer = cell.borrow_mut();
+        ENTITY_SERIALIZER.with(|entity_serializer| {
             let mut result = None;
             let mut serializer = Some(serializer);
             let result_ref = &mut result;
-            entity_serializer
-                .as_mut()
-                .expect("No entity serializer set")
-                .serialize(*self, &mut move |serializable| {
-                    *result_ref = Some(erased_serde::serialize(
-                        serializable,
-                        serializer
-                            .take()
-                            .expect("serialize can only be called once"),
-                    ));
-                });
+            entity_serializer.serialize(*self, &mut move |serializable| {
+                *result_ref = Some(erased_serde::serialize(
+                    serializable,
+                    serializer
+                        .take()
+                        .expect("serialize can only be called once"),
+                ));
+            });
             result.unwrap()
         })
     }
@@ -101,12 +122,9 @@ impl<'de> Deserialize<'de> for Entity {
         D: serde::Deserializer<'de>,
     {
         use serde::de::Error;
-        SERIALIZER.with(|cell| {
+        ENTITY_SERIALIZER.with(|entity_serializer| {
             let mut deserializer = erased_serde::Deserializer::erase(deserializer);
-            let mut entity_serializer = cell.borrow_mut();
             entity_serializer
-                .as_mut()
-                .expect("No entity serializer set")
                 .deserialize(&mut deserializer)
                 .map_err(D::Error::custom)
         })
@@ -130,57 +148,66 @@ pub enum CanonizeError {
 /// Contains the canon names of entities.
 #[derive(Default, Debug)]
 pub struct Canon {
+    inner: parking_lot::RwLock<CanonInner>,
+}
+
+#[derive(Default, Debug)]
+struct CanonInner {
     to_name: HashMap<Entity, EntityName, EntityHasher>,
     to_id: HashMap<EntityName, Entity>,
     allocator: Allocate,
 }
 
 impl Canon {
-    /// Returns the [Entity](struct.Entity.html) ID associated with the given [EntityName](struct.EntityName.html).
+    /// Returns the [`Entity`] ID associated with the given [`EntityName`].
     pub fn get_id(&self, name: &EntityName) -> Option<Entity> {
-        self.to_id.get(name).copied()
+        self.inner.read().to_id.get(name).copied()
     }
 
-    /// Returns the [EntityName](struct.EntityName.html) associated with the given [Entity](struct.Entity.html) ID.
+    /// Returns the [`EntityName`] associated with the given [`Entity`] ID.
     pub fn get_name(&self, entity: Entity) -> Option<EntityName> {
-        self.to_name.get(&entity).copied()
+        self.inner.read().to_name.get(&entity).copied()
     }
 
-    /// Canonizes a given [EntityName](struct.EntityName.html) and returns the associated [Entity](struct.Entity.html) ID.
-    pub fn canonize_name(&mut self, name: &EntityName) -> Entity {
-        match self.to_id.entry(*name) {
+    /// Canonizes a given [`EntityName`] and returns the associated [`Entity`] ID.
+    pub fn canonize_name(&self, name: &EntityName) -> Entity {
+        let mut inner = self.inner.write();
+        let inner = &mut *inner;
+        match inner.to_id.entry(*name) {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant) => {
-                let entity = self.allocator.next().unwrap();
+                let entity = inner.allocator.next().unwrap();
                 vacant.insert(entity);
-                self.to_name.insert(entity, *name);
+                inner.to_name.insert(entity, *name);
                 entity
             }
         }
     }
 
-    /// Canonizes a given [Entity](struct.Entity.html) ID and returns the associated [EntityName](struct.EntityName.html).
-    pub fn canonize_id(&mut self, entity: Entity) -> EntityName {
-        match self.to_name.entry(entity) {
+    /// Canonizes a given [`Entity`] ID and returns the associated [`EntityName`].
+    pub fn canonize_id(&self, entity: Entity) -> EntityName {
+        let mut inner = self.inner.write();
+        match inner.to_name.entry(entity) {
             Entry::Occupied(occupied) => *occupied.get(),
             Entry::Vacant(vacant) => {
                 let uuid = Uuid::new_v4();
                 let name = *uuid.as_bytes();
                 vacant.insert(name);
-                self.to_id.insert(name, entity);
+                inner.to_id.insert(name, entity);
                 name
             }
         }
     }
 
     /// Canonizes the given entity and name pair.
-    pub fn canonize(&mut self, entity: Entity, name: EntityName) -> Result<(), CanonizeError> {
-        if let Some(existing) = self.to_id.get(&name) {
+    pub fn canonize(&self, entity: Entity, name: EntityName) -> Result<(), CanonizeError> {
+        let mut inner = self.inner.write();
+        if let Some(existing) = inner.to_id.get(&name) {
             if existing != &entity {
                 return Err(CanonizeError::NameAlreadyBound(*existing, name));
             }
         }
-        match self.to_name.entry(entity) {
+        match inner.to_name.entry(entity) {
             Entry::Occupied(occupied) => {
                 if occupied.get() == &name {
                     Ok(())
@@ -190,7 +217,7 @@ impl Canon {
             }
             Entry::Vacant(vacant) => {
                 vacant.insert(name);
-                self.to_id.insert(name, entity);
+                inner.to_id.insert(name, entity);
                 Ok(())
             }
         }
@@ -199,13 +226,12 @@ impl Canon {
 
 impl CustomEntitySerializer for Canon {
     type SerializedID = uuid::Uuid;
-    /// Constructs the serializable representation of `Entity`
-    fn to_serialized(&mut self, entity: Entity) -> Self::SerializedID {
+
+    fn to_serialized(&self, entity: Entity) -> Self::SerializedID {
         uuid::Uuid::from_bytes(self.canonize_id(entity))
     }
 
-    /// Convert a `SerializedEntity` to an `Entity`.
-    fn from_serialized(&mut self, serialized: Self::SerializedID) -> Entity {
+    fn from_serialized(&self, serialized: Self::SerializedID) -> Entity {
         self.canonize_name(serialized.as_bytes())
     }
 }

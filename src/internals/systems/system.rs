@@ -448,3 +448,40 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        internals::{query::IntoQuery, systems::system::SystemBuilder},
+        Resources, Schedule,
+    };
+
+    #[test]
+    fn subworld_split_in_system_read() {
+        struct Ball;
+        struct Paddle;
+        struct Transform;
+
+        let mut world = World::default();
+        let mut resources = Resources::default();
+
+        world.push((Ball, Transform));
+        world.push((Paddle, Transform));
+        world.push((Paddle, Transform));
+
+        let system = SystemBuilder::new("PaddleSystem")
+            .with_query(<(&mut Ball, &Transform)>::query())
+            .with_query(<(&Paddle, &Transform)>::query())
+            .build(|_, world, _, (ball_query, paddle_query)| {
+                let (mut balls, paddles) = world.split_for_query(ball_query);
+
+                for _ in ball_query.iter_mut(&mut balls) {
+                    for _ in paddle_query.iter(&paddles) {}
+                }
+            });
+
+        let mut schedule = Schedule::builder().add_thread_local(system).build();
+        schedule.execute(&mut world, &mut resources);
+    }
+}

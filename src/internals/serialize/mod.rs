@@ -1,9 +1,9 @@
 //! Contains types required to serialize and deserialize a world via the serde library.
 
-use std::{collections::HashMap, hash::Hash, marker::PhantomData, sync::Arc};
+use std::{collections::HashMap, hash::Hash, marker::PhantomData};
 
 use de::{WorldDeserializer, WorldVisitor};
-use id::{Canon, EntitySerializer};
+use id::EntitySerializer;
 use ser::WorldSerializer;
 use serde::{de::DeserializeSeed, Serializer};
 
@@ -17,7 +17,6 @@ use crate::{
         world::World,
     },
     storage::UnknownComponentWriter,
-    Entity,
 };
 
 pub mod archetypes;
@@ -38,7 +37,7 @@ impl<T> TypeKey for T where
     T: serde::Serialize + for<'de> serde::Deserialize<'de> + Ord + Clone + Hash
 {
 }
-/// A [TypeKey](trait.TypeKey.html) which can construct itself for a given type T.
+/// A [`TypeKey`] which can construct itself for a given type T.
 pub trait AutoTypeKey<T: Component>: TypeKey {
     /// Constructs the type key for component type `T`.
     fn new() -> Self;
@@ -63,20 +62,6 @@ pub enum UnknownType {
     Error,
 }
 
-/// Describes how to serialize and deserialize a runtime `Entity` ID.
-pub trait CustomEntitySerializer {
-    /// The type used for serialized Entity IDs. Developers should be aware of their
-    /// serialization/deserialization use-cases as well as world-merge use cases when picking a
-    /// SerializedID, as the SerializedId type must identify unique entities across world
-    /// serialization/deserialization cycles as well as across world merges.
-    type SerializedID: serde::Serialize + for<'a> serde::Deserialize<'a>;
-    /// Constructs the serializable representation of `Entity`
-    fn to_serialized(&mut self, entity: Entity) -> Self::SerializedID;
-
-    /// Convert a `SerializedEntity` to an `Entity`.
-    fn from_serialized(&mut self, serialized: Self::SerializedID) -> Entity;
-}
-
 /// A world (de)serializer which describes how to (de)serialize the component types in a world.
 ///
 /// The type parameter `T` represents the key used in the serialized output to identify each
@@ -85,13 +70,11 @@ pub trait CustomEntitySerializer {
 ///
 /// See the [legion_typeuuid crate](https://github.com/TomGillen/legion_typeuuid) for an example
 /// of a type key which is stable between compiles.
-pub struct Registry<T, S = Canon>
+pub struct Registry<T>
 where
     T: TypeKey,
-    S: CustomEntitySerializer + 'static,
 {
     _phantom_t: PhantomData<T>,
-    _phantom_s: PhantomData<S>,
     missing: UnknownType,
     serialize_fns: HashMap<
         ComponentTypeId,
@@ -104,23 +87,19 @@ where
         ),
     >,
     constructors: HashMap<T, (ComponentTypeId, fn(&mut EntityLayout))>,
-    canon: Arc<parking_lot::RwLock<S>>,
 }
 
-impl<T, S> Registry<T, S>
+impl<T> Registry<T>
 where
     T: TypeKey,
-    S: CustomEntitySerializer + 'static,
 {
     /// Constructs a new registry.
-    pub fn new(canon: Arc<parking_lot::RwLock<S>>) -> Self {
+    pub fn new() -> Self {
         Self {
             missing: UnknownType::Error,
             serialize_fns: HashMap::new(),
             constructors: HashMap::new(),
-            canon,
             _phantom_t: PhantomData,
-            _phantom_s: PhantomData,
         }
     }
 
@@ -196,57 +175,43 @@ where
     }
 
     /// Constructs a serde::DeserializeSeed which will deserialize into an existing world.
-    pub fn as_deserialize_into_world<'a>(
+    pub fn as_deserialize_into_world<'a, E: EntitySerializer>(
         &'a self,
         world: &'a mut World,
-    ) -> DeserializeIntoWorld<'a, Self> {
-        DeserializeIntoWorld(&self, world)
+        entity_serializer: &'a E,
+    ) -> DeserializeIntoWorld<'a, Self, E> {
+        DeserializeIntoWorld {
+            world,
+            world_deserializer: self,
+            entity_serializer,
+        }
     }
 
     /// Constructs a serde::DeserializeSeed which will deserialize into a new world.
-    pub fn as_deserialize(&self) -> DeserializeNewWorld<'_, Self> {
-        DeserializeNewWorld(&self)
+    pub fn as_deserialize<'a, E: EntitySerializer>(
+        &'a self,
+        entity_serializer: &'a E,
+    ) -> DeserializeNewWorld<'a, Self, E> {
+        DeserializeNewWorld {
+            world_deserializer: self,
+            entity_serializer,
+        }
     }
 }
 
-impl<T, S> Default for Registry<T, S>
+impl<T> Default for Registry<T>
 where
     T: TypeKey,
-    S: CustomEntitySerializer + Default + 'static,
 {
+    #[inline]
     fn default() -> Self {
-        Self::new(Arc::new(parking_lot::RwLock::new(S::default())))
+        Self::new()
     }
 }
 
-impl<S: CustomEntitySerializer + 'static> EntitySerializer for &parking_lot::RwLock<S> {
-    fn serialize(
-        &self,
-        entity: Entity,
-        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
-    ) {
-        let mut canon = self.write();
-        let serialized = canon.to_serialized(entity);
-        serialize_fn(&serialized);
-    }
-
-    fn deserialize(
-        &self,
-        deserializer: &mut dyn erased_serde::Deserializer,
-    ) -> Result<Entity, erased_serde::Error> {
-        let mut canon = self.write();
-        let serialized =
-            <<S as CustomEntitySerializer>::SerializedID as serde::Deserialize>::deserialize(
-                deserializer,
-            )?;
-        Ok(canon.from_serialized(serialized))
-    }
-}
-
-impl<T, S> WorldSerializer for Registry<T, S>
+impl<T> WorldSerializer for Registry<T>
 where
     T: TypeKey,
-    S: CustomEntitySerializer + 'static,
 {
     type TypeId = T;
 
@@ -310,16 +275,11 @@ where
             panic!();
         }
     }
-    fn with_entity_serializer(&self, callback: &mut dyn FnMut(&dyn EntitySerializer)) {
-        let canon_ref = &*self.canon;
-        callback(&canon_ref);
-    }
 }
 
-impl<T, S> WorldDeserializer for Registry<T, S>
+impl<T> WorldDeserializer for Registry<T>
 where
     T: TypeKey,
-    S: CustomEntitySerializer + 'static,
 {
     type TypeId = T;
 
@@ -366,10 +326,6 @@ where
             //Err(D::Error::custom("unrecognized component type"))
             panic!()
         }
-    }
-    fn with_entity_serializer(&self, callback: &mut dyn FnMut(&dyn EntitySerializer)) {
-        let canon_ref = &*self.canon;
-        callback(&canon_ref);
     }
 }
 
@@ -427,11 +383,20 @@ impl<'a, 'de, T: Component + for<'b> serde::de::Deserialize<'b>> serde::de::Dese
     }
 }
 
-/// Wraps a [WorldDeserializer](de/trait.WorldDeserializer.html) and a world and implements
-/// `serde::DeserializeSeed` for deserializing into the world.
-pub struct DeserializeIntoWorld<'a, T: WorldDeserializer>(pub &'a T, pub &'a mut World);
+/// Wraps a [`WorldDeserializer`] and a world and implements `serde::DeserializeSeed`
+/// for deserializing into the world.
+pub struct DeserializeIntoWorld<'a, W: WorldDeserializer, E: EntitySerializer> {
+    /// The [World](../world/struct.World.html) to deserialize into.
+    pub world: &'a mut World,
+    /// The [WorldDeserializer](trait.WorldDeserializer.html) to use.
+    pub world_deserializer: &'a W,
+    /// The [EntitySerializer](trait.EntitySerializer.html) to use.
+    pub entity_serializer: &'a E,
+}
 
-impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for DeserializeIntoWorld<'a, W> {
+impl<'a, 'de, W: WorldDeserializer, E: EntitySerializer> DeserializeSeed<'de>
+    for DeserializeIntoWorld<'a, W, E>
+{
     type Value = ();
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -439,17 +404,25 @@ impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for DeserializeIntoWorl
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_map(WorldVisitor {
-            world_deserializer: self.0,
-            world: self.1,
+            world: self.world,
+            world_deserializer: self.world_deserializer,
+            entity_serializer: self.entity_serializer,
         })
     }
 }
 
-/// Wraps a [WorldDeserializer](de/trait.WorldDeserializer.html) and a universe and implements
-/// `serde::DeserializeSeed` for deserializing into a new world.
-pub struct DeserializeNewWorld<'a, T: WorldDeserializer>(pub &'a T);
+/// Wraps a [`WorldDeserializer`] and a world and implements `serde::DeserializeSeed`
+/// for deserializing into a new world.
+pub struct DeserializeNewWorld<'a, W: WorldDeserializer, E: EntitySerializer> {
+    /// The [WorldDeserializer](trait.WorldDeserializer.html) to use.
+    pub world_deserializer: &'a W,
+    /// The [EntitySerializer](trait.EntitySerializer.html) to use.
+    pub entity_serializer: &'a E,
+}
 
-impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for DeserializeNewWorld<'a, W> {
+impl<'a, 'de, W: WorldDeserializer, E: EntitySerializer> DeserializeSeed<'de>
+    for DeserializeNewWorld<'a, W, E>
+{
     type Value = World;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -457,7 +430,12 @@ impl<'a, 'de, W: WorldDeserializer> DeserializeSeed<'de> for DeserializeNewWorld
         D: serde::Deserializer<'de>,
     {
         let mut world = World::default();
-        DeserializeIntoWorld(self.0, &mut world).deserialize(deserializer)?;
+        DeserializeIntoWorld {
+            world: &mut world,
+            world_deserializer: self.world_deserializer,
+            entity_serializer: self.entity_serializer,
+        }
+        .deserialize(deserializer)?;
         Ok(world)
     }
 }
@@ -471,10 +449,11 @@ enum WorldField {
 
 #[cfg(test)]
 mod test {
-    use super::{Canon, Registry};
+    use super::Registry;
     use crate::internals::{
         entity::Entity,
         query::filter::filter_fns::any,
+        serialize::id::{set_entity_serializer, Canon},
         world::{EntityStore, World},
     };
 
@@ -499,17 +478,23 @@ mod test {
             (8usize, 8isize, EntityRef(entity)),
         ])[0];
 
+        let entity_serializer = Canon::default();
         let mut registry = Registry::<String>::default();
         registry.register::<usize>("usize".to_string());
         registry.register::<bool>("bool".to_string());
         registry.register::<isize>("isize".to_string());
         registry.register::<EntityRef>("entity_ref".to_string());
 
-        let json = serde_json::to_value(&world.as_serializable(any(), &registry)).unwrap();
+        let json =
+            serde_json::to_value(&world.as_serializable(any(), &registry, &entity_serializer))
+                .unwrap();
         println!("{:#}", json);
 
         use serde::de::DeserializeSeed;
-        let world: World = registry.as_deserialize().deserialize(json).unwrap();
+        let world: World = registry
+            .as_deserialize(&entity_serializer)
+            .deserialize(json)
+            .unwrap();
         let entry = world.entry_ref(entity).unwrap();
         assert_eq!(entry.get_component::<usize>().unwrap(), &1usize);
         assert_eq!(entry.get_component::<bool>().unwrap(), &false);
@@ -545,12 +530,15 @@ mod test {
             (8usize, 8isize),
         ]);
 
+        let entity_serializer = Canon::default();
         let mut registry = Registry::<i32>::default();
         registry.register::<usize>(1);
         registry.register::<bool>(2);
         registry.register::<isize>(3);
 
-        let encoded = bincode::serialize(&world.as_serializable(any(), &registry)).unwrap();
+        let encoded =
+            bincode::serialize(&world.as_serializable(any(), &registry, &entity_serializer))
+                .unwrap();
 
         use bincode::config::Options;
         use serde::de::DeserializeSeed;
@@ -561,7 +549,7 @@ mod test {
                 .allow_trailing_bytes(),
         );
         let world: World = registry
-            .as_deserialize()
+            .as_deserialize(&entity_serializer)
             .deserialize(&mut deserializer)
             .unwrap();
         let entity = world.entry_ref(entity).unwrap();
@@ -575,11 +563,8 @@ mod test {
     #[test]
     fn run_as_context_panic() {
         std::panic::catch_unwind(|| {
-            let registry = Registry::<i32>::default();
-
-            super::WorldSerializer::with_entity_serializer(&registry, &mut |canon| {
-                super::id::run_as_context(canon, || panic!());
-            });
+            let entity_serializer = Canon::default();
+            set_entity_serializer(&entity_serializer, || panic!());
         })
         .unwrap_err();
 
@@ -608,24 +593,26 @@ mod test {
             (8usize, 8isize, EntityRef(entity)),
         ])[0];
 
-        let locked_canon_ref = std::sync::Arc::new(parking_lot::RwLock::new(Canon::default()));
-        let mut registry = Registry::<String>::new(locked_canon_ref.clone());
+        let entity_serializer = Canon::default();
+        let mut registry = Registry::<String>::new();
         registry.register::<usize>("usize".to_string());
         registry.register::<bool>("bool".to_string());
         registry.register::<isize>("isize".to_string());
         registry.register::<EntityRef>("entity_ref".to_string());
 
-        let json = serde_json::to_value(&world1.as_serializable(any(), &registry)).unwrap();
+        let json =
+            serde_json::to_value(&world1.as_serializable(any(), &registry, &entity_serializer))
+                .unwrap();
         println!("{:#}", json);
-        // Need to drop our read access to the canon before registry.as_deserialize will work,
-        // otherwise it will hang trying to acquire write access to the canon.
-        {
-            let canon = locked_canon_ref.read();
-            let entityname = canon.get_name(entity).unwrap();
-            assert_eq!(canon.get_id(&entityname).unwrap(), entity);
-        }
+
+        let entityname = entity_serializer.get_name(entity).unwrap();
+        assert_eq!(entity_serializer.get_id(&entityname).unwrap(), entity);
+
         use serde::de::DeserializeSeed;
-        let world2: World = registry.as_deserialize().deserialize(json).unwrap();
+        let world2: World = registry
+            .as_deserialize(&entity_serializer)
+            .deserialize(json)
+            .unwrap();
         let entry = world2.entry_ref(entity).unwrap();
         assert_eq!(entry.get_component::<usize>().unwrap(), &1usize);
         assert_eq!(entry.get_component::<bool>().unwrap(), &false);

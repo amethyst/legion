@@ -1,5 +1,4 @@
-//! Contains types related to the [SubWorld](struct.SubWorld.html) which
-//! can split a world by component type access.
+//! Contains types related to the [`SubWorld`] which can split a world by component type access.
 
 use std::borrow::Cow;
 
@@ -148,14 +147,14 @@ impl<'a> ComponentAccess<'a> {
 
 /// Provides access to a subset of the entities of a `World`.
 ///
-/// To access a component mutably in a world, such as inside a [query](../query/index.html) or via an
-/// [entry](struct.EntryMut.html), you need to borrow the entire world mutably. This prevents you from
-/// accessing any other data in the world at the same time.
+/// To access a component mutably in a world, such as inside a [query](crate::query) or via an
+/// [`EntryMut`], you need to borrow the entire world mutably. This prevents you from accessing
+/// any other data in the world at the same time.
 ///
 /// In some cases, we can work around this by splitting the world. We can split a world around the
-/// component types requested by a [view](../query/view/index.html). This will create two subworlds,
-/// the left one allowing access only to the components (and mutability) declared by the view, while
-/// the right subworld will allow access to everything _but_ those components.
+/// component types requested by a [`View`]. This will create two subworlds, the left one allowing
+/// access only to the components (and mutability) declared by the view, while the right subworld
+/// will allow access to everything _but_ those components.
 ///
 /// Subworlds can be recustively further split.
 #[derive(Clone)]

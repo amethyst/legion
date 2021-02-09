@@ -14,7 +14,7 @@ edition = "2018"
 default = ["parallel", "serialize", "crossbeam-events", "codegen"]
 parallel = ["rayon"]
 extended-tuple-impls = []
-serialize = ["serde", "erased-serde", "uuid/serde"]
+serialize = ["serde", "erased-serde", "uuid/serde", "scoped-tls-hkt"]
 crossbeam-events = ["crossbeam-channel"]
 codegen = ["legion_codegen"]
 stdweb = ["uuid/stdweb"]
@@ -25,7 +25,6 @@ legion_codegen = { path = "codegen", version = "0.3", optional = true }
 smallvec = "1.4"
 itertools = "0.10"
 downcast-rs = "1.2"
-derivative = "2.1"
 paste = "1.0.0"
 parking_lot = "0.11"
 bit-set = "0.5"
@@ -33,6 +32,7 @@ thiserror = "1.0"
 uuid = { version = "0.8", features = ["v4"] }
 rayon = { version = "1.4", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
+scoped-tls-hkt = { version = "0.1", optional = true }
 erased-serde = { version = "0.3", optional = true }
 crossbeam-channel = { version = "0.5", optional = true }
 atomic_refcell = "0.1.6"

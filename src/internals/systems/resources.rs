@@ -131,7 +131,7 @@ impl<'a, T: Resource> ResourceSet<'a> for Read<T> {
         resources
             .get(&type_id)
             .map(|x| x.get::<T>())
-            .expect("resource does not exist")
+            .unwrap_or_else(|| panic_nonexistent_resource(type_id))
     }
 }
 
@@ -143,8 +143,15 @@ impl<'a, T: Resource> ResourceSet<'a> for Write<T> {
         resources
             .get(&type_id)
             .map(|x| x.get_mut::<T>())
-            .expect("resource does not exist")
+            .unwrap_or_else(|| panic_nonexistent_resource(type_id))
     }
+}
+
+fn panic_nonexistent_resource(type_id: &ResourceTypeId) -> ! {
+    #[cfg(debug_assertions)]
+    panic!("resource {} does not exist", type_id.name);
+    #[cfg(not(debug_assertions))]
+    panic!("some resource does not exist");
 }
 
 macro_rules! resource_tuple {

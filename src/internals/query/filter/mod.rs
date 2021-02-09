@@ -131,12 +131,11 @@ pub trait GroupMatcher {
     /// Returns `true` if the filter may potentially match a group.
     fn can_match_group() -> bool;
 
-    /// Returns the components that are requried to be present in a group.
+    /// Returns the components that are required to be present in a group.
     fn group_components() -> Vec<ComponentTypeId>;
 }
 
-/// A combination of a [LayoutFilter](trait.LayoutFilter.html) and a
-/// [DynamicFilter](trait.DynamicFilter.html).
+/// A combination of a [`LayoutFilter`] and a [`DynamicFilter`].
 pub trait EntityFilter: Default + Send + Sync {
     /// The layout filter type.
     type Layout: LayoutFilter + GroupMatcher + Default + Send + Sync;

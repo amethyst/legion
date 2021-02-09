@@ -7,12 +7,21 @@ use derivative::Derivative;
 /// A vector of slices.
 ///
 /// Each slice is stored inline so as to be efficiently iterated through linearly.
-#[derive(Derivative, Debug)]
-#[derivative(Default(bound = ""))]
+#[derive(Debug)]
 pub struct SliceVec<T> {
     data: Vec<T>,
     counts: Vec<usize>,
     indices: Vec<usize>,
+}
+
+impl<T> Default for SliceVec<T> {
+    fn default() -> Self {
+        Self {
+            data: Vec::new(),
+            counts: Vec::new(),
+            indices: Vec::new(),
+        }
+    }
 }
 
 impl<T> SliceVec<T> {

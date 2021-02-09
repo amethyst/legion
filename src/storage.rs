@@ -1,9 +1,9 @@
 //! A "packed archetype" storage model.
 //!
 //! Any combination of types of components can be attached to each entity
-//! in a [world](../world/struct.World.html). Storing the (potentially
-//! unique) set of component values for each entity in a manner which is
-//! efficient to search and access is the responsibility of the ECS libary.
+//! in a [`World`](super::world::World). Storing the (potentially unique)
+//! set of component values for each entity in a manner which is efficient
+//! to search and access is the responsibility of the ECS libary.
 //!
 //! Legion achieves this via the use of "archetypes". Archetypes are a
 //! collection of entities who all have exactly the same set of component
@@ -21,8 +21,8 @@
 //! through the components in an archetype is extremely performant as
 //! it offers perfect cache locality. By storing each component type in
 //! its own array, we only need to access the memory containing components
-//! actually reqested by the query's view (see the
-//! [query module](../query/index.html)).
+//! actually reqested by the query's view (see the [`query`](crate::query)
+//! module).
 //!
 //! One of the disadvantages of archetypes is that there are discontinuities
 //! between component arrays of different archetypes. In practise this causes
@@ -44,7 +44,7 @@
 //! in archetypes which also contain another specific component).
 //!
 //! We can provide hints to a world about how it should pack archetypes by
-//! declaring groups with the world's [options](../world/struct.WorldOptions.html)
+//! declaring groups with the world's [options](super::world::WorldOptions)
 //! which can be provided while constructing the world. Component groups can be
 //! used to accelerate the largest and most common queries by optmizing the data
 //! layout for those queries.

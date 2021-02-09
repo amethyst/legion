@@ -7,13 +7,14 @@ use serde::{
 
 use super::{
     archetypes::de::ArchetypeLayoutDeserializer, entities::de::EntitiesLayoutDeserializer,
-    id::run_as_context, EntitySerializer, UnknownType, WorldField,
+    EntitySerializer, UnknownType, WorldField,
 };
 use crate::{
     internals::{
         storage::{archetype::EntityLayout, component::ComponentTypeId},
         world::World,
     },
+    serialize::set_entity_serializer,
     storage::UnknownComponentWriter,
 };
 
@@ -42,17 +43,15 @@ pub trait WorldDeserializer {
         type_id: ComponentTypeId,
         deserializer: D,
     ) -> Result<Box<[u8]>, D::Error>;
-
-    /// Calls `callback` with the Entity ID serializer
-    fn with_entity_serializer(&self, callback: &mut dyn FnMut(&dyn EntitySerializer));
 }
 
-pub struct WorldVisitor<'a, W: WorldDeserializer> {
-    pub world_deserializer: &'a W,
+pub struct WorldVisitor<'a, W: WorldDeserializer, E: EntitySerializer> {
     pub world: &'a mut World,
+    pub world_deserializer: &'a W,
+    pub entity_serializer: &'a E,
 }
 
-impl<'a, 'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<'a, W> {
+impl<'a, 'de, W: WorldDeserializer, E: EntitySerializer> Visitor<'de> for WorldVisitor<'a, W, E> {
     type Value = ();
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -94,13 +93,11 @@ impl<'a, 'de, W: WorldDeserializer> Visitor<'de> for WorldVisitor<'a, W> {
         let mut world = self.world;
         let mut map_hoist = Some(map);
         let world_deserializer = self.world_deserializer;
-        world_deserializer.with_entity_serializer(&mut |canon| {
-            let world_inner = &mut world;
-            let hoist_ref_inner = &hoist_ref;
-            run_as_context(canon, || {
-                let map = map_hoist.take().unwrap();
-                hoist_ref_inner.set(Some(run(world_deserializer, *world_inner, map)));
-            })
+        let world_inner = &mut world;
+        let hoist_ref_inner = &hoist_ref;
+        set_entity_serializer(self.entity_serializer, || {
+            let map = map_hoist.take().unwrap();
+            hoist_ref_inner.set(Some(run(world_deserializer, *world_inner, map)));
         });
         hoist.into_inner().unwrap()
     }

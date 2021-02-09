@@ -2,8 +2,6 @@
 
 use std::{any::TypeId, marker::PhantomData};
 
-use derivative::Derivative;
-
 use super::{DefaultFilter, Fetch, IntoIndexableIter, IntoView, ReadOnly, ReadOnlyFetch, View};
 use crate::internals::{
     iter::indexed::{IndexedIter, TrustedRandomAccess},
@@ -21,9 +19,14 @@ use crate::internals::{
 };
 
 /// Reads a single entity data component type from a chunk.
-#[derive(Derivative, Debug, Copy, Clone)]
-#[derivative(Default(bound = ""))]
+#[derive(Debug, Copy, Clone)]
 pub struct TryRead<T>(PhantomData<*const T>);
+
+impl<T> Default for TryRead<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
 unsafe impl<T> Send for TryRead<T> {}
 unsafe impl<T: Sync> Sync for TryRead<T> {}

@@ -15,7 +15,7 @@ Legion aims to be a feature rich high performance [Entity component system](http
 
 ### Worlds
 
-[Worlds](https://docs.rs/legion/latest/legion/world/struct.World.html) are collections of [entities](https://docs.rs/legion/latest/legion/entity/struct.Entity.html), where each entity can have an arbitrary collection of [components](https://docs.rs/legion/latest/legion/storage/component/trait.Component.html) attached.
+[Worlds](https://docs.rs/legion/latest/legion/world/struct.World.html) are collections of [entities](https://docs.rs/legion/latest/legion/struct.Entity.html), where each entity can have an arbitrary collection of [components](https://docs.rs/legion/latest/legion/storage/trait.Component.html) attached.
 
 ```rust
 use legion::*;
@@ -48,7 +48,7 @@ let entities: &[Entity] = world.extend(vec![
 ]);
 ```
 
-You can access entities via [entries](https://docs.rs/legion/latest/legion/entry/index.html). Entries allow you to query an entity to find out what types of components are attached to it, to get component references, or to add and remove components.
+You can access entities via [entries](https://docs.rs/legion/latest/legion/world/struct.Entry.html). Entries allow you to query an entity to find out what types of components are attached to it, to get component references, or to add and remove components.
 
 ```rust
 // entries return `None` if the entity does not exist
@@ -108,9 +108,9 @@ There is much more than can be done with queries. See the [module documentation]
 
 ### Systems
 
-You may have noticed that when we wanted to write to a component, we needed to use `iter_mut` to iterate through our query. But perhaps your application wants to be able to process different components on different entities, perhaps even at the same time in parallel? While it is possible to do this manually (see [World](https://docs.rs/legion/latest/legion/world/struct.World.html)::split), this is very difficult to do when the different pieces of the application don't know what components each other need, or might or might not even have conflicting access requirements.
+You may have noticed that when we wanted to write to a component, we needed to use `iter_mut` to iterate through our query. But perhaps your application wants to be able to process different components on different entities, perhaps even at the same time in parallel? While it is possible to do this manually (see [World::split](https://docs.rs/legion/latest/legion/world/struct.World.html#method.split)), this is very difficult to do when the different pieces of the application don't know what components each other need, or might or might not even have conflicting access requirements.
 
-[Systems](https://docs.rs/legion/latest/legion/systems/system/index.html) and the [Schedule](https://docs.rs/legion/latest/legion/systems/schedule/struct.Schedule.html) automates this process, and can even schedule work at a more granular level than you can otherwise do manually. A system is a unit of work. Each system is defined as a function which is provided access to queries and shared [resources](https://docs.rs/legion/latest/legion/struct.Resources.html). These systems can then be appended to a schedule, which is a linear sequence of systems, ordered by when side effects (such as writes to components) should be observed. The schedule will automatically parallelize the execution of all systems whilst maintaining the apparent order of execution from the perspective of each system.
+[Systems](https://docs.rs/legion/latest/legion/systems/index.html) and the [Schedule](https://docs.rs/legion/latest/legion/struct.Schedule.html) automates this process, and can even schedule work at a more granular level than you can otherwise do manually. A system is a unit of work. Each system is defined as a function which is provided access to queries and shared [resources](https://docs.rs/legion/latest/legion/struct.Resources.html). These systems can then be appended to a schedule, which is a linear sequence of systems, ordered by when side effects (such as writes to components) should be observed. The schedule will automatically parallelize the execution of all systems whilst maintaining the apparent order of execution from the perspective of each system.
 
 ```rust
 // a system fn which loops through Position and Velocity components, and reads the Time shared resource
