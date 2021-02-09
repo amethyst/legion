@@ -170,9 +170,9 @@ impl<'a, T: Component> ComponentSlice<'a, T> {
     }
 }
 
-impl<'a, T: Component> Into<&'a [T]> for ComponentSlice<'a, T> {
-    fn into(self) -> &'a [T] {
-        self.components
+impl<'a, T: Component> From<ComponentSlice<'a, T>> for &'a [T] {
+    fn from(slice: ComponentSlice<'a, T>) -> Self {
+        slice.components
     }
 }
 

@@ -2,8 +2,6 @@
 
 use std::iter::{FusedIterator, IntoIterator};
 
-use derivative::Derivative;
-
 /// A vector of slices.
 ///
 /// Each slice is stored inline so as to be efficiently iterated through linearly.
