@@ -3,8 +3,9 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{format_ident, quote, quote_spanned};
 use syn::{
-    parse_macro_input, parse_quote, Attribute, Expr, GenericArgument, Generics, Ident, Index,
-    ItemFn, Lit, Meta, PathArguments, Signature, Type, Visibility,
+    parse_macro_input, parse_quote, spanned::Spanned, Attribute, Expr, GenericArgument, Generics,
+    Ident, Index, ItemFn, Lit, Meta, PathArguments, Signature, Type, TypePath, TypeReference,
+    Visibility,
 };
 
 /// Wraps a function in a system, and generates a new function which constructs that system.
@@ -73,6 +74,20 @@ use syn::{
 /// }
 /// ```
 ///
+/// Systems can declare queries. The above can also be written as:
+///
+/// ```ignore
+/// # use legion_codegen::system;
+/// # use legion::{Schedule, world::SubWorld, Read, Write, IntoQuery, Query};
+/// # struct Time;
+/// #[system]
+/// fn run_query(world: &mut SubWorld, query: &mut Query<(&usize, &mut bool)>) {
+///     for (a, b) in query.iter_mut(world) {
+///         println!("{} {}", a, b);
+///     }
+/// }
+/// ```
+///
 /// `for_each` and `par_for_each` system types can be used to implement the query for you.
 /// References will be interpreted as `Read<T>` and `Write<T>`, while options of references
 /// (e.g. `Option<&Position>`) will be interpreted as `TryRead<T>` and `TryWrite<T>`. You can
@@ -119,7 +134,7 @@ use syn::{
 ///
 /// Schedule::builder()
 ///      // initialize state when you construct the system
-///     .add_system(stateful_system(5usize))
+///     .add_system(stateful_system(5_usize))
 ///     .build();
 /// ```
 ///
@@ -194,11 +209,13 @@ enum Error {
     ExpectedFilterExpression(Span),
     #[error(
         "system does not request any component access (sub-world will have no permissions), \
-    consider using #[read_compnent(T)] or #[write_component(T)]"
+    consider using #[read_component(T)] or #[write_component(T)], or add a Query to the system"
     )]
     SubworldWithoutPermissions,
     #[error("{0}")]
     Message(String),
+    #[error("Queries should be passed to system functions via mutable references")]
+    QueryShouldBeMutableReference(Span),
 }
 
 impl Error {
@@ -210,6 +227,7 @@ impl Error {
             Error::InvalidArgument(span) => *span,
             Error::ExpectedComponentType(span) => *span,
             Error::ExpectedFilterExpression(span) => *span,
+            Error::QueryShouldBeMutableReference(span) => *span,
             _ => Span::call_site(),
         }
     }
@@ -272,13 +290,11 @@ impl SystemAttr {
                 }
                 Self::new(n, s)
             }
-            Meta::NameValue(name_value) => {
-                match name_value.path.get_ident() {
-                    Some(ident) if ident == "ctor" => Self::new(Some(name_value.lit.clone()), None),
-                    Some(ident) => return Err(Error::InvalidKey(ident.span())),
-                    _ => return Err(Error::InvalidKey(Span::call_site())),
-                }
-            }
+            Meta::NameValue(name_value) => match name_value.path.get_ident() {
+                Some(ident) if ident == "ctor" => Self::new(Some(name_value.lit.clone()), None),
+                Some(ident) => return Err(Error::InvalidKey(ident.span())),
+                _ => return Err(Error::InvalidKey(Span::call_site())),
+            },
         };
 
         Ok(result)
@@ -296,7 +312,7 @@ struct Sig {
 }
 
 impl Sig {
-    fn parse(item: &mut Signature) -> Result<Self, Error> {
+    fn parse(item: &mut Signature, type_attr: SystemType) -> Result<Self, Error> {
         let mut parameters = Vec::new();
         let mut query = Vec::<Type>::new();
         let mut read_resources = Vec::new();
@@ -305,116 +321,124 @@ impl Sig {
         for param in &mut item.inputs {
             match param {
                 syn::FnArg::Receiver(_) => return Err(Error::SelfNotAllowed),
-                syn::FnArg::Typed(arg) => {
-                    match arg.ty.as_ref() {
-                        Type::Path(ty_path) => {
-                            let ident = &ty_path.path.segments[0].ident;
-                            if ident == "Option" {
-                                match &ty_path.path.segments[0].arguments {
-                                    PathArguments::AngleBracketed(bracketed) => {
-                                        let arg = bracketed.args.iter().next().unwrap();
-                                        match arg {
-                                            GenericArgument::Type(ty) => {
-                                                match ty {
-                                                    Type::Reference(ty) => {
-                                                        let mutable = ty.mutability.is_some();
-                                                        parameters.push(Parameter::Component(
-                                                            query.len(),
-                                                        ));
-                                                        let elem = &ty.elem;
-                                                        if mutable {
-                                                            query.push(
-                                                        parse_quote!(::legion::TryWrite<#elem>),
-                                                    );
-                                                        } else {
-                                                            query.push(
-                                                        parse_quote!(::legion::TryRead<#elem>),
-                                                    );
-                                                        }
-                                                    }
-                                                    _ => {
-                                                        return Err(Error::InvalidOptionArgument(
-                                                            ident.span(),
-                                                            quote!(#ty).to_string(),
-                                                        ))
-                                                    }
-                                                }
+                syn::FnArg::Typed(arg) => match arg.ty.as_ref() {
+                    Type::Path(ty_path) if ty_path.path.segments[0].ident == "Option" => {
+                        let segment = &ty_path.path.segments[0];
+                        match &segment.arguments {
+                            PathArguments::AngleBracketed(bracketed) => {
+                                let arg = bracketed.args.iter().next().unwrap();
+                                match arg {
+                                    GenericArgument::Type(ty) => match ty {
+                                        Type::Reference(ty) => {
+                                            let mutable = ty.mutability.is_some();
+                                            parameters.push(Parameter::Component(query.len()));
+                                            let elem = &ty.elem;
+                                            if mutable {
+                                                query.push(parse_quote!(::legion::TryWrite<#elem>));
+                                            } else {
+                                                query.push(parse_quote!(::legion::TryRead<#elem>));
                                             }
-                                            _ => panic!(),
                                         }
-                                    }
+                                        _ => {
+                                            return Err(Error::InvalidOptionArgument(
+                                                segment.ident.span(),
+                                                quote!(#ty).to_string(),
+                                            ))
+                                        }
+                                    },
                                     _ => panic!(),
                                 }
-                            } else {
-                                return Err(Error::InvalidArgument(ident.span()));
                             }
+                            _ => panic!(),
                         }
-                        Type::Reference(ty)
-                            if is_type(&ty.elem, &["CommandBuffer"])
-                                || is_type(&ty.elem, &["legion", "CommandBuffer"])
-                                || is_type(&ty.elem, &["legion", "systems", "CommandBuffer"]) =>
-                        {
-                            if ty.mutability.is_some() {
-                                parameters.push(Parameter::CommandBufferMut);
-                            } else {
-                                parameters.push(Parameter::CommandBuffer);
-                            }
-                        }
-                        Type::Reference(ty)
-                            if is_type(&ty.elem, &["SubWorld"])
-                                || is_type(&ty.elem, &["legion", "SubWorld"])
-                                || is_type(&ty.elem, &["legion", "world", "SubWorld"]) =>
-                        {
-                            if ty.mutability.is_some() {
-                                parameters.push(Parameter::SubWorldMut);
-                            } else {
-                                parameters.push(Parameter::SubWorld);
-                            }
-                        }
-                        Type::Reference(ty)
-                            if is_type(&ty.elem, &["Entity"])
-                                || is_type(&ty.elem, &["legion", "Entity"])
-                                || is_type(&ty.elem, &["legion", "world", "Entity"]) =>
-                        {
-                            parameters.push(Parameter::Component(query.len()));
-                            query.push(parse_quote!(::legion::Entity));
-                        }
-                        Type::Reference(ty) => {
-                            let mutable = ty.mutability.is_some();
-                            let attribute = Self::find_remove_arg_attr(&mut arg.attrs);
-                            match attribute {
-                                Some(ArgAttr::Resource) => {
-                                    if mutable {
-                                        parameters
-                                            .push(Parameter::ResourceMut(write_resources.len()));
-                                        write_resources.push(ty.elem.as_ref().clone());
-                                    } else {
-                                        parameters.push(Parameter::Resource(read_resources.len()));
-                                        read_resources.push(ty.elem.as_ref().clone());
-                                    }
-                                }
-                                Some(ArgAttr::State) => {
-                                    if mutable {
-                                        parameters.push(Parameter::StateMut(state_args.len()));
-                                    } else {
-                                        parameters.push(Parameter::State(state_args.len()));
-                                    }
-                                    state_args.push(ty.elem.as_ref().clone());
-                                }
-                                None => {
-                                    parameters.push(Parameter::Component(query.len()));
-                                    let elem = &ty.elem;
-                                    if mutable {
-                                        query.push(parse_quote!(::legion::Write<#elem>));
-                                    } else {
-                                        query.push(parse_quote!(::legion::Read<#elem>));
-                                    }
-                                }
-                            }
-                        }
-                        _ => return Err(Error::InvalidArgument(Span::call_site())),
                     }
-                }
+                    Type::Path(ty_path)
+                        if path_match(ty_path, &["Query"])
+                            || path_match(ty_path, &["legion", "Query"])
+                            || path_match(ty_path, &["legion", "query", "Query"]) =>
+                    {
+                        return Err(Error::QueryShouldBeMutableReference(ty_path.span()));
+                    }
+                    Type::Path(ty_path) => {
+                        return Err(Error::InvalidArgument(
+                            ty_path.path.segments[0].ident.span(),
+                        ));
+                    }
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["CommandBuffer"])
+                            || is_type(&ty.elem, &["legion", "CommandBuffer"])
+                            || is_type(&ty.elem, &["legion", "systems", "CommandBuffer"]) =>
+                    {
+                        if ty.mutability.is_some() {
+                            parameters.push(Parameter::CommandBufferMut);
+                        } else {
+                            parameters.push(Parameter::CommandBuffer);
+                        }
+                    }
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["SubWorld"])
+                            || is_type(&ty.elem, &["legion", "SubWorld"])
+                            || is_type(&ty.elem, &["legion", "world", "SubWorld"]) =>
+                    {
+                        if ty.mutability.is_some() {
+                            parameters.push(Parameter::SubWorldMut);
+                        } else {
+                            parameters.push(Parameter::SubWorld);
+                        }
+                    }
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["Entity"])
+                            || is_type(&ty.elem, &["legion", "Entity"])
+                            || is_type(&ty.elem, &["legion", "world", "Entity"]) =>
+                    {
+                        parameters.push(Parameter::Component(query.len()));
+                        query.push(parse_quote!(::legion::Entity));
+                    }
+                    Type::Reference(ty)
+                        if is_type(&ty.elem, &["Query"])
+                            || is_type(&ty.elem, &["legion", "Query"])
+                            || is_type(&ty.elem, &["legion", "query", "Query"]) =>
+                    {
+                        if !ty.mutability.is_some() {
+                            return Err(Error::QueryShouldBeMutableReference(ty.span()));
+                        }
+
+                        parameters.push(Parameter::Query(ty.elem.clone()));
+                    }
+                    Type::Reference(ty) => {
+                        let mutable = ty.mutability.is_some();
+                        let attribute = Self::find_remove_arg_attr(&mut arg.attrs);
+                        match attribute {
+                            Some(ArgAttr::Resource) => {
+                                if mutable {
+                                    parameters.push(Parameter::ResourceMut(write_resources.len()));
+                                    write_resources.push(ty.elem.as_ref().clone());
+                                } else {
+                                    parameters.push(Parameter::Resource(read_resources.len()));
+                                    read_resources.push(ty.elem.as_ref().clone());
+                                }
+                            }
+                            Some(ArgAttr::State) => {
+                                if mutable {
+                                    parameters.push(Parameter::StateMut(state_args.len()));
+                                } else {
+                                    parameters.push(Parameter::State(state_args.len()));
+                                }
+                                state_args.push(ty.elem.as_ref().clone());
+                            }
+                            None => {
+                                parameters.push(Parameter::Component(query.len()));
+                                let elem = &ty.elem;
+                                if mutable {
+                                    query.push(parse_quote!(::legion::Write<#elem>));
+                                } else {
+                                    query.push(parse_quote!(::legion::Read<#elem>));
+                                }
+                            }
+                        }
+                    }
+                    _ => return Err(Error::InvalidArgument(Span::call_site())),
+                },
             }
         }
 
@@ -454,13 +478,17 @@ enum ArgAttr {
 
 fn is_type(ty: &Type, segments: &[&str]) -> bool {
     if let Type::Path(path) = ty {
-        segments
-            .iter()
-            .zip(path.path.segments.iter())
-            .all(|(a, b)| b.ident == *a)
+        path_match(path, segments)
     } else {
         false
     }
+}
+
+fn path_match(path: &TypePath, segments: &[&str]) -> bool {
+    segments
+        .iter()
+        .zip(path.path.segments.iter())
+        .all(|(a, b)| b.ident == *a)
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -480,6 +508,12 @@ impl SystemType {
     }
 }
 
+impl Default for SystemType {
+    fn default() -> Self {
+        SystemType::Simple
+    }
+}
+
 enum Parameter {
     CommandBuffer,
     CommandBufferMut,
@@ -490,6 +524,7 @@ enum Parameter {
     ResourceMut(usize),
     State(usize),
     StateMut(usize),
+    Query(Box<Type>),
 }
 
 struct Config {
@@ -540,7 +575,7 @@ impl Config {
         }
 
         // parse signature, extract cmd, world, components and resources
-        let signature = Sig::parse(&mut item.sig)?;
+        let signature = Sig::parse(&mut item.sig, attr.system_type.unwrap_or_default())?;
 
         Ok(Config {
             attr,
@@ -586,7 +621,12 @@ impl Config {
                 .any(|p| matches!(p, Parameter::SubWorldMut));
             let has_components =
                 !self.read_components.is_empty() || !self.write_components.is_empty();
-            if (has_subworld || has_subworld_mut) && !has_components {
+            let has_queries = self
+                .signature
+                .parameters
+                .iter()
+                .any(|param| matches!(param, Parameter::Query(_)));
+            if (has_subworld || has_subworld_mut) && (!has_components && !has_queries) {
                 return Err(Error::SubworldWithoutPermissions);
             }
         }
@@ -659,9 +699,16 @@ impl Config {
         let has_query = !signature.query.is_empty();
         let single_resource =
             (signature.read_resources.len() + signature.write_resources.len()) == 1;
+        let single_query = signature
+            .parameters
+            .iter()
+            .filter(|param| matches!(param, Parameter::Query(_)))
+            .count()
+            == 1;
         let mut call_params = Vec::new();
         let mut fn_params = Vec::new();
         let mut world = None;
+        let mut queries = Vec::new();
         for param in &signature.parameters {
             match param {
                 Parameter::CommandBuffer => call_params.push(quote!(cmd)),
@@ -719,6 +766,15 @@ impl Config {
                     call_params.push(quote!(&mut #arg_name));
                     fn_params.push(quote!(mut #arg_name: #arg_type));
                 }
+                Parameter::Query(ty) if single_query => {
+                    call_params.push(quote!(query));
+                    queries.push(quote!(#ty));
+                }
+                Parameter::Query(ty) => {
+                    let idx = Index::from(queries.len());
+                    call_params.push(quote!(&mut query.#idx));
+                    queries.push(quote!(#ty));
+                }
             }
         }
 
@@ -732,22 +788,18 @@ impl Config {
         let world = world.unwrap_or_else(|| quote!(let for_query = world;));
         let body = match system_type {
             SystemType::Simple => fn_call,
-            SystemType::ForEach => {
-                quote! {
-                    #world
-                    query.for_each_mut(for_query, |components| {
-                        #fn_call
-                    });
-                }
-            }
-            SystemType::ParForEach => {
-                quote! {
-                    #world
-                    query.par_for_each_mut(for_query, |components| {
-                        #fn_call
-                    });
-                }
-            }
+            SystemType::ForEach => quote! {
+                #world
+                query.for_each_mut(for_query, |components| {
+                    #fn_call
+                });
+            },
+            SystemType::ParForEach => quote! {
+                #world
+                query.par_for_each_mut(for_query, |components| {
+                    #fn_call
+                });
+            },
         };
 
         // construct our system
@@ -777,6 +829,7 @@ impl Config {
                 #(.read_resource::<#read_resources>())*
                 #(.write_resource::<#write_resources>())*
                 #query
+                #(.with_query(<#queries>::new()))*
                 .build(move |cmd, world, resources, query| {
                     #body
                 })
