@@ -1,17 +1,16 @@
 #[cfg(feature = "codegen")]
 mod tests {
-    use std::fmt::Debug;
-
-    use legion::{
-        storage::Component, system, systems::CommandBuffer, world::SubWorld, IntoQuery, Query,
-        Read, Resources, Schedule, World, Write,
-    };
     use std::{
         fmt::Debug,
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc,
         },
+    };
+
+    use legion::{
+        storage::Component, system, systems::CommandBuffer, world::SubWorld, IntoQuery, Query,
+        Read, Resources, Schedule, World, Write,
     };
 
     #[test]
