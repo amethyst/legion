@@ -4,8 +4,7 @@ use proc_macro2::Span;
 use quote::{format_ident, quote, quote_spanned};
 use syn::{
     parse_macro_input, parse_quote, spanned::Spanned, Attribute, Expr, GenericArgument, Generics,
-    Ident, Index, ItemFn, Lit, Meta, PathArguments, Signature, Type, TypePath, TypeReference,
-    Visibility,
+    Ident, Index, ItemFn, Lit, Meta, PathArguments, Signature, Type, TypePath, Visibility,
 };
 
 /// Wraps a function in a system, and generates a new function which constructs that system.
@@ -312,7 +311,7 @@ struct Sig {
 }
 
 impl Sig {
-    fn parse(item: &mut Signature, type_attr: SystemType) -> Result<Self, Error> {
+    fn parse(item: &mut Signature) -> Result<Self, Error> {
         let mut parameters = Vec::new();
         let mut query = Vec::<Type>::new();
         let mut read_resources = Vec::new();
@@ -399,7 +398,7 @@ impl Sig {
                             || is_type(&ty.elem, &["legion", "Query"])
                             || is_type(&ty.elem, &["legion", "query", "Query"]) =>
                     {
-                        if !ty.mutability.is_some() {
+                        if ty.mutability.is_none() {
                             return Err(Error::QueryShouldBeMutableReference(ty.span()));
                         }
 
@@ -575,7 +574,7 @@ impl Config {
         }
 
         // parse signature, extract cmd, world, components and resources
-        let signature = Sig::parse(&mut item.sig, attr.system_type.unwrap_or_default())?;
+        let signature = Sig::parse(&mut item.sig)?;
 
         Ok(Config {
             attr,
@@ -680,7 +679,7 @@ impl Config {
             signature,
         } = self;
 
-        let system_type = attr.system_type.unwrap_or(SystemType::Simple);
+        let system_type = attr.system_type.unwrap_or_default();
 
         // declare query
         let query = if system_type.requires_query() {
