@@ -3,6 +3,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     hash::BuildHasherDefault,
+    num::NonZeroU64,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -14,7 +15,7 @@ use super::{
 /// An opaque identifier for an entity.
 #[derive(Debug, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct Entity(u64);
+pub struct Entity(NonZeroU64);
 
 thread_local! {
     pub static ID_CLONE_MAPPINGS: RefCell<HashMap<Entity, Entity, EntityHasher>> = RefCell::new(HashMap::default());
@@ -33,7 +34,8 @@ const BLOCK_SIZE: u64 = 16;
 const BLOCK_SIZE_USIZE: usize = BLOCK_SIZE as usize;
 
 // Always divisible by BLOCK_SIZE.
-static NEXT_ENTITY: AtomicU64 = AtomicU64::new(0);
+// Safety: This must never be 0, so skip the first block
+static NEXT_ENTITY: AtomicU64 = AtomicU64::new(BLOCK_SIZE);
 
 /// An iterator which yields new entity IDs.
 #[derive(Debug)]
@@ -44,6 +46,7 @@ pub struct Allocate {
 impl Allocate {
     /// Constructs a new enity ID allocator iterator.
     pub fn new() -> Self {
+        // This is still safe because the allocator grabs a new block immediately
         Self { next: 0 }
     }
 }
@@ -65,9 +68,14 @@ impl<'a> Iterator for Allocate {
             debug_assert_eq!(self.next % BLOCK_SIZE, 0);
         }
 
-        let result = Some(Entity(self.next));
+        // Safety: self.next can't be 0 as long as the first block is skipped,
+        // and no overflow occurs in NEXT_ENTITY
+        let entity = unsafe {
+            debug_assert_ne!(self.next, 0);
+            Entity(NonZeroU64::new_unchecked(self.next))
+        };
         self.next += 1;
-        result
+        Some(entity)
     }
 }
 
@@ -105,9 +113,15 @@ pub struct LocationMap {
 impl Debug for LocationMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let entries = self.blocks.iter().flat_map(|(base, locs)| {
-            locs.iter()
-                .enumerate()
-                .filter_map(move |(i, loc)| loc.map(|loc| (Entity(*base + i as u64), loc)))
+            locs.iter().enumerate().filter_map(move |(i, loc)| {
+                // Safety: as long as the inserted entities are valid, this should also be valid
+                let entity = unsafe {
+                    let id = *base + i as u64;
+                    debug_assert_ne!(id, 0);
+                    Entity(NonZeroU64::new_unchecked(id))
+                };
+                loc.map(|loc| (entity, loc))
+            })
         });
         f.debug_map().entries(entries).finish()
     }
@@ -140,7 +154,7 @@ impl LocationMap {
         let mut block_vec = None;
         let mut removed = Vec::new();
         for (i, entity) in ids.iter().enumerate() {
-            let block = entity.0 / BLOCK_SIZE;
+            let block = entity.0.get() / BLOCK_SIZE;
             if current_block != block {
                 block_vec = Some(
                     self.blocks
@@ -151,7 +165,7 @@ impl LocationMap {
             }
 
             if let Some(ref mut vec) = block_vec {
-                let idx = (entity.0 % BLOCK_SIZE) as usize;
+                let idx = (entity.0.get() % BLOCK_SIZE) as usize;
                 let loc = EntityLocation(arch, ComponentIndex(base + i));
                 if let Some(previous) = vec[idx].replace(loc) {
                     removed.push(previous);
@@ -171,8 +185,8 @@ impl LocationMap {
 
     /// Returns the location of an entity.
     pub fn get(&self, entity: Entity) -> Option<EntityLocation> {
-        let block = entity.0 / BLOCK_SIZE;
-        let idx = (entity.0 % BLOCK_SIZE) as usize;
+        let block = entity.0.get() / BLOCK_SIZE;
+        let idx = (entity.0.get() % BLOCK_SIZE) as usize;
         if let Some(&result) = self.blocks.get(&block).and_then(|v| v.get(idx)) {
             result
         } else {
@@ -182,8 +196,8 @@ impl LocationMap {
 
     /// Removes an entity from the location map.
     pub fn remove(&mut self, entity: Entity) -> Option<EntityLocation> {
-        let block = entity.0 / BLOCK_SIZE;
-        let idx = (entity.0 % BLOCK_SIZE) as usize;
+        let block = entity.0.get() / BLOCK_SIZE;
+        let idx = (entity.0.get() % BLOCK_SIZE) as usize;
         if let Some(loc) = self.blocks.get_mut(&block).and_then(|v| v.get_mut(idx)) {
             let original = loc.take();
             if original.is_some() {
