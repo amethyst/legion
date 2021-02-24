@@ -1060,7 +1060,7 @@ pub mod par_iter {
         where
             F: Folder<Self::Item>,
         {
-            let indices = self.result.index.iter();
+            let indices = self.result.index().iter();
             let fetch = unsafe {
                 <V as View<'a>>::fetch(
                     self.world.components(),
@@ -1099,9 +1099,9 @@ pub mod par_iter {
 mod test {
     use super::{
         view::{read::Read, write::Write},
-        IntoQuery,
+        IntoQuery, QueryResult,
     };
-    use crate::internals::world::World;
+    use crate::internals::{storage::archetype::ArchetypeIndex, world::World};
 
     #[test]
     fn query() {
@@ -1232,6 +1232,24 @@ mod test {
         }
 
         assert_eq!(components[0], &1usize);
+    }
+
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn queryresult_split_zero() {
+        let result = QueryResult::unordered(&[ArchetypeIndex(0), ArchetypeIndex(1)]);
+        let (left, right) = result.split_at(0);
+        assert_eq!(left.range(), &(0..0));
+        assert_eq!(right.range(), &(0..2));
+    }
+
+    #[test]
+    #[cfg(feature = "parallel")]
+    fn queryresult_split_one() {
+        let result = QueryResult::unordered(&[ArchetypeIndex(0), ArchetypeIndex(1)]);
+        let (left, right) = result.split_at(1);
+        assert_eq!(left.range(), &(0..1));
+        assert_eq!(right.range(), &(1..2));
     }
 
     #[test]
