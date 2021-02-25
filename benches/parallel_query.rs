@@ -51,28 +51,32 @@ fn setup(data: &[Variants]) -> World {
 
     for (i, group) in &data.iter().group_by(|x| index(**x)) {
         match i {
-            0 => world.extend(
-                group
-                    .map(|x| {
-                        if let Variants::Ab(a, b) = x {
-                            (*a, *b)
-                        } else {
-                            panic!();
-                        }
-                    })
-                    .collect::<Vec<_>>(),
-            ),
-            _ => world.extend(
-                group
-                    .map(|x| {
-                        if let Variants::Ac(a, c) = x {
-                            (*a, *c)
-                        } else {
-                            panic!();
-                        }
-                    })
-                    .collect::<Vec<_>>(),
-            ),
+            0 => {
+                world.extend(
+                    group
+                        .map(|x| {
+                            if let Variants::Ab(a, b) = x {
+                                (*a, *b)
+                            } else {
+                                panic!();
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            }
+            _ => {
+                world.extend(
+                    group
+                        .map(|x| {
+                            if let Variants::Ac(a, c) = x {
+                                (*a, *c)
+                            } else {
+                                panic!();
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            }
         };
     }
 
