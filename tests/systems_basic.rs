@@ -1,10 +1,16 @@
 #[cfg(feature = "codegen")]
 mod tests {
-    use std::fmt::Debug;
+    use std::{
+        fmt::Debug,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+    };
 
     use legion::{
-        storage::Component, system, systems::CommandBuffer, world::SubWorld, IntoQuery, Read,
-        Schedule, Write,
+        storage::Component, system, systems::CommandBuffer, world::SubWorld, IntoQuery, Query,
+        Read, Resources, Schedule, World, Write,
     };
 
     #[test]
@@ -157,5 +163,44 @@ mod tests {
         fn basic<T: 'static>(#[state] _: &mut T) {}
 
         Schedule::builder().add_system(basic_system(false)).build();
+    }
+
+    #[test]
+    fn with_query() {
+        #[system]
+        fn basic(_: &mut SubWorld, _: &mut Query<(&u8, &mut i8)>) {}
+
+        Schedule::builder().add_system(basic_system()).build();
+    }
+
+    #[test]
+    fn with_two_queries() {
+        #[system]
+        fn basic(
+            #[state] a_count: &Arc<AtomicUsize>,
+            #[state] b_count: &Arc<AtomicUsize>,
+            world: &mut SubWorld,
+            a: &mut Query<(&u8, &mut usize)>,
+            b: &mut Query<(&usize, &mut bool)>,
+        ) {
+            a_count.store(a.iter_mut(world).count(), Ordering::SeqCst);
+            b_count.store(b.iter_mut(world).count(), Ordering::SeqCst);
+        }
+
+        let a_count = Arc::new(AtomicUsize::new(0));
+        let b_count = Arc::new(AtomicUsize::new(0));
+        let mut schedule = Schedule::builder()
+            .add_system(basic_system(a_count.clone(), b_count.clone()))
+            .build();
+
+        let mut world = World::default();
+        let mut resources = Resources::default();
+
+        world.extend(vec![(1_usize, false), (2_usize, false)]);
+
+        schedule.execute(&mut world, &mut resources);
+
+        assert_eq!(0, a_count.load(Ordering::SeqCst));
+        assert_eq!(2, b_count.load(Ordering::SeqCst));
     }
 }

@@ -205,8 +205,8 @@ pub use legion_codegen::system;
 pub use crate::serialize::Registry;
 pub use crate::{
     query::{
-        any, component, maybe_changed, passthrough, Fetch, IntoQuery, Read, TryRead, TryWrite,
-        Write,
+        any, component, maybe_changed, passthrough, Fetch, IntoQuery, Query, Read, TryRead,
+        TryWrite, Write,
     },
     storage::{GroupSource, IntoSoa},
     systems::{Resources, Schedule, SystemBuilder},
