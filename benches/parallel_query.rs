@@ -14,21 +14,21 @@ struct C(f32);
 
 #[derive(Copy, Clone, Debug)]
 enum Variants {
-    AB(A, B),
-    AC(A, C),
+    Ab(A, B),
+    Ac(A, C),
 }
 
 fn index(v: Variants) -> u8 {
     match v {
-        Variants::AB(_, _) => 0,
-        Variants::AC(_, _) => 1,
+        Variants::Ab(_, _) => 0,
+        Variants::Ac(_, _) => 1,
     }
 }
 
 fn generate(i: u8) -> Variants {
     match i {
-        0 => Variants::AB(A(0.0), B(0.0)),
-        _ => Variants::AC(A(0.0), C(0.0)),
+        0 => Variants::Ab(A(0.0), B(0.0)),
+        _ => Variants::Ac(A(0.0), C(0.0)),
     }
 }
 
@@ -51,32 +51,28 @@ fn setup(data: &[Variants]) -> World {
 
     for (i, group) in &data.iter().group_by(|x| index(**x)) {
         match i {
-            0 => {
-                world.extend(
-                    group
-                        .map(|x| {
-                            if let Variants::AB(a, b) = x {
-                                (*a, *b)
-                            } else {
-                                panic!();
-                            }
-                        })
-                        .collect::<Vec<_>>(),
-                )
-            }
-            _ => {
-                world.extend(
-                    group
-                        .map(|x| {
-                            if let Variants::AC(a, c) = x {
-                                (*a, *c)
-                            } else {
-                                panic!();
-                            }
-                        })
-                        .collect::<Vec<_>>(),
-                )
-            }
+            0 => world.extend(
+                group
+                    .map(|x| {
+                        if let Variants::Ab(a, b) = x {
+                            (*a, *b)
+                        } else {
+                            panic!();
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            ),
+            _ => world.extend(
+                group
+                    .map(|x| {
+                        if let Variants::Ac(a, c) = x {
+                            (*a, *c)
+                        } else {
+                            panic!();
+                        }
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         };
     }
 
@@ -89,8 +85,8 @@ fn setup_ideal(data: &[Variants]) -> (Vec<(A, B)>, Vec<(A, C)>) {
 
     for v in data {
         match v {
-            Variants::AB(a, b) => ab.push((*a, *b)),
-            Variants::AC(a, c) => ac.push((*a, *c)),
+            Variants::Ab(a, b) => ab.push((*a, *b)),
+            Variants::Ac(a, c) => ac.push((*a, *c)),
         };
     }
 

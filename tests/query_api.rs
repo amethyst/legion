@@ -63,7 +63,7 @@ fn query_try_read_entity_data() {
         .collect::<Vec<_>>();
     assert_eq!(rots.iter().filter(|x| x.is_none()).count(), 1);
     assert_eq!(
-        rots.iter().cloned().filter_map(|x| x).collect::<Vec<_>>(),
+        rots.iter().cloned().flatten().collect::<Vec<_>>(),
         &[Rot(0.4, 0.5, 0.6)]
     );
 }
@@ -75,7 +75,7 @@ fn query_try_write_entity_data() {
     let entity = world.push((Pos(4., 5., 6.), Rot(0.4, 0.5, 0.6)));
 
     let mut query = TryWrite::<Rot>::query();
-    for x in query.iter_mut(&mut world).filter_map(|x| x) {
+    for x in query.iter_mut(&mut world).flatten() {
         *x = Rot(9.0, 9.0, 9.0);
     }
     assert_eq!(

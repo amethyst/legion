@@ -29,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      # install the toolchain we are going to compile and test with
       - name: install ${{ matrix.toolchain }} toolchain
         id: install_toolchain
         uses: actions-rs/toolchain@v1
@@ -36,32 +37,39 @@ jobs:
           toolchain: ${{ matrix.toolchain }}
           profile: minimal
           override: true
+      
+      # we want to install the latest nightly with clippy and rustfmt to run checks against stable
+      - name: install nightly toolchain
+        id: install_nightly_toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          profile: minimal
+          components: clippy, rustfmt
+        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
 
-      - run: CFG_RELEASE_CHANNEL="nightly" CFG_RELEASE="nightly" cargo +nightly install --force rustfmt-nightly --git https://github.com/rust-lang/rustfmt --tag v1.4.35 --all-features
-        if: matrix.toolchain == 'nightly' && matrix.os == 'ubuntu-latest'
-
+      # run rustfmt and clippy checks, but only once
       - run: cargo +nightly fmt --all -- --check
-        if: matrix.toolchain == 'nightly' && matrix.os == 'ubuntu-latest'
-        
-      - run: rustup component add clippy
-        if: matrix.toolchain == 'nightly'
+        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
 
       - run: cargo +nightly clippy -Z unstable-options --workspace --all-targets --all-features
-        if: matrix.toolchain == 'nightly'
+        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
 
+      # run tests
       - run: cargo install cargo-hack
       - run: cargo hack test --workspace --each-feature
 
-      - uses: peaceiris/actions-mdbook@v1
-        with:
-          mdbook-version: 'latest'
-        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
+      # build book
+      # - uses: peaceiris/actions-mdbook@v1
+      #   with:
+      #     mdbook-version: 'latest'
+      #   if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
 
-      - run: cargo install mdbook-linkcheck
-        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
+      # - run: cargo install mdbook-linkcheck
+      #   if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
 
-      - run: mdbook build docs/book
-        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
+      # - run: mdbook build docs/book
+      #   if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
 
-      - run: mdbook test -L ./target/debug/deps docs/book
-        if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
+      # - run: mdbook test -L ./target/debug/deps docs/book
+      #   if: matrix.toolchain == 'stable' && matrix.os == 'ubuntu-latest'
