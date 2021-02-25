@@ -156,8 +156,7 @@ impl<'a> ComponentAccess<'a> {
 /// access only to the components (and mutability) declared by the view, while the right subworld
 /// will allow access to everything _but_ those components.
 ///
-/// Subworlds can be recustively further split.
-#[derive(Clone)]
+/// Subworlds can be recursively further split.
 pub struct SubWorld<'a> {
     world: &'a World,
     components: ComponentAccess<'a>,
