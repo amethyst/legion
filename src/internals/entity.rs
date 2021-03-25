@@ -33,10 +33,6 @@ impl Clone for Entity {
 const BLOCK_SIZE: u64 = 16;
 const BLOCK_SIZE_USIZE: usize = BLOCK_SIZE as usize;
 
-// Always divisible by BLOCK_SIZE.
-// Safety: This must never be 0, so skip the first block
-static NEXT_ENTITY: AtomicU64 = AtomicU64::new(BLOCK_SIZE);
-
 /// An iterator which yields new entity IDs.
 #[derive(Debug)]
 pub struct Allocate {
