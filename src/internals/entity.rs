@@ -57,7 +57,7 @@ impl Default for Allocate {
     }
 }
 
-impl<'a> Iterator for Allocate {
+impl Iterator for Allocate {
     type Item = Entity;
 
     #[inline(always)]
