@@ -77,6 +77,13 @@ impl<'a> Iterator for Allocate {
         self.next += 1;
         Some(entity)
     }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // `next()` always returns `Some`,
+        // thus naturally it's an endless iterator.
+        (usize::MAX, None)
+    }
 }
 
 /// The storage location of an entity's data.
