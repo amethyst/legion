@@ -13,7 +13,7 @@ use super::{
 };
 
 /// An opaque identifier for an entity.
-#[derive(Debug, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Ord, PartialOrd, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Entity(NonZeroU64);
 
