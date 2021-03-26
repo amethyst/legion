@@ -305,7 +305,7 @@ where
     ) -> Result<(), D::Error> {
         if let Some((_, _, _, deserialize, _)) = self.serialize_fns.get(&type_id) {
             use serde::de::Error;
-            let mut deserializer = erased_serde::Deserializer::erase(deserializer);
+            let mut deserializer = <dyn erased_serde::Deserializer>::erase(deserializer);
             (deserialize)(storage, &mut deserializer).map_err(D::Error::custom)
         } else {
             //Err(D::Error::custom("unrecognized component type"))
@@ -320,7 +320,7 @@ where
     ) -> Result<Box<[u8]>, D::Error> {
         if let Some((_, _, _, _, deserialize)) = self.serialize_fns.get(&type_id) {
             use serde::de::Error;
-            let mut deserializer = erased_serde::Deserializer::erase(deserializer);
+            let mut deserializer = <dyn erased_serde::Deserializer>::erase(deserializer);
             (deserialize)(&mut deserializer).map_err(D::Error::custom)
         } else {
             //Err(D::Error::custom("unrecognized component type"))
