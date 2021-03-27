@@ -202,7 +202,20 @@ impl World {
     where
         Option<T>: IntoComponentSource,
     {
-        self.extend(Some(components))[0]
+        struct One(Option<Entity>);
+
+        impl<'a> Extend<&'a Entity> for One {
+            fn extend<I: IntoIterator<Item = &'a Entity>>(&mut self, iter: I) {
+                debug_assert!(self.0.is_none());
+                let mut iter = iter.into_iter();
+                self.0 = iter.next().copied();
+                debug_assert!(iter.next().is_none());
+            }
+        }
+
+        let mut o = One(None);
+        self.extend_out(Some(components), &mut o);
+        o.0.unwrap()
     }
 
     /// Appends a collection of entities to the world. Returns the IDs of the new entities.
