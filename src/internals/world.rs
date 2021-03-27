@@ -256,6 +256,90 @@ impl World {
         &self.allocation_buffer
     }
 
+    /// Appends a collection of entities to the world.
+    /// Extends the given `out` collection with the IDs of the new entities.
+    ///
+    /// # Examples
+    ///
+    /// Inserting a vector of component tuples:
+    ///
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::default();
+    /// let mut entities = Vec::new();
+    /// world.extend_out(
+    ///     vec![
+    ///         (1usize, false, 5.3f32),
+    ///         (2usize, true, 5.3f32),
+    ///         (3usize, false, 5.3f32),
+    ///     ],
+    ///     &mut entities,
+    /// );
+    /// ```
+    ///
+    /// Inserting a tuple of component vectors:
+    ///
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::default();
+    /// let mut entities = Vec::new();
+    /// // SoA inserts require all vectors to have the same length.
+    /// // These inserts are faster than inserting via an iterator of tuples.
+    /// world.extend_out(
+    ///     (
+    ///         vec![1usize, 2usize, 3usize],
+    ///         vec![false, true, false],
+    ///         vec![5.3f32, 5.3f32, 5.2f32],
+    ///     )
+    ///         .into_soa(),
+    ///     &mut entities,
+    /// );
+    /// ```
+    ///
+    /// The collection type is generic over [`Extend`], thus any collection could be used:
+    ///
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::default();
+    /// let mut entities = std::collections::VecDeque::new();
+    /// world.extend_out(
+    ///     vec![
+    ///         (1usize, false, 5.3f32),
+    ///         (2usize, true, 5.3f32),
+    ///         (3usize, false, 5.3f32),
+    ///     ],
+    ///     &mut entities,
+    /// );
+    /// ```
+    ///
+    /// [`Extend`]: std::iter::Extend
+    pub fn extend_out<S, E>(&mut self, components: S, out: &mut E)
+    where
+        S: IntoComponentSource,
+        E: for<'a> Extend<&'a Entity>,
+    {
+        let replaced = {
+            let mut components = components.into();
+
+            let arch_index = self.get_archetype_for_components(&mut components);
+            let archetype = &mut self.archetypes[arch_index.0 as usize];
+            let mut writer =
+                ArchetypeWriter::new(arch_index, archetype, self.components.get_multi_mut());
+            components.push_components(&mut writer, Allocate::new());
+
+            let (base, entities) = writer.inserted();
+            let r = self.entities.insert(entities, arch_index, base);
+            // Extend the given collection with inserted entities.
+            out.extend(entities.iter());
+
+            r
+        };
+
+        for location in replaced {
+            self.remove_at_location(location);
+        }
+    }
+
     /// Removes the specified entity from the world. Returns `true` if an entity was removed.
     pub fn remove(&mut self, entity: Entity) -> bool {
         let location = self.entities.remove(entity);
