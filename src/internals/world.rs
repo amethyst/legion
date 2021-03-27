@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    mem,
     ops::Range,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -234,24 +235,10 @@ impl World {
     /// ```
     /// SoA inserts require all vectors to have the same length. These inserts are faster than inserting via an iterator of tuples.
     pub fn extend(&mut self, components: impl IntoComponentSource) -> &[Entity] {
-        let replaced = {
-            let mut components = components.into();
-
-            let arch_index = self.get_archetype_for_components(&mut components);
-            let archetype = &mut self.archetypes[arch_index.0 as usize];
-            let mut writer =
-                ArchetypeWriter::new(arch_index, archetype, self.components.get_multi_mut());
-            components.push_components(&mut writer, Allocate::new());
-
-            let (base, entities) = writer.inserted();
-            self.allocation_buffer.clear();
-            self.allocation_buffer.extend_from_slice(entities);
-            self.entities.insert(entities, arch_index, base)
-        };
-
-        for location in replaced {
-            self.remove_at_location(location);
-        }
+        let mut self_alloc_buf = mem::take(&mut self.allocation_buffer);
+        self_alloc_buf.clear();
+        self.extend_out(components, &mut self_alloc_buf);
+        self.allocation_buffer = self_alloc_buf;
 
         &self.allocation_buffer
     }
