@@ -91,8 +91,8 @@ impl<'data, T: Component> View<'data> for TryRead<T> {
         let archetype_indexes = query.index().iter();
         TryReadIter {
             components,
-            archetypes,
             archetype_indexes,
+            archetypes,
         }
     }
 }

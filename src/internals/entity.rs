@@ -57,7 +57,7 @@ impl Default for Allocate {
     }
 }
 
-impl<'a> Iterator for Allocate {
+impl Iterator for Allocate {
     type Item = Entity;
 
     #[inline(always)]
@@ -76,6 +76,13 @@ impl<'a> Iterator for Allocate {
         };
         self.next += 1;
         Some(entity)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // `next()` always returns `Some`,
+        // thus naturally it's an endless iterator.
+        (usize::MAX, None)
     }
 }
 
