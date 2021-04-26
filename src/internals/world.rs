@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    mem,
     ops::Range,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -201,7 +202,20 @@ impl World {
     where
         Option<T>: IntoComponentSource,
     {
-        self.extend(Some(components))[0]
+        struct One(Option<Entity>);
+
+        impl<'a> Extend<&'a Entity> for One {
+            fn extend<I: IntoIterator<Item = &'a Entity>>(&mut self, iter: I) {
+                debug_assert!(self.0.is_none());
+                let mut iter = iter.into_iter();
+                self.0 = iter.next().copied();
+                debug_assert!(iter.next().is_none());
+            }
+        }
+
+        let mut o = One(None);
+        self.extend_out(Some(components), &mut o);
+        o.0.unwrap()
     }
 
     /// Appends a collection of entities to the world. Returns the IDs of the new entities.
@@ -234,6 +248,76 @@ impl World {
     /// ```
     /// SoA inserts require all vectors to have the same length. These inserts are faster than inserting via an iterator of tuples.
     pub fn extend(&mut self, components: impl IntoComponentSource) -> &[Entity] {
+        let mut self_alloc_buf = mem::take(&mut self.allocation_buffer);
+        self_alloc_buf.clear();
+        self.extend_out(components, &mut self_alloc_buf);
+        self.allocation_buffer = self_alloc_buf;
+
+        &self.allocation_buffer
+    }
+
+    /// Appends a collection of entities to the world.
+    /// Extends the given `out` collection with the IDs of the new entities.
+    ///
+    /// # Examples
+    ///
+    /// Inserting a vector of component tuples:
+    ///
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::default();
+    /// let mut entities = Vec::new();
+    /// world.extend_out(
+    ///     vec![
+    ///         (1usize, false, 5.3f32),
+    ///         (2usize, true, 5.3f32),
+    ///         (3usize, false, 5.3f32),
+    ///     ],
+    ///     &mut entities,
+    /// );
+    /// ```
+    ///
+    /// Inserting a tuple of component vectors:
+    ///
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::default();
+    /// let mut entities = Vec::new();
+    /// // SoA inserts require all vectors to have the same length.
+    /// // These inserts are faster than inserting via an iterator of tuples.
+    /// world.extend_out(
+    ///     (
+    ///         vec![1usize, 2usize, 3usize],
+    ///         vec![false, true, false],
+    ///         vec![5.3f32, 5.3f32, 5.2f32],
+    ///     )
+    ///         .into_soa(),
+    ///     &mut entities,
+    /// );
+    /// ```
+    ///
+    /// The collection type is generic over [`Extend`], thus any collection could be used:
+    ///
+    /// ```
+    /// # use legion::*;
+    /// let mut world = World::default();
+    /// let mut entities = std::collections::VecDeque::new();
+    /// world.extend_out(
+    ///     vec![
+    ///         (1usize, false, 5.3f32),
+    ///         (2usize, true, 5.3f32),
+    ///         (3usize, false, 5.3f32),
+    ///     ],
+    ///     &mut entities,
+    /// );
+    /// ```
+    ///
+    /// [`Extend`]: std::iter::Extend
+    pub fn extend_out<S, E>(&mut self, components: S, out: &mut E)
+    where
+        S: IntoComponentSource,
+        E: for<'a> Extend<&'a Entity>,
+    {
         let replaced = {
             let mut components = components.into();
 
@@ -244,16 +328,16 @@ impl World {
             components.push_components(&mut writer, Allocate::new());
 
             let (base, entities) = writer.inserted();
-            self.allocation_buffer.clear();
-            self.allocation_buffer.extend_from_slice(entities);
-            self.entities.insert(entities, arch_index, base)
+            let r = self.entities.insert(entities, arch_index, base);
+            // Extend the given collection with inserted entities.
+            out.extend(entities.iter());
+
+            r
         };
 
         for location in replaced {
             self.remove_at_location(location);
         }
-
-        &self.allocation_buffer
     }
 
     /// Removes the specified entity from the world. Returns `true` if an entity was removed.
