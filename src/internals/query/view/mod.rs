@@ -87,7 +87,7 @@ pub trait View<'data>: DefaultFilter + Sized {
     fn validate();
 
     /// Returns `true` if the given component access includes all permissions required by the view.
-    fn validate_access(access: &ComponentAccess) -> bool;
+    fn validate_access(access: &ComponentAccess<'_>) -> bool;
 
     /// Returns the component types read by the view.
     fn reads_types() -> Self::Read;
@@ -233,7 +233,7 @@ macro_rules! impl_view_tuple {
                     }
                 }
 
-                fn validate_access(access: &ComponentAccess) -> bool {
+                fn validate_access(access: &ComponentAccess<'_>) -> bool {
                     $( $ty::validate_access(access) )&&*
                 }
 

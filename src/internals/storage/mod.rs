@@ -331,7 +331,7 @@ impl Components {
     }
 
     /// Returns a writer for writing to multiple component storages.
-    pub fn get_multi_mut(&mut self) -> MultiMut {
+    pub fn get_multi_mut(&mut self) -> MultiMut<'_> {
         MultiMut::new(self)
     }
 

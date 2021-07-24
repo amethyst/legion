@@ -47,11 +47,11 @@ type SerializeFn = fn(*const u8, &mut dyn FnMut(&dyn erased_serde::Serialize));
 type SerializeSliceFn =
     fn(&dyn UnknownComponentStorage, ArchetypeIndex, &mut dyn FnMut(&dyn erased_serde::Serialize));
 type DeserializeSliceFn = fn(
-    UnknownComponentWriter,
-    &mut dyn erased_serde::Deserializer,
+    UnknownComponentWriter<'_>,
+    &mut dyn erased_serde::Deserializer<'_>,
 ) -> Result<(), erased_serde::Error>;
 type DeserializeSingleBoxedFn =
-    fn(&mut dyn erased_serde::Deserializer) -> Result<Box<[u8]>, erased_serde::Error>;
+    fn(&mut dyn erased_serde::Deserializer<'_>) -> Result<Box<[u8]>, erased_serde::Error>;
 
 #[derive(Copy, Clone)]
 /// An error type describing what to do when a component type is unrecognized.
@@ -127,7 +127,8 @@ where
             (serialize)(component);
         };
         let deserialize_slice_fn =
-            |storage: UnknownComponentWriter, deserializer: &mut dyn erased_serde::Deserializer| {
+            |storage: UnknownComponentWriter<'_>,
+             deserializer: &mut dyn erased_serde::Deserializer<'_>| {
                 // todo avoid temp vec
                 ComponentSeq::<C> {
                     storage,
@@ -136,18 +137,19 @@ where
                 .deserialize(deserializer)?;
                 Ok(())
             };
-        let deserialize_single_boxed_fn = |deserializer: &mut dyn erased_serde::Deserializer| {
-            let component = erased_serde::deserialize::<C>(deserializer)?;
-            unsafe {
-                let vec = std::slice::from_raw_parts(
-                    &component as *const C as *const u8,
-                    std::mem::size_of::<C>(),
-                )
-                .to_vec();
-                std::mem::forget(component);
-                Ok(vec.into_boxed_slice())
-            }
-        };
+        let deserialize_single_boxed_fn =
+            |deserializer: &mut dyn erased_serde::Deserializer<'_>| {
+                let component = erased_serde::deserialize::<C>(deserializer)?;
+                unsafe {
+                    let vec = std::slice::from_raw_parts(
+                        &component as *const C as *const u8,
+                        std::mem::size_of::<C>(),
+                    )
+                    .to_vec();
+                    std::mem::forget(component);
+                    Ok(vec.into_boxed_slice())
+                }
+            };
         let constructor_fn = |layout: &mut EntityLayout| layout.register_component::<C>();
         self.serialize_fns.insert(
             type_id,
@@ -305,7 +307,7 @@ where
     ) -> Result<(), D::Error> {
         if let Some((_, _, _, deserialize, _)) = self.serialize_fns.get(&type_id) {
             use serde::de::Error;
-            let mut deserializer = <dyn erased_serde::Deserializer>::erase(deserializer);
+            let mut deserializer = <dyn erased_serde::Deserializer<'_>>::erase(deserializer);
             (deserialize)(storage, &mut deserializer).map_err(D::Error::custom)
         } else {
             //Err(D::Error::custom("unrecognized component type"))
@@ -320,7 +322,7 @@ where
     ) -> Result<Box<[u8]>, D::Error> {
         if let Some((_, _, _, _, deserialize)) = self.serialize_fns.get(&type_id) {
             use serde::de::Error;
-            let mut deserializer = <dyn erased_serde::Deserializer>::erase(deserializer);
+            let mut deserializer = <dyn erased_serde::Deserializer<'_>>::erase(deserializer);
             (deserialize)(&mut deserializer).map_err(D::Error::custom)
         } else {
             //Err(D::Error::custom("unrecognized component type"))
@@ -353,7 +355,7 @@ impl<'a, 'de, T: Component + for<'b> serde::de::Deserialize<'b>> serde::de::Dese
         {
             type Value = ();
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 formatter.write_str("component seq")
             }
 

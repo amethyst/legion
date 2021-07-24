@@ -50,7 +50,7 @@ impl<'data, T: Component> View<'data> for Write<T> {
     fn validate() {}
 
     #[inline]
-    fn validate_access(access: &ComponentAccess) -> bool {
+    fn validate_access(access: &ComponentAccess<'_>) -> bool {
         access.allows_write(ComponentTypeId::of::<T>())
     }
 

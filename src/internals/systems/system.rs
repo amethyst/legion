@@ -200,7 +200,7 @@ pub trait SystemFn<R: ResourceSet<'static>, Q: QuerySet> {
     fn run(
         &mut self,
         commands: &mut CommandBuffer,
-        world: &mut SubWorld,
+        world: &mut SubWorld<'_>,
         resources: &mut R::Result,
         queries: &mut Q,
     );
@@ -210,12 +210,12 @@ impl<F, R, Q> SystemFn<R, Q> for F
 where
     R: ResourceSet<'static>,
     Q: QuerySet,
-    F: FnMut(&mut CommandBuffer, &mut SubWorld, &mut R::Result, &mut Q) + 'static,
+    F: FnMut(&mut CommandBuffer, &mut SubWorld<'_>, &mut R::Result, &mut Q) + 'static,
 {
     fn run(
         &mut self,
         commands: &mut CommandBuffer,
-        world: &mut SubWorld,
+        world: &mut SubWorld<'_>,
         resources: &mut R::Result,
         queries: &mut Q,
     ) {
@@ -425,7 +425,7 @@ where
         <Q as ConsFlatten>::Output: QuerySet,
         F: FnMut(
             &mut CommandBuffer,
-            &mut SubWorld,
+            &mut SubWorld<'_>,
             &mut <<R as ConsFlatten>::Output as ResourceSet<'static>>::Result,
             &mut <Q as ConsFlatten>::Output,
         ),

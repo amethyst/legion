@@ -202,7 +202,7 @@ impl ResourceCell {
     /// # Safety
     /// Types which are !Sync should only be retrieved on the thread which owns the resource
     /// collection.
-    pub fn get<T: Resource>(&self) -> AtomicRef<T> {
+    pub fn get<T: Resource>(&self) -> AtomicRef<'_, T> {
         let borrow = self.data.borrow();
         AtomicRef::map(borrow, |inner| inner.downcast_ref::<T>().unwrap())
     }
@@ -210,7 +210,7 @@ impl ResourceCell {
     /// # Safety
     /// Types which are !Send should only be retrieved on the thread which owns the resource
     /// collection.
-    pub fn get_mut<T: Resource>(&self) -> AtomicRefMut<T> {
+    pub fn get_mut<T: Resource>(&self) -> AtomicRefMut<'_, T> {
         let borrow = self.data.borrow_mut(); // panics if this is borrowed already
 
         AtomicRefMut::map(borrow, |inner| inner.downcast_mut::<T>().unwrap())
@@ -234,7 +234,7 @@ impl UnsafeResources {
 
     /// # Safety
     /// Resources which are `!Sync` or `!Send` must be retrieved or inserted only on the main thread.
-    unsafe fn entry(&mut self, type_id: ResourceTypeId) -> Entry<ResourceTypeId, ResourceCell> {
+    unsafe fn entry(&mut self, type_id: ResourceTypeId) -> Entry<'_, ResourceTypeId, ResourceCell> {
         self.map.entry(type_id)
     }
 
@@ -282,7 +282,7 @@ impl Resources {
 
     /// Creates an accessor to resources which are Send and Sync, which itself can be sent
     /// between threads.
-    pub fn sync(&mut self) -> SyncResources {
+    pub fn sync(&mut self) -> SyncResources<'_> {
         SyncResources {
             internal: &self.internal,
         }
@@ -327,7 +327,7 @@ impl Resources {
     ///
     /// # Panics
     /// Panics if the resource is already borrowed mutably.
-    pub fn get<T: Resource>(&self) -> Option<AtomicRef<T>> {
+    pub fn get<T: Resource>(&self) -> Option<AtomicRef<'_, T>> {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection
@@ -336,7 +336,7 @@ impl Resources {
     }
 
     /// Retrieve a mutable reference to  `T` from the store if it exists. Otherwise, return `None`.
-    pub fn get_mut<T: Resource>(&self) -> Option<AtomicRefMut<T>> {
+    pub fn get_mut<T: Resource>(&self) -> Option<AtomicRefMut<'_, T>> {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection
@@ -346,7 +346,7 @@ impl Resources {
 
     /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
     /// the closure `f` is called to construct the object and it is then inserted into the store.
-    pub fn get_or_insert_with<T: Resource, F: FnOnce() -> T>(&mut self, f: F) -> AtomicRef<T> {
+    pub fn get_or_insert_with<T: Resource, F: FnOnce() -> T>(&mut self, f: F) -> AtomicRef<'_, T> {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection
@@ -364,7 +364,7 @@ impl Resources {
     pub fn get_mut_or_insert_with<T: Resource, F: FnOnce() -> T>(
         &mut self,
         f: F,
-    ) -> AtomicRefMut<T> {
+    ) -> AtomicRefMut<'_, T> {
         // safety:
         // this type is !Send and !Sync, and so can only be accessed from the thread which
         // owns the resources collection
@@ -379,13 +379,13 @@ impl Resources {
 
     /// Attempts to retrieve an immutable reference to `T` from the store. If it does not exist,
     /// the provided value is inserted and then a reference to it is returned.
-    pub fn get_or_insert<T: Resource>(&mut self, value: T) -> AtomicRef<T> {
+    pub fn get_or_insert<T: Resource>(&mut self, value: T) -> AtomicRef<'_, T> {
         self.get_or_insert_with(|| value)
     }
 
     /// Attempts to retrieve a mutable reference to `T` from the store. If it does not exist,
     /// the provided value is inserted and then a reference to it is returned.
-    pub fn get_mut_or_insert<T: Resource>(&mut self, value: T) -> AtomicRefMut<T> {
+    pub fn get_mut_or_insert<T: Resource>(&mut self, value: T) -> AtomicRefMut<'_, T> {
         self.get_mut_or_insert_with(|| value)
     }
 
@@ -393,7 +393,7 @@ impl Resources {
     /// the default constructor for `T` is called.
     ///
     /// `T` must implement `Default` for this method.
-    pub fn get_or_default<T: Resource + Default>(&mut self) -> AtomicRef<T> {
+    pub fn get_or_default<T: Resource + Default>(&mut self) -> AtomicRef<'_, T> {
         self.get_or_insert_with(T::default)
     }
 
@@ -401,7 +401,7 @@ impl Resources {
     /// the default constructor for `T` is called.
     ///
     /// `T` must implement `Default` for this method.
-    pub fn get_mut_or_default<T: Resource + Default>(&mut self) -> AtomicRefMut<T> {
+    pub fn get_mut_or_default<T: Resource + Default>(&mut self) -> AtomicRefMut<'_, T> {
         self.get_mut_or_insert_with(T::default)
     }
 
@@ -429,13 +429,13 @@ impl<'a> SyncResources<'a> {
     ///
     /// # Panics
     /// Panics if the resource is already borrowed mutably.
-    pub fn get<T: Resource + Sync>(&self) -> Option<AtomicRef<T>> {
+    pub fn get<T: Resource + Sync>(&self) -> Option<AtomicRef<'_, T>> {
         let type_id = &ResourceTypeId::of::<T>();
         self.internal.get(&type_id).map(|x| x.get::<T>())
     }
 
     /// Retrieve a mutable reference to  `T` from the store if it exists. Otherwise, return `None`.
-    pub fn get_mut<T: Resource + Send>(&self) -> Option<AtomicRefMut<T>> {
+    pub fn get_mut<T: Resource + Send>(&self) -> Option<AtomicRefMut<'_, T>> {
         let type_id = &ResourceTypeId::of::<T>();
         self.internal.get(&type_id).map(|x| x.get_mut::<T>())
     }

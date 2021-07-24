@@ -81,7 +81,7 @@ fn remove() {
     }
 
     for e in entities.iter() {
-        assert_eq!(true, world.contains(*e));
+        assert!(world.contains(*e));
     }
 
     for e in entities.iter() {
@@ -106,7 +106,7 @@ fn delete_all() {
 
     // Check that the entity allocator knows about the entities
     for e in entities.iter() {
-        assert_eq!(true, world.contains(*e));
+        assert!(world.contains(*e));
     }
 
     // Check that the entities are in storage
@@ -144,7 +144,7 @@ fn delete_last() {
     assert_eq!(false, world.contains(last));
 
     for (i, e) in entities.iter().take(entities.len() - 1).enumerate() {
-        assert_eq!(true, world.contains(*e));
+        assert!(world.contains(*e));
         match world.entry_ref(*e).unwrap().get_component() {
             Ok(x) => assert_eq!(components.get(i).map(|(x, _)| x), Some(&x as &Pos)),
             Err(_) => assert_eq!(components.get(i).map(|(x, _)| x), None),
@@ -176,7 +176,7 @@ fn delete_first() {
     assert_eq!(false, world.contains(first));
 
     for (i, e) in entities.iter().skip(1).enumerate() {
-        assert_eq!(true, world.contains(*e));
+        assert!(world.contains(*e));
         match world.entry_ref(*e).unwrap().get_component() {
             Ok(x) => assert_eq!(components.get(i + 1).map(|(x, _)| x), Some(&x as &Pos)),
             Err(_) => assert_eq!(components.get(i + 1).map(|(x, _)| x), None),

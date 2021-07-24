@@ -35,7 +35,7 @@ impl<T> SliceVec<T> {
     }
 
     /// Gets an iterator over slices starting from the given index.
-    pub fn iter_from(&self, start: usize) -> SliceVecIter<T> {
+    pub fn iter_from(&self, start: usize) -> SliceVecIter<'_, T> {
         let index = *self.indices.get(start).unwrap_or(&self.data.len());
         SliceVecIter {
             data: &self.data[index..],

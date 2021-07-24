@@ -1,4 +1,4 @@
-#![deny(missing_docs)]
+#![deny(rust_2018_idioms, missing_docs)]
 
 //! Legion aims to be a feature rich high performance ECS library for Rust game projects with minimal boilerplate.
 //!

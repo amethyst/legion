@@ -18,7 +18,7 @@ pub trait EntitySerializer: 'static {
     /// Deserializes an `Entity`.
     fn deserialize(
         &self,
-        deserializer: &mut dyn erased_serde::Deserializer,
+        deserializer: &mut dyn erased_serde::Deserializer<'_>,
     ) -> Result<Entity, erased_serde::Error>;
 }
 
@@ -55,7 +55,7 @@ where
 
     fn deserialize(
         &self,
-        deserializer: &mut dyn erased_serde::Deserializer,
+        deserializer: &mut dyn erased_serde::Deserializer<'_>,
     ) -> Result<Entity, erased_serde::Error> {
         let serialized =
             <<Self as CustomEntitySerializer>::SerializedID as serde::Deserialize>::deserialize(
@@ -123,7 +123,7 @@ impl<'de> Deserialize<'de> for Entity {
     {
         use serde::de::Error;
         ENTITY_SERIALIZER.with(|entity_serializer| {
-            let mut deserializer = <dyn erased_serde::Deserializer>::erase(deserializer);
+            let mut deserializer = <dyn erased_serde::Deserializer<'_>>::erase(deserializer);
             entity_serializer
                 .deserialize(&mut deserializer)
                 .map_err(D::Error::custom)

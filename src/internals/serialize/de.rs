@@ -54,7 +54,7 @@ pub struct WorldVisitor<'a, W: WorldDeserializer, E: EntitySerializer> {
 impl<'a, 'de, W: WorldDeserializer, E: EntitySerializer> Visitor<'de> for WorldVisitor<'a, W, E> {
     type Value = ();
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("map")
     }
 

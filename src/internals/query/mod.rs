@@ -169,7 +169,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
     // Query Execution
     // ----------------
 
-    fn validate_archetype_access(storage: &StorageAccessor, archetypes: &[ArchetypeIndex]) {
+    fn validate_archetype_access(storage: &StorageAccessor<'_>, archetypes: &[ArchetypeIndex]) {
         for arch in archetypes {
             if !storage.can_access_archetype(*arch) {
                 panic!("query attempted to access archetype which not available in subworld");
@@ -576,7 +576,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         world: &'world T,
         mut f: Body,
     ) where
-        Body: FnMut(ChunkView<<V::View as View<'world>>::Fetch>),
+        Body: FnMut(ChunkView<'_, <V::View as View<'world>>::Fetch>),
     {
         for chunk in self.iter_chunks_unchecked(world) {
             f(chunk);
@@ -597,7 +597,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         world: &'a T,
         f: Body,
     ) where
-        Body: Fn(ChunkView<<V::View as View<'a>>::Fetch>) + Send + Sync,
+        Body: Fn(ChunkView<'_, <V::View as View<'a>>::Fetch>) + Send + Sync,
     {
         use rayon::iter::ParallelIterator;
         self.par_iter_chunks_unchecked(world).for_each(f);
@@ -612,7 +612,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         world: &'world mut T,
         f: Body,
     ) where
-        Body: FnMut(ChunkView<<V::View as View<'world>>::Fetch>),
+        Body: FnMut(ChunkView<'_, <V::View as View<'world>>::Fetch>),
     {
         // safety: we have exclusive access to world
         unsafe { self.for_each_chunk_unchecked(world, f) };
@@ -624,7 +624,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
     #[inline]
     pub fn par_for_each_chunk_mut<'a, T: EntityStore, Body>(&'a mut self, world: &'a mut T, f: Body)
     where
-        Body: Fn(ChunkView<<V::View as View<'a>>::Fetch>) + Send + Sync,
+        Body: Fn(ChunkView<'_, <V::View as View<'a>>::Fetch>) + Send + Sync,
     {
         // safety: we have exclusive access to world
         unsafe { self.par_for_each_chunk_unchecked(world, f) };
@@ -640,7 +640,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
         world: &'world T,
         f: Body,
     ) where
-        Body: FnMut(ChunkView<<V::View as View<'world>>::Fetch>),
+        Body: FnMut(ChunkView<'_, <V::View as View<'world>>::Fetch>),
         <V::View as View<'world>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
@@ -655,7 +655,7 @@ impl<V: IntoView, F: EntityFilter> Query<V, F> {
     #[inline]
     pub fn par_for_each_chunk<'a, T: EntityStore, Body>(&'a mut self, world: &'a T, f: Body)
     where
-        Body: Fn(ChunkView<<V::View as View<'a>>::Fetch>) + Send + Sync,
+        Body: Fn(ChunkView<'_, <V::View as View<'a>>::Fetch>) + Send + Sync,
         <V::View as View<'a>>::Fetch: ReadOnlyFetch,
     {
         // safety: the view is readonly - it cannot create mutable aliases
@@ -871,7 +871,7 @@ impl<'a, F: Fetch> rayon::iter::IntoParallelIterator for ChunkView<'a, F> {
 pub struct ChunkIter<'data, 'index, V, D>
 where
     V: View<'data>,
-    D: DynamicFilter + 'index,
+    D: DynamicFilter,
 {
     inner: V::Iter,
     indices: Iter<'index, ArchetypeIndex>,
@@ -946,7 +946,7 @@ pub mod par_iter {
     pub struct Iter<'world, 'query, V, D>
     where
         V: View<'world>,
-        D: DynamicFilter + 'query,
+        D: DynamicFilter,
     {
         inner: V::Iter,
         indices: std::slice::Iter<'query, ArchetypeIndex>,
@@ -985,7 +985,7 @@ pub mod par_iter {
     pub struct ParChunkIter<'a, V, D>
     where
         V: View<'a>,
-        D: DynamicFilter + 'a,
+        D: DynamicFilter,
     {
         world: StorageAccessor<'a>,
         result: QueryResult<'a>,

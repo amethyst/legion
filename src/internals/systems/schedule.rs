@@ -581,7 +581,7 @@ impl Schedule {
             System(&'a mut CommandBuffer),
         }
 
-        let mut waiting_flush: Vec<ToFlush> = Vec::new();
+        let mut waiting_flush: Vec<ToFlush<'_>> = Vec::new();
         for step in &mut self.steps {
             match step {
                 Step::Systems(executor) => {

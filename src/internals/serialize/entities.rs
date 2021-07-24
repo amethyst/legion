@@ -192,7 +192,7 @@ pub mod de {
             impl<'b, 'de, D: WorldDeserializer> Visitor<'de> for EntitySeqVisitor<'b, D> {
                 type Value = ();
 
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     formatter.write_str("entity map")
                 }
 
@@ -241,7 +241,7 @@ pub mod de {
             impl<'b, 'de, D: WorldDeserializer> Visitor<'de> for ComponentMapVisitor<'b, D> {
                 type Value = ();
 
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     formatter.write_str("struct Entity")
                 }
 

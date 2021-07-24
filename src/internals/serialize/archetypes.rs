@@ -214,7 +214,7 @@ pub mod de {
             impl<'b, 'de, S: WorldDeserializer> Visitor<'de> for SeqVisitor<'b, S> {
                 type Value = ();
 
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     formatter.write_str("archetype sequence")
                 }
 
@@ -261,7 +261,7 @@ pub mod de {
             impl<'b, 'de, S: WorldDeserializer> Visitor<'de> for StructVisitor<'b, S> {
                 type Value = ();
 
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     formatter.write_str("archetype sequence")
                 }
 
@@ -362,7 +362,7 @@ pub mod de {
             impl<'b, 'de, S: WorldDeserializer> Visitor<'de> for SeqVisitor<'b, S> {
                 type Value = EntityLayout;
 
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     formatter.write_str("type ID sequence")
                 }
 
@@ -536,7 +536,7 @@ pub mod de {
             impl<'c, 'd, 'de> Visitor<'de> for SeqVisitor<'c, 'd> {
                 type Value = ();
 
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     formatter.write_str("entity seq")
                 }
 
@@ -582,7 +582,7 @@ pub mod de {
             impl<'c, 'd, 'de, S: WorldDeserializer> Visitor<'de> for MapVisitor<'c, 'd, S> {
                 type Value = ();
 
-                fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     formatter.write_str("component map")
                 }
 

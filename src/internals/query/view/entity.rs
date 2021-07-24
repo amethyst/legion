@@ -38,7 +38,7 @@ impl<'data> View<'data> for Entity {
     fn validate() {}
 
     #[inline]
-    fn validate_access(_: &ComponentAccess) -> bool {
+    fn validate_access(_: &ComponentAccess<'_>) -> bool {
         true
     }
 

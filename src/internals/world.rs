@@ -50,15 +50,15 @@ pub trait EntityStore {
     fn id(&self) -> WorldId;
 
     /// Returns an entity entry which can be used to access entity metadata and components.
-    fn entry_ref(&self, entity: Entity) -> Result<EntryRef, EntityAccessError>;
+    fn entry_ref(&self, entity: Entity) -> Result<EntryRef<'_>, EntityAccessError>;
 
     /// Returns a mutable entity entry which can be used to access entity metadata and components.
-    fn entry_mut(&mut self, entity: Entity) -> Result<EntryMut, EntityAccessError>;
+    fn entry_mut(&mut self, entity: Entity) -> Result<EntryMut<'_>, EntityAccessError>;
 
     /// Returns a component storage accessor for component types declared in the specified [`View`].
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
-    ) -> Result<StorageAccessor, EntityAccessError>;
+    ) -> Result<StorageAccessor<'_>, EntityAccessError>;
 }
 
 /// Unique identifier for a [`World`].
@@ -388,7 +388,7 @@ impl World {
     ///     entry.add_component(0.2f32);
     /// }
     /// ```
-    pub fn entry(&mut self, entity: Entity) -> Option<Entry> {
+    pub fn entry(&mut self, entity: Entity) -> Option<Entry<'_>> {
         self.entities
             .get(entity)
             .map(move |location| Entry::new(location, self))
@@ -397,7 +397,7 @@ impl World {
     pub(crate) unsafe fn entry_unchecked(
         &self,
         entity: Entity,
-    ) -> Result<EntryMut, EntityAccessError> {
+    ) -> Result<EntryMut<'_>, EntityAccessError> {
         self.entities
             .get(entity)
             .map(|location| {
@@ -591,7 +591,7 @@ impl World {
     ///
     /// In this second example, `left` is provided access _only_ to `&Position`. `right` is granted permission
     /// to everything _but_ `&mut Position`.
-    pub fn split<T: IntoView>(&mut self) -> (SubWorld, SubWorld) {
+    pub fn split<T: IntoView>(&mut self) -> (SubWorld<'_>, SubWorld<'_>) {
         let permissions = T::View::requires_permissions();
         let (left, right) = ComponentAccess::All.split(permissions);
 
@@ -609,7 +609,7 @@ impl World {
     pub fn split_for_query<'q, V: IntoView, F: EntityFilter>(
         &mut self,
         _: &'q Query<V, F>,
-    ) -> (SubWorld, SubWorld) {
+    ) -> (SubWorld<'_>, SubWorld<'_>) {
         self.split::<V>()
     }
 
@@ -927,7 +927,7 @@ impl World {
 }
 
 impl EntityStore for World {
-    fn entry_ref(&self, entity: Entity) -> Result<EntryRef, EntityAccessError> {
+    fn entry_ref(&self, entity: Entity) -> Result<EntryRef<'_>, EntityAccessError> {
         self.entities
             .get(entity)
             .map(|location| {
@@ -941,14 +941,14 @@ impl EntityStore for World {
             .ok_or(EntityAccessError::EntityNotFound)
     }
 
-    fn entry_mut(&mut self, entity: Entity) -> Result<EntryMut, EntityAccessError> {
+    fn entry_mut(&mut self, entity: Entity) -> Result<EntryMut<'_>, EntityAccessError> {
         // safety: we have exclusive access to the world
         unsafe { self.entry_unchecked(entity) }
     }
 
     fn get_component_storage<V: for<'b> View<'b>>(
         &self,
-    ) -> Result<StorageAccessor, EntityAccessError> {
+    ) -> Result<StorageAccessor<'_>, EntityAccessError> {
         Ok(StorageAccessor::new(
             self.id,
             &self.index,
@@ -1080,7 +1080,7 @@ pub trait Merger {
         src_entity_range: Range<usize>,
         src_arch: &Archetype,
         src_components: &Components,
-        dst: &mut ArchetypeWriter,
+        dst: &mut ArchetypeWriter<'_>,
     );
 }
 
@@ -1115,7 +1115,7 @@ pub struct Duplicate {
                     Range<usize>,
                     &Archetype,
                     &dyn UnknownComponentStorage,
-                    &mut ArchetypeWriter,
+                    &mut ArchetypeWriter<'_>,
                 ),
             >,
         ),
@@ -1138,7 +1138,7 @@ impl Duplicate {
             move |src_entities: Range<usize>,
                   src_arch: &Archetype,
                   src: &dyn UnknownComponentStorage,
-                  dst: &mut ArchetypeWriter| {
+                  dst: &mut ArchetypeWriter<'_>| {
                 let src = src.downcast_ref::<T::Storage>().unwrap();
                 let mut dst = dst.claim_components::<T>();
 
@@ -1175,7 +1175,7 @@ impl Duplicate {
             move |src_entities: Range<usize>,
                   src_arch: &Archetype,
                   src: &dyn UnknownComponentStorage,
-                  dst: &mut ArchetypeWriter| {
+                  dst: &mut ArchetypeWriter<'_>| {
                 let src = src.downcast_ref::<Source::Storage>().unwrap();
                 let mut dst = dst.claim_components::<Target>();
 
@@ -1203,7 +1203,12 @@ impl Duplicate {
         dst_type: ComponentTypeId,
         constructor: fn() -> Box<dyn UnknownComponentStorage>,
         duplicate_fn: Box<
-            dyn FnMut(Range<usize>, &Archetype, &dyn UnknownComponentStorage, &mut ArchetypeWriter),
+            dyn FnMut(
+                Range<usize>,
+                &Archetype,
+                &dyn UnknownComponentStorage,
+                &mut ArchetypeWriter<'_>,
+            ),
         >,
     ) {
         self.duplicate_fns
@@ -1228,7 +1233,7 @@ impl Merger for Duplicate {
         src_entity_range: Range<usize>,
         src_arch: &Archetype,
         src_components: &Components,
-        dst: &mut ArchetypeWriter,
+        dst: &mut ArchetypeWriter<'_>,
     ) {
         for src_type in src_arch.layout().component_types() {
             if let Some((_, _, convert)) = self.duplicate_fns.get_mut(src_type) {
@@ -1385,7 +1390,7 @@ mod test {
         let mut count = 0;
         for chunk in query.iter_chunks_mut(&mut world) {
             let (x, _) = chunk.into_components();
-            count += x.iter().count();
+            count += x.len();
         }
 
         assert_eq!(count, 30000);
