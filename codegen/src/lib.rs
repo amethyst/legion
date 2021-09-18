@@ -319,6 +319,13 @@ impl Sig {
         let mut read_resources = Vec::new();
         let mut write_resources = Vec::new();
         let mut state_args = Vec::new();
+
+        // Don't enable for tests or benchmarks
+        let prefix = match env!("CARGO_PKG_NAME") != "legion" && cfg!(reexport) {
+            true => quote!(self),
+            false => quote!(),
+        };
+
         for param in &mut item.inputs {
             match param {
                 syn::FnArg::Receiver(_) => return Err(Error::SelfNotAllowed),
@@ -339,11 +346,11 @@ impl Sig {
                                                     let elem = &ty.elem;
                                                     if mutable {
                                                         query.push(
-                                                            parse_quote!(::legion::TryWrite<#elem>),
+                                                            parse_quote!(#prefix::legion::TryWrite<#elem>),
                                                         );
                                                     } else {
                                                         query.push(
-                                                            parse_quote!(::legion::TryRead<#elem>),
+                                                            parse_quote!(#prefix::legion::TryRead<#elem>),
                                                         );
                                                     }
                                                 }
@@ -401,7 +408,7 @@ impl Sig {
                                 || is_type(&ty.elem, &["legion", "world", "Entity"]) =>
                         {
                             parameters.push(Parameter::Component(query.len()));
-                            query.push(parse_quote!(::legion::Entity));
+                            query.push(parse_quote!(#prefix::legion::Entity));
                         }
                         Type::Reference(ty)
                             if is_type(&ty.elem, &["Query"])
@@ -440,9 +447,9 @@ impl Sig {
                                     parameters.push(Parameter::Component(query.len()));
                                     let elem = &ty.elem;
                                     if mutable {
-                                        query.push(parse_quote!(::legion::Write<#elem>));
+                                        query.push(parse_quote!(#prefix::legion::Write<#elem>));
                                     } else {
-                                        query.push(parse_quote!(::legion::Read<#elem>));
+                                        query.push(parse_quote!(#prefix::legion::Read<#elem>));
                                     }
                                 }
                             }
@@ -835,10 +842,17 @@ impl Config {
         };
         let read_resources = &signature.read_resources;
         let write_resources = &signature.write_resources;
+
+        // Don't enable for tests or benchmarks
+        let prefix = match env!("CARGO_PKG_NAME") != "legion" && cfg!(reexport) {
+            true => quote!(self),
+            false => quote!(),
+        };
+
         let builder = quote! {
             use legion::IntoQuery;
             #generic_parameter_names
-            ::legion::systems::SystemBuilder::new(format!("{}{}", #system_name, generic_names))
+            #prefix::legion::systems::SystemBuilder::new(format!("{}{}", #system_name, generic_names))
                 #(.read_component::<#read_components>())*
                 #(.write_component::<#write_components>())*
                 #(.read_resource::<#read_resources>())*
@@ -867,7 +881,7 @@ impl Config {
         let where_clause = signature.generics.make_where_clause();
 
         let result = quote! {
-            #visibility fn #constructor_name<#generic_params>(#(#fn_params),*) -> impl ::legion::systems::Runnable
+            #visibility fn #constructor_name<#generic_params>(#(#fn_params),*) -> impl #prefix::legion::systems::Runnable
             #where_clause
             {
                 #builder
