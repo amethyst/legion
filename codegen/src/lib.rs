@@ -321,10 +321,9 @@ impl Sig {
         let mut state_args = Vec::new();
 
         // Don't enable for tests or benchmarks
-        let prefix = match env!("CARGO_PKG_NAME") != "legion" && cfg!(reexport) {
-            true => quote!(self),
-            false => quote!(),
-        };
+        let prefix = quote!();
+        #[cfg(all(feature = "reexport", not(feature = "no-reexport")))]
+        let prefix = quote!(self);
 
         for param in &mut item.inputs {
             match param {
@@ -844,10 +843,9 @@ impl Config {
         let write_resources = &signature.write_resources;
 
         // Don't enable for tests or benchmarks
-        let prefix = match env!("CARGO_PKG_NAME") != "legion" && cfg!(reexport) {
-            true => quote!(self),
-            false => quote!(),
-        };
+        let prefix = quote!();
+        #[cfg(all(feature = "reexport", not(feature = "no-reexport")))]
+        let prefix = quote!(self);
 
         let builder = quote! {
             use legion::IntoQuery;
