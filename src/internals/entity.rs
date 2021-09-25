@@ -38,7 +38,7 @@ const BLOCK_SIZE_USIZE: usize = BLOCK_SIZE as usize;
 static NEXT_ENTITY: AtomicU64 = AtomicU64::new(BLOCK_SIZE);
 
 /// An iterator which yields new entity IDs.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Allocate {
     next: u64,
 }
