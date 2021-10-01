@@ -227,7 +227,7 @@ where
 #[allow(clippy::enum_variant_names)]
 enum Command {
     WriteWorld(Arc<dyn WorldWritable>),
-    ExecMutWorld(Arc<dyn Fn(&mut World, &mut Resources) + Send + Sync>),
+    ExecMutWorld(Box<dyn FnOnce(&mut World, &mut Resources) + Send + Sync>),
 }
 
 /// A command buffer used to queue mutable changes to the world from a system. This buffer is automatically
@@ -301,9 +301,9 @@ impl CommandBuffer {
     /// access to the world.
     pub fn exec_mut<F>(&mut self, f: F)
     where
-        F: 'static + Fn(&mut World, &mut Resources) + Send + Sync,
+        F: 'static + FnOnce(&mut World, &mut Resources) + Send + Sync,
     {
-        self.commands.push_front(Command::ExecMutWorld(Arc::new(f)));
+        self.commands.push_front(Command::ExecMutWorld(Box::new(f)));
     }
 
     /// Inserts an arbitrary implementor of the `WorldWritable` trait into the command queue.
@@ -416,6 +416,12 @@ mod tests {
         //    vec![ComponentTypeId::of::<Pos>(), ComponentTypeId::of::<Vel>()],
         //    command.write_components()
         //);
+        //
+
+        let test_resource = TestResource(123);
+        command.exec_mut(move |_, resources| {
+            resources.insert(test_resource);
+        });
 
         command.flush(&mut world, &mut resources);
 
