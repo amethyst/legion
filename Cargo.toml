@@ -20,6 +20,7 @@ codegen = ["legion_codegen"]
 stdweb = ["uuid/stdweb"]
 wasm-bindgen = ["uuid/wasm-bindgen"]
 reexport = ["legion_codegen", "legion_codegen/reexport"]
+no-reexport = ["legion_codegen/no-reexport"]
 
 [dependencies]
 legion_codegen = { path = "codegen", version = "0.4.0", optional = true }
