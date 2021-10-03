@@ -224,12 +224,14 @@ where
     }
 }
 
+#[derive(Clone)]
 #[allow(clippy::enum_variant_names)]
 enum Command {
     WriteWorld(Arc<dyn WorldWritable>),
     ExecMutWorld(Arc<dyn Fn(&mut World, &mut Resources) + Send + Sync>),
 }
 
+#[derive(Clone)]
 /// A command buffer used to queue mutable changes to the world from a system. This buffer is automatically
 /// flushed and refreshed at the beginning of every frame by `Schedule`. If `Schedule` is not used,
 /// then the user needs to manually flush it by performing `CommandBuffer::flush`.
