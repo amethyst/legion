@@ -4,4 +4,4 @@ error: par_for_each systems cannot accept mutable command buffer references
 5 | #[system(par_for_each)]
   | ^^^^^^^^^^^^^^^^^^^^^^^
   |
-  = note: this error originates in an attribute macro (in Nightly builds, run with -Z macro-backtrace for more info)
+  = note: this error originates in the attribute macro `system` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -17,6 +17,7 @@ use super::{
     world::{EntityAccessError, EntityStore, StorageAccessor, World, WorldId},
 };
 
+#[derive(Clone)]
 /// Describes which archetypes are available for access.
 pub enum ArchetypeAccess {
     /// All archetypes.

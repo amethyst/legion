@@ -110,10 +110,12 @@ impl<T: Into<Cow<'static, str>>> From<T> for SystemId {
     }
 }
 
+#[derive(Clone)]
 struct ResourceMarker<T>(PhantomData<*const T>);
 unsafe impl<T: Send> Send for ResourceMarker<T> {}
 unsafe impl<T: Sync> Sync for ResourceMarker<T> {}
 
+#[derive(Clone)]
 /// The concrete type which contains the system closure provided by the user.  This struct should
 /// not be constructed directly, and instead should be created using `SystemBuilder`.
 ///

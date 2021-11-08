@@ -425,6 +425,12 @@ impl Builder {
         self
     }
 
+    /// Adds a system to the schedule.
+    pub fn add_system_boxed(&mut self, system: Box<dyn ParallelRunnable>) -> &mut Self {
+        self.accumulator.push(system);
+        self
+    }
+
     /// Waits for executing systems to complete, and the flushes all outstanding system
     /// command buffers.
     pub fn flush(&mut self) -> &mut Self {
@@ -458,6 +464,13 @@ impl Builder {
     pub fn add_thread_local<S: Runnable + 'static>(&mut self, system: S) -> &mut Self {
         self.finalize_executor();
         let system = Box::new(system) as Box<dyn Runnable>;
+        self.steps.push(Step::ThreadLocalSystem(system));
+        self
+    }
+
+    /// Adds a thread local system to the schedule. This system will be executed on the main thread.
+    pub fn add_thread_local_boxed(&mut self, system: Box<dyn Runnable>) -> &mut Self {
+        self.finalize_executor();
         self.steps.push(Step::ThreadLocalSystem(system));
         self
     }
