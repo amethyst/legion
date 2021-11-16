@@ -113,7 +113,7 @@ pub trait LayoutFilter {
     fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult;
 }
 
-impl LayoutFilter for Box<dyn LayoutFilter> {
+impl LayoutFilter for Box<dyn LayoutFilter + Send> {
     fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
         self.as_ref().matches_layout(components)
     }
