@@ -38,6 +38,55 @@
 //!     .deserialize(json)
 //!     .unwrap();
 //! ```
+//!
+//! # `Box<dyn LayoutFilter + Send>` as a layout filter
+//! [`World::as_serializable()`](super::World::as_serializable) accepts an implementor of the
+//! [`LayoutFilter`](super::query::LayoutFilter) trait that is, in particular, also implemented
+//! for `Box<dyn LayoutFilter + Send>`. This allows to store filter objects of different
+//! types inside [`Box`](std::boxed::Box)es in some collection and process them all together:
+//! ```
+//! # use legion::*;
+//! # use legion::query::LayoutFilter;
+//! # use legion::serialize::Canon;
+//! # let world = World::default();
+//! # #[derive(serde::Serialize, serde::Deserialize)]
+//! # struct Name;
+//! # #[derive(serde::Serialize, serde::Deserialize)]
+//! # struct Position;
+//! # #[derive(serde::Serialize, serde::Deserialize)]
+//! # struct Velocity;
+//! // setup world serializer
+//! let mut registry = Registry::<String>::default();
+//! registry.register::<Name>("name".to_string());
+//! registry.register::<Position>("position".to_string());
+//! registry.register::<Velocity>("velocity".to_string());
+//! let entity_serializer = Canon::default();
+//!
+//! // store serialization requests with different entity filters together
+//! let serialize_requests: Vec<(&str, Box<dyn LayoutFilter + Send>)> = vec![
+//!     ("all entities", Box::new(any())),
+//!     ("entities having names", Box::new(component::<Name>())),
+//!     ("entities without velocity", Box::new(!component::<Velocity>())),
+//! ];
+//!
+//! // process all requests
+//! for (title, filter) in serialize_requests {
+//!     let json = serde_json::to_value(&world.as_serializable(
+//!         filter,
+//!         &registry,
+//!         &entity_serializer,
+//!     ))
+//!     .unwrap();
+//!     println!("{}: {:#}", title, json);
+//! }
+//!
+//! ```
+//!
+//! ## Why also `Send`?
+//! [`Send`](std::marker::Send) requirement is needed to allow to store filters in
+//! [`Resources`](super::Resources) accessed by non thread-local systems. This allows e.g.
+//! to implement serialization requests sending from different systems and then processing them
+//! all together outside the [`Schedule`](super::Schedule) execution.
 
 #[cfg(feature = "type-uuid")]
 pub use crate::internals::serialize::SerializableTypeUuid;
