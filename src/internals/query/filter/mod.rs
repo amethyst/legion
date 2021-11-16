@@ -155,6 +155,23 @@ pub trait EntityFilter: Default + Send + Sync {
     fn filters(&mut self) -> (&Self::Layout, &mut Self::Dynamic);
 }
 
+impl<T, L, D> EntityFilter for Box<T>
+    where T: EntityFilter<Layout=L, Dynamic=D>,
+          L: LayoutFilter + GroupMatcher + Default + Send + Sync,
+          D: DynamicFilter
+{
+    type Layout = L;
+    type Dynamic = D;
+
+    fn layout_filter(&self) -> &Self::Layout {
+        self.as_ref().layout_filter()
+    }
+
+    fn filters(&mut self) -> (&Self::Layout, &mut Self::Dynamic) {
+        self.as_mut().filters()
+    }
+}
+
 impl<T: EntityFilter> LayoutFilter for T {
     fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
         self.layout_filter().matches_layout(components)
