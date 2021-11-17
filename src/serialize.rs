@@ -65,18 +65,15 @@
 //! // store serialization requests with different entity filters together
 //! let serialize_requests: Vec<(&str, Box<dyn LayoutFilter + Send>)> = vec![
 //!     ("all entities", Box::new(any())),
-//!     ("entities having names", Box::new(component::<Name>())),
-//!     ("entities without velocity", Box::new(!component::<Velocity>())),
+//!     ("having names", Box::new(component::<Name>())),
+//!     ("without velocity", Box::new(!component::<Velocity>())),
 //! ];
 //!
 //! // process all requests
 //! for (title, filter) in serialize_requests {
-//!     let json = serde_json::to_value(&world.as_serializable(
-//!         filter,
-//!         &registry,
-//!         &entity_serializer,
-//!     ))
-//!     .unwrap();
+//!     let json =
+//!         serde_json::to_value(&world.as_serializable(filter, &registry, &entity_serializer))
+//!             .unwrap();
 //!     println!("{}: {:#}", title, json);
 //! }
 //!
