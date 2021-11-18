@@ -76,7 +76,6 @@
 //!             .unwrap();
 //!     println!("{}: {:#}", title, json);
 //! }
-//!
 //! ```
 //!
 //! ## Why also `Send`?
