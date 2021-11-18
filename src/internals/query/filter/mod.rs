@@ -113,6 +113,12 @@ pub trait LayoutFilter {
     fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult;
 }
 
+impl LayoutFilter for Box<dyn LayoutFilter + Send> {
+    fn matches_layout(&self, components: &[ComponentTypeId]) -> FilterResult {
+        self.as_ref().matches_layout(components)
+    }
+}
+
 /// A filter which selects based upon the data available in the archetype.
 pub trait DynamicFilter: Default + Send + Sync {
     /// Prepares the filter to run.
