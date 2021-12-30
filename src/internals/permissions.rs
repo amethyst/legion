@@ -265,11 +265,10 @@ impl<T: PartialEq> Default for Permissions<T> {
 impl<T: PartialEq + Debug> Debug for Permissions<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn list<V: Debug>(items: &[V]) -> String {
-            use itertools::Itertools;
             items
                 .iter()
                 .map(|x| format!("{:?}", x))
-                .fold1(|x, y| format!("{}, {}", x, y))
+                .reduce(|x, y| format!("{}, {}", x, y))
                 .unwrap_or_else(|| "".to_owned())
         }
 
@@ -285,11 +284,10 @@ impl<T: PartialEq + Debug> Debug for Permissions<T> {
 impl<T: PartialEq + Display> Display for Permissions<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn list<V: Display>(items: &[V]) -> String {
-            use itertools::Itertools;
             items
                 .iter()
                 .map(|x| format!("{}", x))
-                .fold1(|x, y| format!("{}, {}", x, y))
+                .reduce(|x, y| format!("{}, {}", x, y))
                 .unwrap_or_else(|| "".to_owned())
         }
 

@@ -220,7 +220,13 @@ pub trait ComponentSource: ArchetypeSource {
 
 /// A collection with a known length.
 pub trait KnownLength {
+    /// Gets the length of the collection.
     fn len(&self) -> usize;
+
+    /// Returns true only if the collection is empty.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 /// Converts a type into a [`ComponentSource`].
