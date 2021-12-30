@@ -81,7 +81,7 @@ pub use crate::internals::{
     hash::{ComponentTypeIdHasher, U64Hasher},
     insert::{
         ArchetypeSource, ArchetypeWriter, ComponentSource, ComponentWriter, IntoComponentSource,
-        IntoSoa, UnknownComponentWriter,
+        IntoSoa, KnownLength, UnknownComponentWriter,
     },
     storage::{
         archetype::{Archetype, ArchetypeIndex, EntityLayout},
